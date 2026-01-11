@@ -335,7 +335,7 @@ func (s *Subform) CreateInstances(data []map[string]string) []SubformInstance {
 | **Watermarks** | Medium | Medium | Text/image watermarks |
 | **Annotations (write)** | High | High | Create links, comments, highlights |
 | **Bookmarks (write)** | Medium | Medium | Create navigation structure |
-| **Form fields (AcroForm)** | High | High | ⚠️ Partial - Parsing done, creation pending |
+| **Form fields (AcroForm)** | High | High | ✅ Implemented - Full parsing and creation |
 | **Actions** | Medium | Medium | GoTo, URI, JavaScript actions |
 
 ### Advanced Features
@@ -400,8 +400,8 @@ func (s *Subform) CreateInstances(data []map[string]string) []SubformInstance {
 5. AES-256 full support ✅
 6. **Text extraction** - Extract text from PDFs
 7. **PDF merging/splitting** - Basic document manipulation
-8. **AcroForm support** - ✅ Parsing implemented, creation pending
-9. **Form field filling** - ⚠️ Basic implementation, needs object replacement
+8. **AcroForm support** - ✅ Complete - Parsing, creation, validation, filling, flattening
+9. **Form field filling** - ✅ Implemented - Basic filling with object stream structure
 10. **Page manipulation** - Rotate, delete, reorder pages
 
 ### Medium Priority (Usability)

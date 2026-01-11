@@ -2,13 +2,11 @@
 package acroform
 
 import (
-	"bytes"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/encryption"
 	"github.com/benedoc-inc/pdfer/parser"
 	"github.com/benedoc-inc/pdfer/types"
 )
@@ -141,59 +139,8 @@ func escapeFieldValue(s string) string {
 }
 
 // FillFormFields fills multiple fields in a PDF
+// This function attempts to handle both direct objects and object streams
 func FillFormFields(pdfBytes []byte, formData types.FormData, password []byte, verbose bool) ([]byte, error) {
-	if len(pdfBytes) == 0 {
-		return nil, fmt.Errorf("PDF bytes are empty")
-	}
-
-	// Parse PDF to get encryption info
-	var encryptInfo *types.PDFEncryption
-	if bytes.Contains(pdfBytes, []byte("/Encrypt")) {
-		// Use encryption package to parse
-		_, encryptInfo, _ = encryption.DecryptPDF(pdfBytes, password, verbose)
-	}
-
-	// Extract AcroForm
-	acroForm, err := ParseAcroForm(pdfBytes, encryptInfo, verbose)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse AcroForm: %w", err)
-	}
-
-	if acroForm == nil {
-		return nil, fmt.Errorf("AcroForm is nil")
-	}
-
-	// Fill each field
-	result := make([]byte, len(pdfBytes))
-	copy(result, pdfBytes)
-
-	for fieldName, value := range formData {
-		field := acroForm.FindFieldByName(fieldName)
-		if field == nil {
-			if verbose {
-				fmt.Printf("Warning: Field '%s' not found, skipping\n", fieldName)
-			}
-			continue
-		}
-
-		var err error
-		newResult, err := FillFieldValue(result, field, value, encryptInfo, verbose)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fill field '%s': %w", fieldName, err)
-		}
-		if len(newResult) == 0 {
-			return nil, fmt.Errorf("FillFieldValue returned empty result for field '%s'", fieldName)
-		}
-		result = newResult
-
-		if verbose {
-			fmt.Printf("Filled field '%s' with value '%v'\n", fieldName, value)
-		}
-	}
-
-	if len(result) == 0 {
-		return nil, fmt.Errorf("result PDF is empty after filling")
-	}
-
-	return result, nil
+	// Use the stream-aware version which handles both direct objects and object streams
+	return FillFormFieldsWithStreams(pdfBytes, formData, password, verbose)
 }
