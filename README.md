@@ -8,7 +8,8 @@ A pure Go library for PDF processing with comprehensive XFA (XML Forms Architect
 ## Features
 
 - **Pure Go** - No CGO, no external dependencies
-- **Unified API** - Clean `parser.Open()` entry point for all PDF operations
+- **Unified API** - Clean `parse.Open()` entry point for all PDF operations
+- **Unified Forms** - Auto-detect and work with AcroForm or XFA forms
 - **PDF Decryption** - RC4 (40/128-bit) and AES (128/256-bit)
 - **XFA Processing** - Extract, parse, modify, and rebuild XFA forms
 - **PDF Generation** - Create PDFs from scratch with text, graphics, and images
@@ -31,10 +32,10 @@ go get github.com/benedoc-inc/pdfer
 ### Open and Parse a PDF (Unified API)
 
 ```go
-import "github.com/benedoc-inc/pdfer/parser"
+import "github.com/benedoc-inc/pdfer/core/parse"
 
 // Open a PDF
-pdf, err := parser.Open(pdfBytes)
+pdf, err := parse.Open(pdfBytes)
 if err != nil {
     log.Fatal(err)
 }
@@ -60,7 +61,7 @@ for _, num := range pdf.Objects() {
 ### Open an Encrypted PDF
 
 ```go
-pdf, err := parser.OpenWithOptions(pdfBytes, parser.ParseOptions{
+pdf, err := parse.OpenWithOptions(pdfBytes, parse.ParseOptions{
     Password: []byte("secret"),
     Verbose:  true,
 })
@@ -83,6 +84,29 @@ rawObj, _ := pdf.GetRawObject(1)
 log.Printf("Object at offset %d, raw bytes: %d", rawObj.Offset, len(rawObj.RawBytes))
 ```
 
+### Extract and Fill Forms (Unified Interface)
+
+```go
+import "github.com/benedoc-inc/pdfer/forms"
+
+// Auto-detect and extract any form type (AcroForm or XFA)
+form, err := forms.Extract(pdfBytes, password, false)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Work with unified interface
+schema := form.Schema()
+log.Printf("Form type: %s, Fields: %d", form.Type(), len(schema.Questions))
+
+// Fill the form
+formData := types.FormData{
+    "FirstName": "John",
+    "LastName":  "Doe",
+}
+filled, err := form.Fill(pdfBytes, formData, password, false)
+```
+
 ### Extract XFA from an Encrypted PDF
 
 ```go
@@ -93,8 +117,8 @@ import (
     "os"
 
     "github.com/benedoc-inc/pdfer"
-    "github.com/benedoc-inc/pdfer/encryption"
-    "github.com/benedoc-inc/pdfer/xfa"
+    "github.com/benedoc-inc/pdfer/core/encrypt"
+    "github.com/benedoc-inc/pdfer/forms/xfa"
 )
 
 func main() {
@@ -102,7 +126,7 @@ func main() {
     pdfBytes, _ := os.ReadFile("form.pdf")
 
     // Decrypt (empty password for many government forms)
-    _, encryptInfo, err := encryption.DecryptPDF(pdfBytes, []byte(""), false)
+    _, encryptInfo, err := encrypt.DecryptPDF(pdfBytes, []byte(""), false)
     if err != nil {
         log.Fatal(err)
     }
@@ -163,10 +187,10 @@ os.WriteFile("filled.pdf", updatedPDF, 0644)
 ### Create a PDF from Scratch
 
 ```go
-import "github.com/benedoc-inc/pdfer/writer"
+import "github.com/benedoc-inc/pdfer/core/write"
 
 // Create a simple PDF with text and graphics
-builder := writer.NewSimplePDFBuilder()
+builder := write.NewSimplePDFBuilder()
 
 // Add a page
 page := builder.AddPage(writer.PageSizeLetter)
@@ -196,10 +220,10 @@ pdfBytes, err := builder.Bytes()
 ### Embed Images in a PDF
 
 ```go
-import "github.com/benedoc-inc/pdfer/writer"
+import "github.com/benedoc-inc/pdfer/core/write"
 
-builder := writer.NewSimplePDFBuilder()
-page := builder.AddPage(writer.PageSizeLetter)
+builder := write.NewSimplePDFBuilder()
+page := builder.AddPage(write.PageSizeLetter)
 
 // Add a JPEG image
 jpegData, _ := os.ReadFile("photo.jpg")
@@ -219,13 +243,13 @@ pdfBytes, _ := builder.Bytes()
 ### Parse PDFs with Incremental Updates
 
 ```go
-import "github.com/benedoc-inc/pdfer/parser"
+import "github.com/benedoc-inc/pdfer/core/parse"
 
 // Parse a PDF that has been edited multiple times
 pdfBytes, _ := os.ReadFile("edited.pdf")
 
 // Check how many revisions the PDF has
-revisions := parser.CountRevisions(pdfBytes)
+revisions := parse.CountRevisions(pdfBytes)
 log.Printf("PDF has %d revisions", revisions)
 
 // Parse all revisions and merge object tables
@@ -237,13 +261,13 @@ if err != nil {
 log.Printf("Found %d objects", len(result.Objects))
 
 // Extract a specific revision (e.g., the original before edits)
-originalPDF, _ := parser.ExtractRevision(pdfBytes, 1)
+originalPDF, _ := parse.ExtractRevision(pdfBytes, 1)
 ```
 
 ### Byte-Perfect PDF Parsing
 
 ```go
-import "github.com/benedoc-inc/pdfer/parser"
+import "github.com/benedoc-inc/pdfer/core/parse"
 
 // Parse PDF with full byte preservation
 pdfBytes, _ := os.ReadFile("document.pdf")
@@ -273,7 +297,7 @@ reconstructed := doc.Bytes()
 ### Build XFA PDF from XML Streams
 
 ```go
-builder := writer.NewXFABuilder(false)
+builder := write.NewXFABuilder(false)
 
 streams := []writer.XFAStreamData{
     {Name: "template", Data: templateXML, Compress: true},
@@ -289,11 +313,19 @@ pdfBytes, err := builder.BuildFromXFA(streams)
 ```
 github.com/benedoc-inc/pdfer/
 ├── pdfer.go         # Root package with type aliases
-├── encryption/      # PDF decryption (RC4, AES)
-├── parser/          # Low-level PDF parsing
-├── types/           # Core data structures
-├── writer/          # PDF generation
-├── xfa/             # XFA form processing
+├── core/            # Foundation layer
+│   ├── parse/       # PDF parsing (reading structure)
+│   ├── write/       # PDF writing (creating/modifying)
+│   └── encrypt/     # Encryption/decryption
+├── forms/           # Form processing (unified domain)
+│   ├── forms.go     # Unified form interface
+│   ├── acroform/    # AcroForm implementation
+│   └── xfa/         # XFA implementation
+├── content/         # Content operations
+│   └── extract/     # Content extraction
+├── resources/       # Embeddable resources
+│   └── font/        # Font embedding
+├── types/           # Shared data structures
 ├── cmd/pdfer/       # CLI tool
 └── examples/        # Usage examples
 ```

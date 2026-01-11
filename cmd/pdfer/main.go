@@ -8,9 +8,9 @@ import (
 	"log"
 	"os"
 
-	"github.com/benedoc-inc/pdfer/encryption"
+	encrypt "github.com/benedoc-inc/pdfer/core/encrypt"
+	"github.com/benedoc-inc/pdfer/forms/xfa"
 	"github.com/benedoc-inc/pdfer/types"
-	"github.com/benedoc-inc/pdfer/xfa"
 )
 
 func main() {
@@ -130,7 +130,7 @@ func main() {
 		}
 
 		// Try to decrypt with empty password (most eSTAR PDFs allow this)
-		decryptedBytes, encrypt, err := encryption.DecryptPDF(pdfBytes, []byte(""), *verbose)
+		decryptedBytes, encInfo, err := encrypt.DecryptPDF(pdfBytes, []byte(""), *verbose)
 		if err != nil {
 			if *verbose {
 				log.Printf("Empty password failed, trying common passwords...")
@@ -139,10 +139,10 @@ func main() {
 			commonPasswords := [][]byte{[]byte(""), []byte("admin"), []byte("password"), []byte("1234")}
 			decrypted := false
 			for _, pwd := range commonPasswords {
-				decryptedBytes, encrypt, err = encryption.DecryptPDF(pdfBytes, pwd, *verbose)
+				decryptedBytes, encInfo, err := encrypt.DecryptPDF(pdfBytes, pwd, *verbose)
 				if err == nil {
 					pdfBytes = decryptedBytes
-					encryptInfo = encrypt
+					encryptInfo = encInfo
 					decrypted = true
 					if *verbose {
 						log.Printf("Successfully decrypted PDF")
@@ -155,7 +155,7 @@ func main() {
 			}
 		} else {
 			pdfBytes = decryptedBytes
-			encryptInfo = encrypt
+			encryptInfo = encInfo
 			if *verbose {
 				log.Printf("Successfully decrypted PDF with empty password")
 			}
@@ -217,7 +217,7 @@ func handleExtractSchema(inputPDF, outputJSON string, verbose bool) {
 		}
 
 		// Try to decrypt with empty password (most eSTAR PDFs allow this)
-		decryptedBytes, encrypt, err := encryption.DecryptPDF(pdfBytes, []byte(""), verbose)
+		decryptedBytes, encInfo, err := encrypt.DecryptPDF(pdfBytes, []byte(""), verbose)
 		if err != nil {
 			if verbose {
 				log.Printf("Empty password failed, trying common passwords...")
@@ -226,10 +226,10 @@ func handleExtractSchema(inputPDF, outputJSON string, verbose bool) {
 			commonPasswords := [][]byte{[]byte(""), []byte("admin"), []byte("password"), []byte("1234")}
 			decrypted := false
 			for _, pwd := range commonPasswords {
-				decryptedBytes, encrypt, err = encryption.DecryptPDF(pdfBytes, pwd, verbose)
+				decryptedBytes, encInfo, err = encrypt.DecryptPDF(pdfBytes, pwd, verbose)
 				if err == nil {
 					pdfBytes = decryptedBytes
-					encryptInfo = encrypt
+					encryptInfo = encInfo
 					decrypted = true
 					if verbose {
 						log.Printf("Successfully decrypted PDF")
@@ -242,7 +242,7 @@ func handleExtractSchema(inputPDF, outputJSON string, verbose bool) {
 			}
 		} else {
 			pdfBytes = decryptedBytes
-			encryptInfo = encrypt
+			encryptInfo = encInfo
 			if verbose {
 				log.Printf("Successfully decrypted PDF with empty password")
 			}

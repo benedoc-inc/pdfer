@@ -6,14 +6,14 @@ import (
 	"log"
 	"os"
 
-	"github.com/benedoc-inc/pdfer/acroform"
-	"github.com/benedoc-inc/pdfer/writer"
+	"github.com/benedoc-inc/pdfer/core/write"
+	"github.com/benedoc-inc/pdfer/forms/acroform"
 )
 
 func main() {
 	// Create a page builder
-	builder := writer.NewSimplePDFBuilder()
-	page := builder.AddPage(writer.PageSizeLetter)
+	builder := write.NewSimplePDFBuilder()
+	page := builder.AddPage(write.PageSizeLetter)
 
 	// Add some content
 	content := page.Content()

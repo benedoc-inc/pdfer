@@ -20,7 +20,7 @@ This document details the current implementation gaps in pdfer and provides guid
 
 ---
 
-## Encryption (`encryption/`)
+## Encryption (`core/encrypt/`)
 
 ### ✅ Fully Implemented
 
@@ -55,12 +55,12 @@ This document details the current implementation gaps in pdfer and provides guid
 
 | Feature | File | Notes |
 |---------|------|-------|
-| Cross-reference tables | `parser.go` | Traditional xref format |
-| Cross-reference streams | `xref_stream.go` | PDF 1.5+ compressed xref |
-| Object streams (ObjStm) | `object_stream.go` | Compressed object storage |
-| PNG predictor filters | `object_stream.go` | Predictors 10-15 |
+| Cross-reference tables | `core/parse/parser.go` | Traditional xref format |
+| Cross-reference streams | `core/parse/xref_stream.go` | PDF 1.5+ compressed xref |
+| Object streams (ObjStm) | `core/parse/object_stream.go` | Compressed object storage |
+| PNG predictor filters | `core/parse/object_stream.go` | Predictors 10-15 |
 | FlateDecode | Multiple | zlib/deflate decompression |
-| Object retrieval | `get_object.go` | Unified direct + ObjStm access |
+| Object retrieval | `core/parse/get_object.go` | Unified direct + ObjStm access |
 
 ### ⚠️ Partial Implementation
 
@@ -73,13 +73,13 @@ This document details the current implementation gaps in pdfer and provides guid
 
 | Feature | File | Notes |
 |---------|------|-------|
-| **ASCIIHexDecode** | `filters.go` | Encode and decode hex text |
-| **ASCII85Decode** | `filters.go` | Encode and decode base-85 |
-| **RunLengthDecode** | `filters.go` | Simple RLE compression |
-| **DCTDecode** | `filters.go` | JPEG image pass-through filter |
-| **Incremental updates** | `incremental.go` | Parse PDFs with multiple revisions, /Prev chain |
-| **Byte-perfect parsing** | `document.go`, `document_parser.go` | Full PDF structure with raw bytes preserved |
-| **Unified API** | `api.go` | Clean `Open()`/`OpenWithOptions()` entry point with `PDF` type |
+| **ASCIIHexDecode** | `core/parse/filters.go` | Encode and decode hex text |
+| **ASCII85Decode** | `core/parse/filters.go` | Encode and decode base-85 |
+| **RunLengthDecode** | `core/parse/filters.go` | Simple RLE compression |
+| **DCTDecode** | `core/parse/filters.go` | JPEG image pass-through filter |
+| **Incremental updates** | `core/parse/incremental.go` | Parse PDFs with multiple revisions, /Prev chain |
+| **Byte-perfect parsing** | `core/parse/document.go`, `core/parse/document_parser.go` | Full PDF structure with raw bytes preserved |
+| **Unified API** | `core/parse/api.go` | Clean `Open()`/`OpenWithOptions()` entry point with `PDF` type |
 
 ### ❌ Not Implemented
 
@@ -109,20 +109,20 @@ This document details the current implementation gaps in pdfer and provides guid
 
 ---
 
-## PDF Writing (`writer/`)
+## PDF Writing (`core/write/`)
 
 ### ✅ Fully Implemented
 
 | Feature | File | Notes |
 |---------|------|-------|
-| Basic PDF structure | `writer.go` | Header, objects, xref, trailer |
-| Stream objects | `writer.go` | With FlateDecode compression |
-| XFA PDF building | `xfa_builder.go` | From XFA streams |
-| PDF rebuilding | `xfa_builder.go` | Modify existing PDFs |
-| Object encryption | `writer.go` | AES-128 for streams |
-| **Image embedding** | `image.go` | JPEG (DCTDecode), PNG to RGB XObjects |
-| **Page content streams** | `content.go` | Text, graphics, and image operators |
-| **Page building** | `page.go` | SimplePDFBuilder for easy page creation |
+| Basic PDF structure | `core/write/writer.go` | Header, objects, xref, trailer |
+| Stream objects | `core/write/writer.go` | With FlateDecode compression |
+| XFA PDF building | `core/write/xfa_builder.go` | From XFA streams |
+| PDF rebuilding | `core/write/xfa_builder.go` | Modify existing PDFs |
+| Object encryption | `core/write/writer.go` | AES-128 for streams |
+| **Image embedding** | `core/write/image.go` | JPEG (DCTDecode), PNG to RGB XObjects |
+| **Page content streams** | `core/write/content.go` | Text, graphics, and image operators |
+| **Page building** | `core/write/page.go` | SimplePDFBuilder for easy page creation |
 
 ### ⚠️ Partial Implementation
 
@@ -135,7 +135,7 @@ This document details the current implementation gaps in pdfer and provides guid
 
 | Feature | File | Notes |
 |---------|------|-------|
-| **Font embedding** | `font/font.go`, `font/pdf.go` | TrueType/OpenType font embedding with subsetting support |
+| **Font embedding** | `resources/font/font.go`, `resources/font/pdf.go` | TrueType/OpenType font embedding with subsetting support |
 
 ### ❌ Not Implemented
 
@@ -180,21 +180,21 @@ content.SetFont(fontName, 12).ShowText("Hello, World!")
 
 ---
 
-## XFA Processing (`xfa/`)
+## XFA Processing (`forms/xfa/`)
 
 ### ✅ Fully Implemented
 
 | Feature | File | Notes |
 |---------|------|-------|
-| Template extraction | `xfa.go` | Form structure |
-| Datasets extraction | `xfa.go` | Form data |
-| Config extraction | `xfa.go` | Rendering config |
-| LocaleSet extraction | `xfa.go` | Localization |
-| Form field parsing | `xfa_form_translator.go` | Text, numeric, choice, date |
-| Validation rules | `xfa_form_translator.go` | Required, patterns, ranges |
-| Calculation rules | `xfa_form_translator.go` | Basic field calculations |
-| Field value updates | `xfa.go` | Modify datasets |
-| PDF rebuild | `xfa.go` | With updated XFA |
+| Template extraction | `forms/xfa/xfa.go` | Form structure |
+| Datasets extraction | `forms/xfa/xfa.go` | Form data |
+| Config extraction | `forms/xfa/xfa.go` | Rendering config |
+| LocaleSet extraction | `forms/xfa/xfa.go` | Localization |
+| Form field parsing | `forms/xfa/xfa_form_translator.go` | Text, numeric, choice, date |
+| Validation rules | `forms/xfa/xfa_form_translator.go` | Required, patterns, ranges |
+| Calculation rules | `forms/xfa/xfa_form_translator.go` | Basic field calculations |
+| Field value updates | `forms/xfa/xfa.go` | Modify datasets |
+| PDF rebuild | `forms/xfa/xfa.go` | With updated XFA |
 
 ### ⚠️ Partial Implementation
 
@@ -300,16 +300,25 @@ func (s *Subform) CreateInstances(data []map[string]string) []SubformInstance {
 | **Page reordering** | Medium | Medium | Reorder pages in document |
 | **PDF comparison** | Low | High | Diff two PDFs, highlight differences |
 
-### Content Extraction
+### Content Extraction (`content/extract/`)
+
+#### ✅ Fully Implemented
+
+| Feature | File | Notes |
+|---------|------|-------|
+| **Metadata extraction** | `content/extract/metadata.go` | Document info (title, author, dates, etc.) |
+| **Page extraction** | `content/extract/pages.go` | Extract page structure, dimensions, rotation |
+| **Bookmark extraction** | `content/extract/bookmarks.go` | Extract outline/bookmark hierarchy |
+| **Form data extraction** | `forms/acroform/extract.go`, `forms/xfa/` | ✅ Implemented - Extract AcroForm and XFA field values |
+
+#### ❌ Not Implemented
+
 | Feature | Priority | Complexity | Notes |
 |---------|----------|------------|-------|
 | **Text extraction** | High | Medium | Extract text with position, font, size info |
 | **Image extraction** | Medium | Medium | Extract all embedded images |
 | **Font extraction** | Low | Medium | Extract embedded fonts from PDF |
-| **Metadata extraction** | Medium | Low | Document info, XMP, custom metadata |
-| **Bookmark extraction** | Medium | Medium | Extract outline/bookmark structure |
 | **Annotation extraction** | Medium | High | Links, comments, highlights, form fields |
-| **Form data extraction** | High | High | ✅ Implemented - Extract AcroForm field values |
 
 ### Content Creation
 | Feature | Priority | Complexity | Notes |
@@ -339,21 +348,22 @@ func (s *Subform) CreateInstances(data []map[string]string) []SubformInstance {
 | **3D content** | Low | Very High | 3D annotations, U3D, PRC support |
 | **Multimedia** | Low | Very High | Video, audio, rich media annotations |
 
-## Form Handling (`acroform/`)
+## Form Handling (`forms/`)
 
 ### ✅ Fully Implemented
 
 | Feature | File | Notes |
 |---------|------|-------|
-| **AcroForm parsing** | `acroform/parser.go` | Extract AcroForm structure and fields recursively |
-| **Form field extraction** | `acroform/extract.go` | Extract field values and convert to FormSchema |
-| **Form field filling** | `acroform/fill_streams.go`, `acroform/replace.go` | Fill AcroForm fields with values, handles direct objects and object streams |
-| **Form field creation** | `acroform/writer.go` | Create AcroForm fields programmatically (text, checkbox, radio, choice, button) |
-| **Form field validation** | `acroform/validation.go` | Validate field values against constraints (required, max length, patterns, ranges) |
-| **Appearance streams** | `acroform/appearance.go` | Generate appearance streams for checkboxes, text fields, buttons |
-| **Field actions** | `acroform/actions.go` | Add actions to fields (URI, JavaScript, GoTo, Submit, Reset) |
-| **Form flattening** | `acroform/flatten.go` | Convert form fields to static content (removes interactivity) |
-| **Object stream support** | `acroform/stream_rebuild.go`, `acroform/stream_finder.go` | Handle form fields within compressed object streams |
+| **Unified form interface** | `forms/forms.go` | Auto-detect and work with AcroForm or XFA forms |
+| **AcroForm parsing** | `forms/acroform/parser.go` | Extract AcroForm structure and fields recursively |
+| **Form field extraction** | `forms/acroform/extract.go` | Extract field values and convert to FormSchema |
+| **Form field filling** | `forms/acroform/fill_streams.go`, `forms/acroform/replace.go` | Fill AcroForm fields with values, handles direct objects and object streams |
+| **Form field creation** | `forms/acroform/writer.go` | Create AcroForm fields programmatically (text, checkbox, radio, choice, button) |
+| **Form field validation** | `forms/acroform/validation.go` | Validate field values against constraints (required, max length, patterns, ranges) |
+| **Appearance streams** | `forms/acroform/appearance.go` | Generate appearance streams for checkboxes, text fields, buttons |
+| **Field actions** | `forms/acroform/actions.go` | Add actions to fields (URI, JavaScript, GoTo, Submit, Reset) |
+| **Form flattening** | `forms/acroform/flatten.go` | Convert form fields to static content (removes interactivity) |
+| **Object stream support** | `forms/acroform/stream_rebuild.go`, `forms/acroform/stream_finder.go` | Handle form fields within compressed object streams |
 
 ### ❌ Not Implemented
 
@@ -361,7 +371,16 @@ func (s *Subform) CreateInstances(data []map[string]string) []SubformInstance {
 |---------|----------|------------|-------|
 | **Digital signatures (forms)** | Low | Very High | Sign form fields, signature fields |
 
-### Font Features
+### Font Features (`resources/font/`)
+
+#### ✅ Fully Implemented
+
+| Feature | File | Notes |
+|---------|------|-------|
+| **Font embedding** | `resources/font/font.go`, `resources/font/pdf.go` | TrueType/OpenType font embedding with subsetting support |
+
+#### ❌ Not Implemented
+
 | Feature | Priority | Complexity | Notes |
 |---------|----------|------------|-------|
 | **Advanced subsetting** | Low | High | Full TTF subsetting with table rebuilding |
@@ -370,7 +389,17 @@ func (s *Subform) CreateInstances(data []map[string]string) []SubformInstance {
 | **Font metrics** | Medium | Low | Get font metrics, character widths |
 | **Font fallback** | Low | Medium | Automatic font substitution |
 
-### Image Features
+### Image Features (`core/write/image.go`)
+
+#### ✅ Fully Implemented
+
+| Feature | File | Notes |
+|---------|------|-------|
+| **JPEG embedding** | `core/write/image.go` | JPEG images with DCTDecode filter |
+| **PNG embedding** | `core/write/image.go` | PNG images with alpha channel support |
+
+#### ❌ Not Implemented
+
 | Feature | Priority | Complexity | Notes |
 |---------|----------|------------|-------|
 | **TIFF support** | Medium | Medium | TIFF image embedding |

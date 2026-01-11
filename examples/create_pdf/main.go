@@ -6,19 +6,19 @@ import (
 	"log"
 	"os"
 
-	"github.com/benedoc-inc/pdfer/writer"
+	"github.com/benedoc-inc/pdfer/core/write"
 )
 
 func main() {
 	// Create a new PDF writer
-	w := writer.NewPDFWriter()
+	w := write.NewPDFWriter()
 	w.SetVersion("1.7")
 
 	// Create page content (a simple "Hello World")
 	// Note: This is a minimal example - real content streams would need more setup
 	pageContent := []byte("BT /F1 12 Tf 100 700 Td (Hello, World!) Tj ET")
 	contentNum := w.AddStreamObject(
-		writer.Dictionary{"Length": len(pageContent)},
+		write.Dictionary{"Length": len(pageContent)},
 		pageContent,
 		false, // Don't compress for readability
 	)
