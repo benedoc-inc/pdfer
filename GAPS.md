@@ -7,9 +7,16 @@ This document details the current implementation gaps in pdfer and provides guid
 | Category | Implemented | Partial | Not Implemented |
 |----------|-------------|---------|-----------------|
 | Encryption | 4 | 0 | 1 |
-| PDF Parsing | 13 | 2 | 5 |
-| PDF Writing | 8 | 2 | 6 |
+| PDF Parsing | 13 | 2 | 20+ |
+| PDF Writing | 8 | 2 | 25+ |
 | XFA | 6 | 2 | 4 |
+| Document Manipulation | 0 | 0 | 8 |
+| Content Extraction | 0 | 0 | 7 |
+| Advanced Features | 0 | 0 | 10+ |
+| Form Handling | 0 | 0 | 5 |
+| Font Features | 1 | 0 | 5 |
+| Image Features | 2 | 0 | 6 |
+| Error Handling | 0 | 0 | 5 |
 
 ---
 
@@ -83,6 +90,22 @@ This document details the current implementation gaps in pdfer and provides guid
 | **CCITTFaxDecode** | Low | High | Fax image compression |
 | **JBIG2Decode** | Low | High | Bi-level image compression |
 | **JPXDecode** | Low | High | JPEG 2000 |
+| **Text extraction** | High | Medium | Extract text from content streams with positioning |
+| **Metadata extraction** | Medium | Low | Document info, XMP metadata parsing |
+| **Page extraction** | High | Medium | Extract individual pages as new PDFs |
+| **PDF merging** | High | Medium | Combine multiple PDFs into one |
+| **PDF splitting** | High | Medium | Split PDF into multiple files by pages |
+| **Page rotation** | Medium | Low | Rotate pages 90/180/270 degrees |
+| **Page deletion** | Medium | Medium | Remove pages from PDF |
+| **Page insertion** | Medium | Medium | Insert pages at specific positions |
+| **Bookmark/outline extraction** | Medium | Medium | Extract document navigation structure |
+| **Annotation extraction** | Medium | High | Links, comments, highlights, form fields |
+| **Form field extraction (AcroForm)** | High | High | ✅ Implemented - Extract AcroForm fields |
+| **Image extraction** | Medium | Medium | Extract embedded images from PDF |
+| **PDF/A compliance** | Low | Very High | PDF/A-1, PDF/A-2, PDF/A-3 validation |
+| **PDF/X support** | Low | Very High | PDF/X-1a, PDF/X-3, PDF/X-4 |
+| **Error recovery** | Medium | High | Graceful handling of corrupted PDFs |
+| **Streaming parser** | Low | High | Parse large PDFs without loading entire file |
 
 ---
 
@@ -114,6 +137,14 @@ This document details the current implementation gaps in pdfer and provides guid
 |---------|------|-------|
 | **Font embedding** | `font/font.go`, `font/pdf.go` | TrueType/OpenType font embedding with subsetting support |
 
+### ✅ Newly Implemented
+
+| Feature | File | Notes |
+|---------|------|-------|
+| **AcroForm parsing** | `acroform/parser.go` | Extract AcroForm structure and fields |
+| **Form field extraction** | `acroform/extract.go` | Extract field values and convert to FormSchema |
+| **Form field filling** | `acroform/fill.go` | Fill AcroForm fields with values (basic) |
+
 ### ❌ Not Implemented
 
 | Feature | Priority | Complexity | Notes |
@@ -123,6 +154,28 @@ This document details the current implementation gaps in pdfer and provides guid
 | **Object streams** | Medium | Medium | Compress objects on write |
 | **Digital signatures** | Low | Very High | PKCS#7, CMS signing |
 | **Incremental save** | Medium | Medium | Append without rewriting |
+| **AcroForm creation** | High | High | Create new AcroForm fields programmatically |
+| **Form field validation** | Medium | Medium | Validate field values before filling |
+| **Form flattening** | Medium | High | Convert form fields to static content |
+| **Advanced graphics** | Medium | High | Curves (bezier), arcs, gradients, patterns |
+| **Transparency/alpha** | Medium | High | Alpha channels, blend modes, soft masks |
+| **Annotations (write)** | High | High | Links, comments, highlights, form fields |
+| **Bookmarks/outlines (write)** | Medium | Medium | Create document navigation structure |
+| **Form fields (AcroForm)** | High | High | Create and fill AcroForm fields |
+| **Watermarks** | Medium | Medium | Add text/image watermarks to pages |
+| **Page manipulation** | High | Medium | Rotate, delete, reorder, insert pages |
+| **PDF optimization** | Medium | High | Remove unused objects, compress streams |
+| **Metadata (write)** | Medium | Low | Set document info, XMP metadata |
+| **Multiple image formats** | Medium | Medium | TIFF, GIF, BMP, WebP support |
+| **Font subsetting (advanced)** | Low | High | Full TTF subsetting with table rebuilding |
+| **Type 1 fonts** | Low | Medium | PostScript Type 1 font support |
+| **CID fonts** | Low | High | CID-keyed fonts for CJK languages |
+| **Color spaces** | Medium | Medium | CMYK, Lab, ICC profiles, spot colors |
+| **Layers/OCGs** | Low | High | Optional content groups, layer visibility |
+| **3D content** | Low | Very High | 3D annotations, U3D, PRC |
+| **Multimedia** | Low | Very High | Video, audio, rich media annotations |
+| **Accessibility (write)** | Medium | High | Tagged PDF, structure tree, alt text |
+| **PDF repair** | Low | Very High | Fix corrupted PDFs, recover content |
 
 **Font embedding implementation:**
 ```go
@@ -213,6 +266,13 @@ func (s *Subform) CreateInstances(data []map[string]string) []SubformInstance {
 | `Image` | Image XObject | High |
 | `Annotation` | Form fields, links | Medium |
 | `Outline` | Bookmarks | Low |
+| `Metadata` | Document metadata (Info, XMP) | Medium |
+| `ColorSpace` | Color space definitions | Medium |
+| `Pattern` | Tiling and shading patterns | Low |
+| `Gradient` | Gradient definitions | Low |
+| `FormXObject` | Reusable form XObjects | Medium |
+| `Action` | PDF actions (GoTo, URI, etc.) | Medium |
+| `Destination` | Named destinations for navigation | Low |
 
 ---
 
@@ -238,6 +298,96 @@ func (s *Subform) CreateInstances(data []map[string]string) []SubformInstance {
 
 ---
 
+## Additional PDF Library Features
+
+### Document Manipulation
+| Feature | Priority | Complexity | Notes |
+|---------|----------|------------|-------|
+| **PDF merging** | High | Medium | Combine multiple PDFs, handle conflicts |
+| **PDF splitting** | High | Medium | Split by pages, bookmarks, or custom logic |
+| **Page extraction** | High | Medium | Extract pages as new PDFs |
+| **Page rotation** | Medium | Low | Rotate individual or all pages |
+| **Page deletion** | Medium | Medium | Remove pages, update references |
+| **Page insertion** | Medium | Medium | Insert pages at specific positions |
+| **Page reordering** | Medium | Medium | Reorder pages in document |
+| **PDF comparison** | Low | High | Diff two PDFs, highlight differences |
+
+### Content Extraction
+| Feature | Priority | Complexity | Notes |
+|---------|----------|------------|-------|
+| **Text extraction** | High | Medium | Extract text with position, font, size info |
+| **Image extraction** | Medium | Medium | Extract all embedded images |
+| **Font extraction** | Low | Medium | Extract embedded fonts from PDF |
+| **Metadata extraction** | Medium | Low | Document info, XMP, custom metadata |
+| **Bookmark extraction** | Medium | Medium | Extract outline/bookmark structure |
+| **Annotation extraction** | Medium | High | Links, comments, highlights, form fields |
+| **Form data extraction** | High | High | ✅ Implemented - Extract AcroForm field values |
+
+### Content Creation
+| Feature | Priority | Complexity | Notes |
+|---------|----------|------------|-------|
+| **Advanced graphics** | Medium | High | Bezier curves, arcs, ellipses |
+| **Gradients** | Medium | Medium | Linear and radial gradients |
+| **Patterns** | Low | Medium | Tiling patterns, shading |
+| **Transparency** | Medium | High | Alpha channels, blend modes |
+| **Watermarks** | Medium | Medium | Text/image watermarks |
+| **Annotations (write)** | High | High | Create links, comments, highlights |
+| **Bookmarks (write)** | Medium | Medium | Create navigation structure |
+| **Form fields (AcroForm)** | High | High | ⚠️ Partial - Parsing done, creation pending |
+| **Actions** | Medium | Medium | GoTo, URI, JavaScript actions |
+
+### Advanced Features
+| Feature | Priority | Complexity | Notes |
+|---------|----------|------------|-------|
+| **PDF optimization** | Medium | High | Remove unused objects, compress, linearize |
+| **PDF repair** | Low | Very High | Fix corrupted PDFs, recover content |
+| **Streaming parser** | Low | High | Parse large PDFs without full memory load |
+| **Concurrent parsing** | Low | High | Parallel object parsing for performance |
+| **PDF/A compliance** | Low | Very High | Generate PDF/A-1, PDF/A-2, PDF/A-3 |
+| **PDF/X support** | Low | Very High | Generate PDF/X-1a, PDF/X-3, PDF/X-4 |
+| **Accessibility (tagged PDF)** | Medium | High | Structure tree, alt text, reading order |
+| **Layers/OCGs** | Low | High | Optional content groups, layer control |
+| **Color management** | Medium | Medium | CMYK, Lab, ICC profiles, spot colors |
+| **3D content** | Low | Very High | 3D annotations, U3D, PRC support |
+| **Multimedia** | Low | Very High | Video, audio, rich media annotations |
+
+### Form Handling
+| Feature | Priority | Complexity | Notes |
+|---------|----------|------------|-------|
+| **AcroForm support** | High | High | Full AcroForm parsing and creation |
+| **Form field filling** | High | Medium | Fill AcroForm fields programmatically |
+| **Form field validation** | Medium | Medium | Validate form field values |
+| **Form flattening** | Medium | High | Convert form fields to static content |
+| **Digital signatures (forms)** | Low | Very High | Sign form fields, signature fields |
+
+### Font Features
+| Feature | Priority | Complexity | Notes |
+|---------|----------|------------|-------|
+| **Advanced subsetting** | Low | High | Full TTF subsetting with table rebuilding |
+| **Type 1 fonts** | Low | Medium | PostScript Type 1 font support |
+| **CID fonts** | Low | High | CID-keyed fonts for CJK languages |
+| **Font metrics** | Medium | Low | Get font metrics, character widths |
+| **Font fallback** | Low | Medium | Automatic font substitution |
+
+### Image Features
+| Feature | Priority | Complexity | Notes |
+|---------|----------|------------|-------|
+| **TIFF support** | Medium | Medium | TIFF image embedding |
+| **GIF support** | Low | Low | GIF image embedding |
+| **BMP support** | Low | Low | BMP image embedding |
+| **WebP support** | Low | Medium | WebP image embedding |
+| **Image compression** | Medium | Medium | Recompress images, quality control |
+| **Image scaling** | Medium | Low | Scale images before embedding |
+
+### Error Handling & Validation
+| Feature | Priority | Complexity | Notes |
+|---------|----------|------------|-------|
+| **Better error messages** | High | Medium | Detailed, actionable error messages |
+| **Error recovery** | Medium | High | Graceful handling of corrupted PDFs |
+| **PDF validation** | Medium | High | Validate PDF structure, compliance |
+| **Warning system** | Medium | Low | Non-fatal warnings for issues |
+| **Diagnostic mode** | Low | Medium | Detailed diagnostic information |
+
 ## Contribution Priority
 
 ### High Priority (Core Functionality)
@@ -246,18 +396,35 @@ func (s *Subform) CreateInstances(data []map[string]string) []SubformInstance {
 3. Image embedding ✅
 4. Page content streams ✅
 5. AES-256 full support ✅
+6. **Text extraction** - Extract text from PDFs
+7. **PDF merging/splitting** - Basic document manipulation
+8. **AcroForm support** - ✅ Parsing implemented, creation pending
+9. **Form field filling** - ⚠️ Basic implementation, needs object replacement
+10. **Page manipulation** - Rotate, delete, reorder pages
 
 ### Medium Priority (Usability)
 1. Encryption on write
 2. Cross-reference stream writing
 3. Subform repetition in XFA
 4. Better error messages
+5. **Advanced graphics** - Curves, gradients, patterns
+6. **Annotations** - Create links, comments, highlights
+7. **Bookmarks** - Create navigation structure
+8. **Metadata handling** - Read/write document metadata
+9. **PDF optimization** - Remove unused objects, compress
+10. **Accessibility** - Tagged PDF, structure tree
 
 ### Low Priority (Nice to Have)
 1. Linearized PDF support
 2. Digital signatures
 3. Script execution
 4. LZW and other legacy filters
+5. **PDF/A compliance** - Generate compliant PDFs
+6. **3D content** - 3D annotations support
+7. **Multimedia** - Video/audio support
+8. **PDF repair** - Fix corrupted PDFs
+9. **Streaming parser** - Handle very large PDFs
+10. **Color management** - Advanced color spaces
 
 ---
 
