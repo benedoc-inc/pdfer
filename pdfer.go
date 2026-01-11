@@ -11,8 +11,8 @@
 // Extract XFA from an encrypted PDF:
 //
 //	import "github.com/benedoc-inc/pdfer"
-//	import "github.com/benedoc-inc/pdfer/encryption"
-//	import "github.com/benedoc-inc/pdfer/xfa"
+//	import "github.com/benedoc-inc/pdfer/core/encrypt"
+//	import "github.com/benedoc-inc/pdfer/forms/xfa"
 //
 //	// Decrypt
 //	_, encInfo, _ := encryption.DecryptPDF(pdfBytes, password, false)

@@ -9,16 +9,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/parser"
-	"github.com/benedoc-inc/pdfer/writer"
+	"github.com/benedoc-inc/pdfer/core/parse"
+	"github.com/benedoc-inc/pdfer/core/write"
 )
 
 // TestE2E_CreateAndParseSimplePDF tests creating a simple PDF and parsing it back
 func TestE2E_CreateAndParseSimplePDF(t *testing.T) {
 	// Create a simple PDF with text
-	builder := writer.NewSimplePDFBuilder()
+	builder := write.NewSimplePDFBuilder()
 
-	page := builder.AddPage(writer.PageSizeLetter)
+	page := builder.AddPage(write.PageSizeLetter)
 	fontName := page.AddStandardFont("Helvetica")
 
 	page.Content().
@@ -60,7 +60,7 @@ func TestE2E_CreateAndParseSimplePDF(t *testing.T) {
 	}
 
 	// Parse the PDF back
-	trailer, err := parser.ParsePDFTrailer(pdfBytes)
+	trailer, err := parse.ParsePDFTrailer(pdfBytes)
 	if err != nil {
 		t.Fatalf("Failed to parse trailer: %v", err)
 	}
@@ -74,11 +74,11 @@ func TestE2E_CreateAndParseSimplePDF(t *testing.T) {
 
 // TestE2E_CreateAndParseMultiPagePDF tests creating a multi-page PDF
 func TestE2E_CreateAndParseMultiPagePDF(t *testing.T) {
-	builder := writer.NewSimplePDFBuilder()
+	builder := write.NewSimplePDFBuilder()
 
 	// Create 3 pages
 	for i := 1; i <= 3; i++ {
-		page := builder.AddPage(writer.PageSizeA4)
+		page := builder.AddPage(write.PageSizeA4)
 		fontName := page.AddStandardFont("Times-Roman")
 
 		page.Content().
@@ -112,8 +112,8 @@ func TestE2E_CreateAndParseMultiPagePDF(t *testing.T) {
 
 // TestE2E_CreatePDFWithGraphics tests creating a PDF with graphics
 func TestE2E_CreatePDFWithGraphics(t *testing.T) {
-	builder := writer.NewSimplePDFBuilder()
-	page := builder.AddPage(writer.PageSizeLetter)
+	builder := write.NewSimplePDFBuilder()
+	page := builder.AddPage(write.PageSizeLetter)
 
 	// Draw some shapes
 	page.Content().
@@ -149,7 +149,7 @@ func TestE2E_CreatePDFWithGraphics(t *testing.T) {
 	}
 
 	// Verify we can parse the PDF structure
-	trailer, err := parser.ParsePDFTrailer(pdfBytes)
+	trailer, err := parse.ParsePDFTrailer(pdfBytes)
 	if err != nil {
 		t.Errorf("Failed to parse trailer: %v", err)
 	}
@@ -166,8 +166,8 @@ func TestE2E_FilterRoundTrip(t *testing.T) {
 
 	// Test ASCIIHexDecode round-trip
 	t.Run("ASCIIHexDecode", func(t *testing.T) {
-		encoded := parser.EncodeASCIIHex(testData)
-		decoded, err := parser.DecodeASCIIHex(encoded)
+		encoded := parse.EncodeASCIIHex(testData)
+		decoded, err := parse.DecodeASCIIHex(encoded)
 		if err != nil {
 			t.Fatalf("Decode failed: %v", err)
 		}
@@ -178,8 +178,8 @@ func TestE2E_FilterRoundTrip(t *testing.T) {
 
 	// Test ASCII85Decode round-trip
 	t.Run("ASCII85Decode", func(t *testing.T) {
-		encoded := parser.EncodeASCII85(testData)
-		decoded, err := parser.DecodeASCII85(encoded)
+		encoded := parse.EncodeASCII85(testData)
+		decoded, err := parse.DecodeASCII85(encoded)
 		if err != nil {
 			t.Fatalf("Decode failed: %v", err)
 		}
@@ -190,8 +190,8 @@ func TestE2E_FilterRoundTrip(t *testing.T) {
 
 	// Test RunLengthDecode round-trip
 	t.Run("RunLengthDecode", func(t *testing.T) {
-		encoded := parser.EncodeRunLength(testData)
-		decoded, err := parser.DecodeRunLength(encoded)
+		encoded := parse.EncodeRunLength(testData)
+		decoded, err := parse.DecodeRunLength(encoded)
 		if err != nil {
 			t.Fatalf("Decode failed: %v", err)
 		}
@@ -203,14 +203,14 @@ func TestE2E_FilterRoundTrip(t *testing.T) {
 
 // TestE2E_CreatePDFWithASCIIHexStream tests creating a PDF with ASCIIHex encoded stream
 func TestE2E_CreatePDFWithASCIIHexStream(t *testing.T) {
-	w := writer.NewPDFWriter()
+	w := write.NewPDFWriter()
 
 	// Create content with ASCIIHex encoding
 	content := []byte("BT /F1 12 Tf 72 720 Td (Test) Tj ET")
-	encoded := parser.EncodeASCIIHex(content)
+	encoded := parse.EncodeASCIIHex(content)
 
 	// Create stream dictionary manually
-	streamDict := writer.Dictionary{
+	streamDict := write.Dictionary{
 		"Filter": "/ASCIIHexDecode",
 	}
 
@@ -242,8 +242,8 @@ func TestE2E_CreatePDFWithASCIIHexStream(t *testing.T) {
 
 // TestE2E_XRefParsing tests that created PDFs have valid xref tables
 func TestE2E_XRefParsing(t *testing.T) {
-	builder := writer.NewSimplePDFBuilder()
-	page := builder.AddPage(writer.PageSizeLetter)
+	builder := write.NewSimplePDFBuilder()
+	page := builder.AddPage(write.PageSizeLetter)
 	page.Content().BeginText().EndText()
 	builder.FinalizePage(page)
 
@@ -253,13 +253,13 @@ func TestE2E_XRefParsing(t *testing.T) {
 	}
 
 	// Parse the trailer
-	trailer, err := parser.ParsePDFTrailer(pdfBytes)
+	trailer, err := parse.ParsePDFTrailer(pdfBytes)
 	if err != nil {
 		t.Fatalf("Failed to parse trailer: %v", err)
 	}
 
 	// Parse xref table
-	objMap, err := parser.ParseCrossReferenceTable(pdfBytes, trailer.StartXRef)
+	objMap, err := parse.ParseCrossReferenceTable(pdfBytes, trailer.StartXRef)
 	if err != nil {
 		t.Fatalf("Failed to parse xref: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestE2E_XRefParsing(t *testing.T) {
 
 // TestE2E_ContentStreamOperators tests that content stream operators work correctly
 func TestE2E_ContentStreamOperators(t *testing.T) {
-	cs := writer.NewContentStream()
+	cs := write.NewContentStream()
 
 	// Build a complex content stream
 	cs.SaveState().
@@ -369,8 +369,8 @@ func TestE2E_DCTDecodeJPEGImage(t *testing.T) {
 		jpegData := jpegBuf.Bytes()
 
 		// Create PDF with JPEG image
-		builder := writer.NewSimplePDFBuilder()
-		page := builder.AddPage(writer.PageSizeLetter)
+		builder := write.NewSimplePDFBuilder()
+		page := builder.AddPage(write.PageSizeLetter)
 
 		// Add JPEG image to the PDF
 		imgInfo, err := builder.Writer().AddJPEGImage(jpegData, "Im1")
@@ -423,7 +423,7 @@ func TestE2E_DCTDecodeJPEGImage(t *testing.T) {
 	}
 
 	// Parse the PDF using unified API
-	pdf, err := parser.Open(pdfBytes)
+	pdf, err := parse.Open(pdfBytes)
 	if err != nil {
 		t.Fatalf("Failed to parse PDF: %v", err)
 	}
@@ -497,7 +497,7 @@ func TestE2E_DCTDecodeJPEGImage(t *testing.T) {
 	}
 
 	// Decode using DCTDecode filter
-	decoded, err := parser.DecodeFilter(streamData, "/DCTDecode")
+	decoded, err := parse.DecodeFilter(streamData, "/DCTDecode")
 	if err != nil {
 		t.Fatalf("Failed to decode with DCTDecode: %v", err)
 	}

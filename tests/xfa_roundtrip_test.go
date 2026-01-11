@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/encryption"
+	"github.com/benedoc-inc/pdfer/core/encrypt"
+	"github.com/benedoc-inc/pdfer/forms/xfa"
 	"github.com/benedoc-inc/pdfer/types"
-	"github.com/benedoc-inc/pdfer/xfa"
 )
 
 // getTestResourcePath is now in test_helpers.go
@@ -53,13 +53,13 @@ func TestXFARoundTrip(t *testing.T) {
 	if bytes.Contains(pdfBytes, []byte("/Encrypt")) {
 		// Use DecryptPDF to verify password and get encryption info
 		// Even though DecryptPDFObjects is a placeholder, it still verifies the password
-		_, encrypt, err := encryption.DecryptPDF(pdfBytes, []byte(""), true)
+		_, encInfo, err := encrypt.DecryptPDF(pdfBytes, []byte(""), true)
 		if err != nil {
 			t.Logf("Failed to verify password (may not be encrypted or wrong password): %v", err)
 			// Try to parse encryption info anyway
-			encryptInfo, _ = encryption.ParseEncryptionDictionary(pdfBytes, false)
+			_, _ = encrypt.ParseEncryptionDictionary(pdfBytes, false)
 		} else {
-			encryptInfo = encrypt
+			encryptInfo = encInfo
 			t.Logf("PDF is encrypted, password verified, encryption key derived")
 		}
 	}

@@ -6,8 +6,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/benedoc-inc/pdfer/font"
-	"github.com/benedoc-inc/pdfer/writer"
+	"github.com/benedoc-inc/pdfer/core/write"
+	"github.com/benedoc-inc/pdfer/resources/font"
 )
 
 func main() {
@@ -46,8 +46,8 @@ func main() {
 	fmt.Printf("Font subset will include %d unique characters\n", len(f.Subset))
 
 	// Create PDF builder
-	builder := writer.NewSimplePDFBuilder()
-	page := builder.AddPage(writer.PageSizeA4)
+	builder := write.NewSimplePDFBuilder()
+	page := builder.AddPage(write.PageSizeA4)
 
 	// Add embedded font to page
 	fontName, err := page.AddEmbeddedFont(f)

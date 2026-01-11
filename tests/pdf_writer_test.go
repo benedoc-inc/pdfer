@@ -6,16 +6,16 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/encryption"
+	"github.com/benedoc-inc/pdfer/core/encrypt"
+	"github.com/benedoc-inc/pdfer/core/write"
+	"github.com/benedoc-inc/pdfer/forms/xfa"
 	"github.com/benedoc-inc/pdfer/types"
-	"github.com/benedoc-inc/pdfer/writer"
-	"github.com/benedoc-inc/pdfer/xfa"
 )
 
 func TestBuildPDFFromScratch(t *testing.T) {
 	// Create a simple XFA PDF from scratch
-	builder := writer.NewXFABuilder(true)
-	
+	builder := write.NewXFABuilder(true)
+
 	templateXML := `<?xml version="1.0" encoding="UTF-8"?>
 <template xmlns="http://www.xfa.org/schema/xfa-template/3.3/">
   <subform name="form1" layout="tb">
@@ -44,7 +44,7 @@ func TestBuildPDFFromScratch(t *testing.T) {
   </present>
 </config>`
 
-	streams := []writer.XFAStreamData{
+	streams := []write.XFAStreamData{
 		{Name: "template", Data: []byte(templateXML), Compress: true},
 		{Name: "datasets", Data: []byte(datasetsXML), Compress: true},
 		{Name: "config", Data: []byte(configXML), Compress: true},
@@ -73,7 +73,9 @@ func TestBuildPDFFromScratch(t *testing.T) {
 
 	// Write to file for inspection
 	outPath := filepath.Join("tests", "resources", "scratch_xfa.pdf")
-	os.MkdirAll(filepath.Dir(outPath), 0755)
+	if err := os.MkdirAll(filepath.Dir(outPath), 0755); err != nil {
+		t.Fatalf("Failed to create output directory: %v", err)
+	}
 	if err := os.WriteFile(outPath, pdfBytes, 0644); err != nil {
 		t.Logf("Warning: Could not write PDF: %v", err)
 	} else {
@@ -96,9 +98,9 @@ func TestRebuildPDFWithUpdatedXFA(t *testing.T) {
 	// Get encryption info
 	var encryptInfo *types.PDFEncryption
 	if bytes.Contains(pdfBytes, []byte("/Encrypt")) {
-		_, encrypt, err := encryption.DecryptPDF(pdfBytes, []byte(""), true)
+		_, encInfo, err := encrypt.DecryptPDF(pdfBytes, []byte(""), true)
 		if err == nil {
-			encryptInfo = encrypt
+			encryptInfo = encInfo
 		}
 	}
 
@@ -113,8 +115,8 @@ func TestRebuildPDFWithUpdatedXFA(t *testing.T) {
 
 	// Modify datasets (add a new value)
 	if bytes.Contains(streams.Datasets.Data, []byte("</xfa:data>")) {
-		streams.Datasets.Data = bytes.ReplaceAll(streams.Datasets.Data, 
-			[]byte("</xfa:data>"), 
+		streams.Datasets.Data = bytes.ReplaceAll(streams.Datasets.Data,
+			[]byte("</xfa:data>"),
 			[]byte("<TestField>Modified</TestField></xfa:data>"))
 		t.Logf("Modified datasets XML")
 	}
@@ -144,7 +146,9 @@ func TestRebuildPDFWithUpdatedXFA(t *testing.T) {
 
 	// Write to file
 	outPath := filepath.Join("tests", "resources", "estar_modified.pdf")
-	os.MkdirAll(filepath.Dir(outPath), 0755)
+	if err := os.MkdirAll(filepath.Dir(outPath), 0755); err != nil {
+		t.Fatalf("Failed to create output directory: %v", err)
+	}
 	if err := os.WriteFile(outPath, rebuiltPDF, 0644); err != nil {
 		t.Logf("Warning: Could not write PDF: %v", err)
 	} else {
@@ -167,9 +171,9 @@ func TestBuildPDFFromExtractedXFA(t *testing.T) {
 	// Get encryption info
 	var encryptInfo *types.PDFEncryption
 	if bytes.Contains(pdfBytes, []byte("/Encrypt")) {
-		_, encrypt, err := encryption.DecryptPDF(pdfBytes, []byte(""), true)
+		_, encInfo, err := encrypt.DecryptPDF(pdfBytes, []byte(""), true)
 		if err == nil {
-			encryptInfo = encrypt
+			encryptInfo = encInfo
 		}
 	}
 
@@ -222,7 +226,9 @@ func TestBuildPDFFromExtractedXFA(t *testing.T) {
 
 	// Write to file
 	outPath := filepath.Join("tests", "resources", "estar_clean.pdf")
-	os.MkdirAll(filepath.Dir(outPath), 0755)
+	if err := os.MkdirAll(filepath.Dir(outPath), 0755); err != nil {
+		t.Fatalf("Failed to create output directory: %v", err)
+	}
 	if err := os.WriteFile(outPath, newPDF, 0644); err != nil {
 		t.Logf("Warning: Could not write PDF: %v", err)
 	} else {
