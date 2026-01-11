@@ -248,7 +248,37 @@ func TestExtractAllImages_FromDisk(t *testing.T) {
 	} else {
 		t.Logf("Extracted %d images", len(images))
 		for i, img := range images {
-			t.Logf("Image[%d]: ID=%s, Width=%d, Height=%d, Format=%s", i, img.ID, img.Width, img.Height, img.Format)
+			t.Logf("Image[%d]: ID=%s, Width=%d, Height=%d, Format=%s, DataLen=%d, HasBase64=%v",
+				i, img.ID, img.Width, img.Height, img.Format, len(img.Data), img.DataBase64 != "")
+
+			// Verify binary data is extracted
+			if len(img.Data) == 0 {
+				t.Errorf("Image[%d] (%s) has no binary data extracted", i, img.ID)
+			} else {
+				// Verify format matches data
+				if img.Format == "jpeg" {
+					// JPEG should start with FF D8 (DCTDecode = raw JPEG bytes)
+					if len(img.Data) >= 2 && img.Data[0] == 0xFF && img.Data[1] == 0xD8 {
+						t.Logf("  ✓ JPEG signature verified (DCTDecode)")
+					} else {
+						t.Errorf("  ✗ JPEG signature not found (got %02X %02X)", img.Data[0], img.Data[1])
+					}
+				} else if img.Format == "png" {
+					// FlateDecode images are raw pixel data, not PNG files
+					// Verify we have reasonable amount of data (width * height * components)
+					expectedSize := img.Width * img.Height
+					if img.ColorSpace == "/DeviceRGB" {
+						expectedSize *= 3
+					} else if img.ColorSpace == "/DeviceGray" {
+						expectedSize *= 1
+					}
+					if len(img.Data) >= expectedSize {
+						t.Logf("  ✓ FlateDecode image data verified (%d bytes, expected ~%d)", len(img.Data), expectedSize)
+					} else {
+						t.Logf("  ⚠ FlateDecode image data size: %d bytes (expected ~%d)", len(img.Data), expectedSize)
+					}
+				}
+			}
 		}
 	}
 }

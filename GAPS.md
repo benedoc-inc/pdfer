@@ -11,11 +11,11 @@ This document details the current implementation gaps in pdfer and provides guid
 | PDF Writing | 8 | 2 | 25+ |
 | XFA | 6 | 2 | 4 |
 | Document Manipulation | 0 | 0 | 8 |
-| Content Extraction | 9 | 0 | 2 |
+| Content Extraction | 10 | 0 | 1 |
 | Advanced Features | 0 | 0 | 10+ |
 | Form Handling | 5 | 0 | 1 |
 | Font Features | 1 | 0 | 5 |
-| Image Features | 2 | 0 | 6 |
+| Image Features | 6 | 0 | 2 |
 | Error Handling | 0 | 0 | 5 |
 
 ---
@@ -154,7 +154,7 @@ This document details the current implementation gaps in pdfer and provides guid
 | **Page manipulation** | High | Medium | Rotate, delete, reorder, insert pages |
 | **PDF optimization** | Medium | High | Remove unused objects, compress streams |
 | **Metadata (write)** | Medium | Low | Set document info, XMP metadata |
-| **Multiple image formats** | Medium | Medium | TIFF, GIF, BMP, WebP support |
+| **WebP support** | Low | Medium | WebP image embedding (requires external decoder) |
 | **Font subsetting (advanced)** | Low | High | Full TTF subsetting with table rebuilding |
 | **Type 1 fonts** | Low | Medium | PostScript Type 1 font support |
 | **CID fonts** | Low | High | CID-keyed fonts for CJK languages |
@@ -322,11 +322,16 @@ func (s *Subform) CreateInstances(data []map[string]string) []SubformInstance {
 | **Resource extraction** | `content/extract/resources.go` | Extract fonts, XObjects, images from Resources |
 | **Annotation extraction** | `content/extract/annotations.go` | Extract links, text annotations, markup annotations |
 
+#### ✅ Fully Implemented (Additional)
+
+| Feature | File | Notes |
+|---------|------|-------|
+| **Image binary data extraction** | `content/extract/images.go` | Extract actual image binary data (JPEG bytes for DCTDecode, raw pixel data for FlateDecode) |
+
 #### ❌ Not Implemented
 
 | Feature | Priority | Complexity | Notes |
 |---------|----------|------------|-------|
-| **Image binary data extraction** | Medium | Medium | Extract actual image binary data (JPEG, PNG bytes) |
 | **Font binary data extraction** | Low | Medium | Extract embedded font file data |
 
 ### Content Creation
@@ -404,19 +409,20 @@ func (s *Subform) CreateInstances(data []map[string]string) []SubformInstance {
 
 | Feature | File | Notes |
 |---------|------|-------|
-| **JPEG embedding** | `core/write/image.go` | JPEG images with DCTDecode filter |
-| **PNG embedding** | `core/write/image.go` | PNG images with alpha channel support |
+| **JPEG embedding** | `core/write/image.go` | JPEG images with DCTDecode filter (direct embedding, no re-encoding) |
+| **PNG embedding** | `core/write/image.go` | PNG images converted to RGB/Gray with FlateDecode compression |
+| **Generic image support** | `core/write/image.go` | Any format supported by Go's image package (PNG, GIF, BMP, etc.) |
+| **Alpha channel support** | `core/write/image.go` | Soft masks for images with transparency |
+| **Color space support** | `core/write/image.go` | RGB, Gray, CMYK (from JPEG) |
+| **Image drawing** | `core/write/content.go` | DrawImage, DrawImageAt operators |
 
 #### ❌ Not Implemented
 
 | Feature | Priority | Complexity | Notes |
 |---------|----------|------------|-------|
-| **TIFF support** | Medium | Medium | TIFF image embedding |
-| **GIF support** | Low | Low | GIF image embedding |
-| **BMP support** | Low | Low | BMP image embedding |
-| **WebP support** | Low | Medium | WebP image embedding |
+| **WebP support** | Low | Medium | WebP image embedding (requires external decoder) |
 | **Image compression** | Medium | Medium | Recompress images, quality control |
-| **Image scaling** | Medium | Low | Scale images before embedding |
+| **Image scaling** | Medium | Low | Scale images before embedding (currently done via DrawImageAt) |
 
 ### Error Handling & Validation
 | Feature | Priority | Complexity | Notes |

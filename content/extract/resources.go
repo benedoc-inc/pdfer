@@ -32,6 +32,7 @@ func extractResources(resourcesStr string, pdf *parse.PDF, verbose bool) *types.
 	if xobjectsDict != nil {
 		resources.XObjects = xobjectsDict
 		// Also populate Images from XObjects (for metadata)
+		// Note: Binary data extraction is done separately via extractImageData()
 		for name, xobj := range xobjectsDict {
 			if xobj.Subtype == "/Image" {
 				image := types.Image{
@@ -253,6 +254,46 @@ func extractXObjectsDict(resourcesStr string, pdf *parse.PDF, verbose bool) map[
 	return xobjects
 }
 
+// extractXObjectsDictWithObjNums extracts XObject information with object numbers
+func extractXObjectsDictWithObjNums(resourcesStr string, pdf *parse.PDF, verbose bool) (map[string]types.XObject, map[string]int) {
+	xobjects := make(map[string]types.XObject)
+	objNums := make(map[string]int) // image name -> object number
+
+	// Find /XObject dictionary
+	xobjPattern := regexp.MustCompile(`/XObject\s*<<([^>]*)>>`)
+	xobjMatch := xobjPattern.FindStringSubmatch(resourcesStr)
+	if xobjMatch == nil {
+		// Try without << >> (inline dictionary)
+		xobjPattern2 := regexp.MustCompile(`/XObject\s*<<([^>]+)`)
+		xobjMatch2 := xobjPattern2.FindStringSubmatch(resourcesStr)
+		if xobjMatch2 != nil {
+			xobjMatch = xobjMatch2
+		} else {
+			return xobjects, objNums
+		}
+	}
+
+	xobjDictStr := xobjMatch[1]
+
+	// Parse XObject entries: /Im1 5 0 R /Im2 6 0 R ...
+	xobjEntryPattern := regexp.MustCompile(`/(\w+)\s+(\d+)\s+\d+\s+R`)
+	xobjEntries := xobjEntryPattern.FindAllStringSubmatch(xobjDictStr, -1)
+
+	for _, entry := range xobjEntries {
+		xobjName := entry[1]
+		xobjObjNum, _ := parseObjectRef(entry[2] + " 0 R")
+		objNums[xobjName] = xobjObjNum
+
+		xobj := extractXObjectInfo(xobjObjNum, pdf, verbose)
+		if xobj != nil {
+			xobj.ID = "/" + xobjName
+			xobjects[xobjName] = *xobj
+		}
+	}
+
+	return xobjects, objNums
+}
+
 // extractXObjectInfo extracts information from an XObject dictionary
 func extractXObjectInfo(xobjObjNum int, pdf *parse.PDF, verbose bool) *types.XObject {
 	xobjObj, err := pdf.GetObject(xobjObjNum)
@@ -293,4 +334,10 @@ func extractXObjectInfo(xobjObjNum int, pdf *parse.PDF, verbose bool) *types.XOb
 	}
 
 	return xobject
+}
+
+// extractImageDataWithBinary extracts image with full binary data
+// This is a helper that calls extractImageData from images.go
+func extractImageDataWithBinary(imageObjNum int, pdf *parse.PDF, verbose bool) (*types.Image, error) {
+	return extractImageData(imageObjNum, pdf, verbose)
 }

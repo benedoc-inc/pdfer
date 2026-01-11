@@ -281,6 +281,17 @@ if err != nil {
     log.Fatal(err)
 }
 log.Printf("JSON: %s", jsonStr)
+
+// Extract all images with binary data
+images, err := extract.ExtractAllImages(pdfBytes, nil, false)
+if err != nil {
+    log.Fatal(err)
+}
+for _, img := range images {
+    log.Printf("Image: %s, %dx%d, Format: %s, Data: %d bytes", 
+        img.ID, img.Width, img.Height, img.Format, len(img.Data))
+    // Image binary data is in img.Data (and img.DataBase64 for JSON)
+}
 ```
 
 **Extraction Flow:**
