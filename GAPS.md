@@ -108,34 +108,33 @@ This document details the current implementation gaps in pdfer and provides guid
 | **Dictionary writing** | Basic | Complex nested structures may not format correctly |
 | **String encryption** | Partial | Only stream data encrypted, not string objects in dictionaries |
 
+### ✅ Newly Implemented
+
+| Feature | File | Notes |
+|---------|------|-------|
+| **Font embedding** | `font/font.go`, `font/pdf.go` | TrueType/OpenType font embedding with subsetting support |
+
 ### ❌ Not Implemented
 
 | Feature | Priority | Complexity | Notes |
 |---------|----------|------------|-------|
-| **Font embedding** | High | High | TrueType/OpenType subsetting |
 | **Encryption on write** | Medium | Medium | Generate new encrypted PDFs |
 | **Cross-reference streams** | Medium | Medium | Write modern xref format |
 | **Object streams** | Medium | Medium | Compress objects on write |
 | **Digital signatures** | Low | Very High | PKCS#7, CMS signing |
 | **Incremental save** | Medium | Medium | Append without rewriting |
 
-**To implement font embedding:**
+**Font embedding implementation:**
 ```go
-// Create new package: font/
-type Font struct {
-    Name     string
-    Subtype  string  // TrueType, Type1, etc.
-    Data     []byte  // Raw font file
-    Subset   []rune  // Characters to include
-}
+// Package font/ provides TrueType/OpenType font embedding
+// Usage example:
+fontData, _ := os.ReadFile("font.ttf")
+font, _ := font.NewFont("MyFont", fontData)
+font.AddString("Hello, World!") // Subset to used characters
 
-func (f *Font) ToXObjects() (fontDict, fontFile *PDFObject) {
-    // 1. Parse font file (TTF/OTF)
-    // 2. Subset to used glyphs
-    // 3. Create /FontDescriptor
-    // 4. Create font stream object
-    // 5. Create /ToUnicode CMap
-}
+// Add to page
+fontName, _ := page.AddEmbeddedFont(font)
+content.SetFont(fontName, 12).ShowText("Hello, World!")
 ```
 
 ---
@@ -210,7 +209,7 @@ func (s *Subform) CreateInstances(data []map[string]string) []SubformInstance {
 | Type | Purpose | Priority |
 |------|---------|----------|
 | `Page` | Page object with content | High |
-| `Font` | Font resource | High |
+| `Font` | Font resource | ✅ Complete |
 | `Image` | Image XObject | High |
 | `Annotation` | Form fields, links | Medium |
 | `Outline` | Bookmarks | Low |
@@ -243,7 +242,7 @@ func (s *Subform) CreateInstances(data []map[string]string) []SubformInstance {
 
 ### High Priority (Core Functionality)
 1. Incremental updates parsing ✅
-2. Font embedding
+2. Font embedding ✅
 3. Image embedding ✅
 4. Page content streams ✅
 5. AES-256 full support ✅

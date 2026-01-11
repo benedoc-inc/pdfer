@@ -3,6 +3,8 @@ package writer
 
 import (
 	"fmt"
+
+	"github.com/benedoc-inc/pdfer/font"
 )
 
 // PageSize represents standard page dimensions in points (1 point = 1/72 inch)
@@ -78,6 +80,46 @@ func (pb *PageBuilder) AddImage(info *ImageInfo) string {
 	}
 	pb.images[resourceName] = info.ObjectNum
 	return "/" + resourceName
+}
+
+// AddEmbeddedFont adds an embedded TrueType/OpenType font and returns the resource name
+// The font will be subset to include only the characters added via font.AddString() or font.AddRune()
+func (pb *PageBuilder) AddEmbeddedFont(f *font.Font) (string, error) {
+	// Create a wrapper to make PDFWriter implement font.PDFWriter interface
+	wrapper := &fontWriterWrapper{w: pb.writer}
+
+	// Create PDF objects for the font
+	fontObjs, err := f.ToPDFObjects(wrapper)
+	if err != nil {
+		return "", fmt.Errorf("failed to create font objects: %w", err)
+	}
+
+	// Store font by resource name
+	resourceName := fontObjs.ResourceName
+	// Remove leading / if present
+	if len(resourceName) > 0 && resourceName[0] == '/' {
+		resourceName = resourceName[1:]
+	}
+	pb.fonts[resourceName] = fontObjs.FontDictNum
+
+	return "/" + resourceName, nil
+}
+
+// fontWriterWrapper wraps PDFWriter to implement font.PDFWriter interface
+type fontWriterWrapper struct {
+	w *PDFWriter
+}
+
+func (w *fontWriterWrapper) AddObject(content []byte) int {
+	return w.w.AddObject(content)
+}
+
+func (w *fontWriterWrapper) AddStreamObject(dict map[string]interface{}, data []byte, compress bool) int {
+	return w.w.AddStreamObject(Dictionary(dict), data, compress)
+}
+
+func (w *fontWriterWrapper) NextObjectNumber() int {
+	return w.w.nextObjNum
 }
 
 // Build finalizes the page and returns the page object number

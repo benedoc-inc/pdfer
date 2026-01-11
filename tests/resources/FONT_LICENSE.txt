@@ -1,0 +1,25 @@
+Noto Sans Gothic Font License
+=============================
+
+This font file (test_font.ttf) is included for testing purposes only.
+
+Font: Noto Sans Gothic Regular
+Source: Google Fonts (https://fonts.google.com/noto/specimen/Noto+Sans+Gothic)
+License: SIL Open Font License 1.1 (OFL)
+
+Copyright 2017 Google Inc. All Rights Reserved.
+
+SIL Open Font License 1.1
+-------------------------
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+This license is available with a FAQ at: https://scripts.sil.org/OFL
+
+The OFL allows the fonts to be used, studied, modified and redistributed
+freely as long as they are not sold by themselves. The fonts, including any
+derivative works, can be bundled, embedded, redistributed and/or sold with
+any software provided that any reserved names are not used by derivative works.
+The fonts and derivatives, however, cannot be released under any other type
+of license.
+
+For full license text, see: https://scripts.sil.org/OFL
