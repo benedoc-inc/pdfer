@@ -1,0 +1,31 @@
+# Build outputs
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test outputs
+tests/resources/*_rebuilt.pdf
+tests/resources/*_modified.pdf
+tests/resources/*_clean.pdf
+tests/resources/*_extracted.json
+tests/resources/scratch_*.pdf
+*.test
+*.out
+coverage.html
+coverage.txt
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/
