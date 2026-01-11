@@ -1,0 +1,40 @@
+#!/bin/bash
+# Pre-commit hook for pdfer
+# Runs formatting and linting checks
+
+set -e
+
+echo "Running pre-commit checks..."
+
+# Check if there are any Go files staged
+STAGED_GO_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.go$' || true)
+
+if [ -z "$STAGED_GO_FILES" ]; then
+    echo "No Go files staged, skipping checks."
+    exit 0
+fi
+
+# Run go fmt and check for changes
+echo "Checking formatting..."
+UNFORMATTED=$(gofmt -l $STAGED_GO_FILES)
+if [ -n "$UNFORMATTED" ]; then
+    echo "❌ The following files need formatting:"
+    echo "$UNFORMATTED"
+    echo ""
+    echo "Run 'gofmt -w <file>' to fix, then stage the changes."
+    exit 1
+fi
+echo "✓ Formatting OK"
+
+# Run go vet
+echo "Running go vet..."
+go vet ./...
+echo "✓ Vet OK"
+
+# Check that the code compiles
+echo "Checking compilation..."
+go build ./...
+echo "✓ Build OK"
+
+echo ""
+echo "✅ All pre-commit checks passed!"

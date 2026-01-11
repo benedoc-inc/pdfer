@@ -1,0 +1,14 @@
+#!/bin/bash
+# Pre-push hook for pdfer
+# Runs the full test suite before pushing
+
+set -e
+
+echo "Running pre-push checks..."
+
+# Run all tests
+echo "Running tests..."
+go test ./...
+
+echo ""
+echo "✅ All tests passed! Safe to push."

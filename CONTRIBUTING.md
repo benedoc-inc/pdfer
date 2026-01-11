@@ -11,17 +11,26 @@ Thank you for your interest in contributing to pdfer! This document provides gui
 ## Development Setup
 
 ```bash
-# Install dependencies (none required - pure Go!)
-go mod download
+# Run the setup script (configures git hooks and verifies build)
+./scripts/setup.sh
 
-# Run tests
-go test ./...
+# Or set up manually:
+git config core.hooksPath .githooks  # Enable pre-commit and pre-push hooks
+go mod download                       # Install dependencies
+go test ./...                         # Run tests
+```
 
-# Run tests with coverage
-go test -cover ./...
+### Git Hooks
 
-# Run tests verbosely
-go test -v ./...
+This project uses git hooks to maintain code quality:
+
+- **pre-commit**: Runs `gofmt` and `go vet` on staged files
+- **pre-push**: Runs the full test suite before pushing
+
+The setup script configures these automatically. To skip hooks temporarily:
+```bash
+git commit --no-verify  # Skip pre-commit
+git push --no-verify    # Skip pre-push
 ```
 
 ## Code Style
@@ -77,13 +86,12 @@ See [GAPS.md](GAPS.md) for a comprehensive list of implementation gaps with:
 
 ### High Priority
 1. Incremental updates parsing
-2. Font embedding
-3. Image embedding
-4. Page content streams
-5. AES-256 full support
+2. Font embedding (TrueType/OpenType subsetting)
+3. AES-256 full support
+4. Cross-reference stream writing
 
 ### Good First Issues
-- Add ASCIIHexDecode filter (simple)
+- Add LZWDecode filter
 - Improve error messages
 - Add more test cases
 - Documentation improvements

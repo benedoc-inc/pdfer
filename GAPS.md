@@ -7,8 +7,8 @@ This document details the current implementation gaps in pdfer and provides guid
 | Category | Implemented | Partial | Not Implemented |
 |----------|-------------|---------|-----------------|
 | Encryption | 3 | 1 | 1 |
-| PDF Parsing | 5 | 2 | 4 |
-| PDF Writing | 3 | 2 | 5 |
+| PDF Parsing | 8 | 2 | 7 |
+| PDF Writing | 8 | 2 | 6 |
 | XFA | 6 | 2 | 4 |
 
 ---
@@ -70,6 +70,14 @@ func DeriveEncryptionKeyV5(password []byte, encrypt *PDFEncryption) ([]byte, err
 | **Trailer parsing** | Works for most | Hybrid-reference files (xref table + stream) not fully supported |
 | **Indirect object references** | Basic | Doesn't resolve nested references automatically |
 
+### ✅ Newly Implemented
+
+| Feature | File | Notes |
+|---------|------|-------|
+| **ASCIIHexDecode** | `filters.go` | Encode and decode hex text |
+| **ASCII85Decode** | `filters.go` | Encode and decode base-85 |
+| **RunLengthDecode** | `filters.go` | Simple RLE compression |
+
 ### ❌ Not Implemented
 
 | Feature | Priority | Complexity | Notes |
@@ -77,9 +85,6 @@ func DeriveEncryptionKeyV5(password []byte, encrypt *PDFEncryption) ([]byte, err
 | **Incremental updates** | High | Medium | Multiple xref sections, %%EOF markers |
 | **Linearized PDFs** | Medium | High | First-page optimization, hint tables |
 | **LZWDecode filter** | Low | Medium | Legacy compression, rarely used now |
-| **ASCII85Decode** | Low | Low | Text encoding filter |
-| **ASCIIHexDecode** | Low | Low | Hex text encoding |
-| **RunLengthDecode** | Low | Low | Simple RLE compression |
 | **CCITTFaxDecode** | Low | High | Fax image compression |
 | **JBIG2Decode** | Low | High | Bi-level image compression |
 | **JPXDecode** | Low | High | JPEG 2000 |
@@ -109,6 +114,9 @@ func ParseAllXRefSections(pdfBytes []byte) ([]*XRefSection, error) {
 | XFA PDF building | `xfa_builder.go` | From XFA streams |
 | PDF rebuilding | `xfa_builder.go` | Modify existing PDFs |
 | Object encryption | `writer.go` | AES-128 for streams |
+| **Image embedding** | `image.go` | JPEG (DCTDecode), PNG to RGB XObjects |
+| **Page content streams** | `content.go` | Text, graphics, and image operators |
+| **Page building** | `page.go` | SimplePDFBuilder for easy page creation |
 
 ### ⚠️ Partial Implementation
 
@@ -122,8 +130,6 @@ func ParseAllXRefSections(pdfBytes []byte) ([]*XRefSection, error) {
 | Feature | Priority | Complexity | Notes |
 |---------|----------|------------|-------|
 | **Font embedding** | High | High | TrueType/OpenType subsetting |
-| **Image embedding** | High | Medium | JPEG, PNG to PDF image XObjects |
-| **Page content streams** | High | High | Text operators, graphics state |
 | **Encryption on write** | Medium | Medium | Generate new encrypted PDFs |
 | **Cross-reference streams** | Medium | Medium | Write modern xref format |
 | **Object streams** | Medium | Medium | Compress objects on write |

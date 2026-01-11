@@ -10,9 +10,12 @@ A pure Go library for PDF processing with comprehensive XFA (XML Forms Architect
 - **Pure Go** - No CGO, no external dependencies
 - **PDF Decryption** - RC4 (40/128-bit) and AES (128/256-bit)
 - **XFA Processing** - Extract, parse, modify, and rebuild XFA forms
-- **PDF Generation** - Create PDFs from scratch or modify existing ones
+- **PDF Generation** - Create PDFs from scratch with text, graphics, and images
+- **Image Embedding** - JPEG and PNG images with alpha channel support
+- **Content Streams** - Full text and graphics operators for page content
 - **Object Streams** - Full support for compressed object storage
 - **Cross-Reference Streams** - Parse modern PDF xref streams with predictor filters
+- **Stream Filters** - FlateDecode, ASCIIHexDecode, ASCII85Decode, RunLengthDecode
 
 ## Installation
 
@@ -104,16 +107,55 @@ os.WriteFile("filled.pdf", updatedPDF, 0644)
 ```go
 import "github.com/benedoc-inc/pdfer/writer"
 
-// Create PDF writer
-w := writer.NewPDFWriter()
+// Create a simple PDF with text and graphics
+builder := writer.NewSimplePDFBuilder()
 
-// Add objects
-catalogNum := w.AddObject([]byte("<</Type/Catalog/Pages 2 0 R>>"))
-pagesNum := w.AddObject([]byte("<</Type/Pages/Kids[]/Count 0>>"))
-w.SetRoot(catalogNum)
+// Add a page
+page := builder.AddPage(writer.PageSizeLetter)
+
+// Add a font and get its resource name
+fontName := page.AddStandardFont("Helvetica")
+
+// Draw content
+page.Content().
+    // Add text
+    BeginText().
+    SetFont(fontName, 24).
+    SetTextPosition(72, 720).
+    ShowText("Hello, PDF World!").
+    EndText().
+    // Draw a red rectangle
+    SetFillColorRGB(1, 0, 0).
+    Rectangle(72, 650, 200, 50).
+    Fill()
+
+builder.FinalizePage(page)
 
 // Generate PDF bytes
-pdfBytes, err := w.Bytes()
+pdfBytes, err := builder.Bytes()
+```
+
+### Embed Images in a PDF
+
+```go
+import "github.com/benedoc-inc/pdfer/writer"
+
+builder := writer.NewSimplePDFBuilder()
+page := builder.AddPage(writer.PageSizeLetter)
+
+// Add a JPEG image
+jpegData, _ := os.ReadFile("photo.jpg")
+imgInfo, err := builder.Writer().AddJPEGImage(jpegData, "Im1")
+if err != nil {
+    log.Fatal(err)
+}
+
+// Register image with page and draw it
+imgName := page.AddImage(imgInfo)
+page.Content().DrawImageAt(imgName, 72, 500, 200, 150)
+
+builder.FinalizePage(page)
+pdfBytes, _ := builder.Bytes()
 ```
 
 ### Build XFA PDF from XML Streams
@@ -176,7 +218,12 @@ var data pdfer.FormData        // = types.FormData
 | Cross-reference streams | ✅ |
 | Object streams (ObjStm) | ✅ |
 | FlateDecode filter | ✅ |
+| ASCIIHexDecode filter | ✅ |
+| ASCII85Decode filter | ✅ |
+| RunLengthDecode filter | ✅ |
 | PNG predictor filters | ✅ |
+| Image embedding (JPEG/PNG) | ✅ |
+| Page content streams | ✅ |
 | Incremental updates | ❌ |
 | Linearized PDFs | ❌ |
 
@@ -201,8 +248,8 @@ See [GAPS.md](GAPS.md) for detailed implementation status and contribution oppor
 ### High Priority Gaps
 - [ ] **Incremental updates** - Parse PDFs with multiple revisions
 - [ ] **Font embedding** - TrueType/OpenType font subsetting
-- [ ] **Image embedding** - JPEG, PNG image objects
-- [ ] **Page content streams** - Text and graphics operators
+- [x] **Image embedding** - JPEG, PNG image objects ✅
+- [x] **Page content streams** - Text and graphics operators ✅
 - [ ] **AES-256 full support** - Complete V5/R6 encryption
 
 ### Not Planned
