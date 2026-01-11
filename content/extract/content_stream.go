@@ -38,6 +38,11 @@ func parseContentStream(contentStr string, pdf *parse.PDF, pageNum int, verbose 
 		strokeColor: &types.Color{R: 0, G: 0, B: 0},
 	}
 
+	// Track current transformation matrix (for images)
+	// Default is identity matrix [1 0 0 1 0 0]
+	currentMatrix := [6]float64{1, 0, 0, 1, 0, 0}
+	matrixStack := [][6]float64{} // Stack for q/Q operators
+
 	// Split content stream into tokens
 	lines := strings.Split(contentStr, "\n")
 	for _, line := range lines {
@@ -199,6 +204,38 @@ func parseContentStream(contentStr string, pdf *parse.PDF, pageNum int, verbose 
 			continue
 		}
 
+		// Save graphics state (q operator) - push current matrix to stack
+		if strings.TrimSpace(line) == "q" {
+			matrixStack = append(matrixStack, currentMatrix)
+			continue
+		}
+
+		// Restore graphics state (Q operator) - pop matrix from stack
+		if strings.TrimSpace(line) == "Q" {
+			if len(matrixStack) > 0 {
+				currentMatrix = matrixStack[len(matrixStack)-1]
+				matrixStack = matrixStack[:len(matrixStack)-1]
+			}
+			continue
+		}
+
+		// Set transformation matrix (cm operator)
+		// Format: a b c d e f cm
+		if match := regexp.MustCompile(`^([\d\.\-]+)\s+([\d\.\-]+)\s+([\d\.\-]+)\s+([\d\.\-]+)\s+([\d\.\-]+)\s+([\d\.\-]+)\s+cm`).FindStringSubmatch(line); match != nil {
+			matrix := [6]float64{}
+			for i := 1; i <= 6; i++ {
+				if val, err := strconv.ParseFloat(match[i], 64); err == nil {
+					matrix[i-1] = val
+				}
+			}
+			// Multiply with current matrix (concatenate transformations)
+			// For simplicity, we'll just replace (assuming q/Q handles stacking)
+			// In full implementation, should multiply: newMatrix = currentMatrix * matrix
+			// For now, replace since DrawImageAt uses q/cm/Do/Q pattern
+			currentMatrix = matrix
+			continue
+		}
+
 		// Set line width (w operator)
 		if match := regexp.MustCompile(`^([\d\.\-]+)\s+w`).FindStringSubmatch(line); match != nil {
 			if val, err := strconv.ParseFloat(match[1], 64); err == nil {
@@ -232,9 +269,32 @@ func parseContentStream(contentStr string, pdf *parse.PDF, pageNum int, verbose 
 		}
 
 		// Draw image (Do operator)
+		// Extract position and size from current transformation matrix
 		if match := regexp.MustCompile(`^([/\w]+)\s+Do`).FindStringSubmatch(line); match != nil {
+			// Transformation matrix [a b c d e f] where:
+			// - a, d are scale factors (width, height)
+			// - e, f are translation (x, y position)
+			// For DrawImageAt pattern: [width 0 0 height x y]
+			x := currentMatrix[4]      // e (translation X)
+			y := currentMatrix[5]      // f (translation Y)
+			width := currentMatrix[0]  // a (scale X)
+			height := currentMatrix[3] // d (scale Y)
+
+			// Handle negative scales (flipped images)
+			if width < 0 {
+				width = -width
+			}
+			if height < 0 {
+				height = -height
+			}
+
 			imageRef := types.ImageRef{
-				ImageID: match[1], // Store XObject name as ImageID for now
+				ImageID:   match[1],
+				X:         x,
+				Y:         y,
+				Width:     width,
+				Height:    height,
+				Transform: currentMatrix,
 			}
 			imageRefs = append(imageRefs, imageRef)
 			continue

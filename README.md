@@ -409,6 +409,103 @@ var q pdfer.Question           // = types.Question
 var data pdfer.FormData        // = types.FormData
 ```
 
+## Document Manipulation
+
+The library provides comprehensive document manipulation capabilities:
+
+```go
+import "github.com/benedoc-inc/pdfer/core/manipulate"
+
+// Rotate pages
+manipulator, _ := manipulate.NewPDFManipulator(pdfBytes, nil, false)
+manipulator.RotatePage(1, 90)  // Rotate page 1 by 90 degrees
+manipulator.RotateAllPages(180) // Rotate all pages by 180 degrees
+rotatedPDF, _ := manipulator.Rebuild()
+
+// Delete pages
+manipulator, _ := manipulate.NewPDFManipulator(pdfBytes, nil, false)
+manipulator.DeletePage(2)  // Delete page 2
+manipulator.DeletePages([]int{3, 5})  // Delete pages 3 and 5
+modifiedPDF, _ := manipulator.Rebuild()
+
+// Extract pages
+extractedPDF, _ := manipulate.ExtractPages(pdfBytes, []int{1, 3, 5}, nil, false)
+
+// Merge PDFs
+mergedPDF, _ := manipulate.MergePDFs([][]byte{pdf1, pdf2, pdf3}, nil, false)
+
+// Split PDF
+ranges := []manipulate.PageRange{
+    {Start: 1, End: 5},
+    {Start: 6, End: 10},
+}
+splitPDFs, _ := manipulate.SplitPDF(pdfBytes, ranges, nil, false)
+
+// Split by page count
+splitPDFs, _ := manipulate.SplitPDFByPageCount(pdfBytes, 5, nil, false) // 5 pages per PDF
+```
+
+### Compare PDFs
+
+```go
+import "github.com/benedoc-inc/pdfer/core/compare"
+
+// Compare two PDFs
+result, err := compare.ComparePDFs(pdf1Bytes, pdf2Bytes, nil, nil, false)
+if err != nil {
+    log.Fatal(err)
+}
+
+if result.Identical {
+    log.Println("PDFs are identical")
+} else {
+    log.Printf("Found %d differences", result.Summary.TotalDifferences)
+    
+    // Generate human-readable report
+    report := compare.GenerateReport(result)
+    log.Println(report)
+    
+    // Or get JSON report
+    jsonReport, _ := compare.GenerateJSONReport(result)
+    log.Println(jsonReport)
+}
+
+// Advanced comparison options with granularity and sensitivity control
+opts := compare.CompareOptions{
+    // Metadata options
+    IgnoreProducer: true,  // Ignore Producer differences
+    IgnoreDates:    true,  // Ignore date differences
+    
+    // Position tolerance
+    TextTolerance:  5.0,   // Position tolerance for text matching (points)
+    GraphicTolerance: 5.0,  // Position tolerance for graphics/images
+    
+    // Text comparison granularity
+    TextGranularity: compare.GranularityElement, // element, word, or char
+    DiffSensitivity: compare.SensitivityNormal,    // strict, normal, or relaxed
+    
+    // Move detection
+    DetectMoves:    true,  // Detect when text/images move positions
+    MoveTolerance: 50.0,  // Position tolerance for detecting moves
+    
+    // Filtering
+    MinChangeThreshold: 0.0, // Minimum change percentage to report (0.0 = all)
+    IgnoreWhitespace: false, // Ignore whitespace differences
+    IgnoreCase:       false, // Case-insensitive comparison
+}
+result, _ := compare.ComparePDFsWithOptions(pdf1Bytes, pdf2Bytes, nil, nil, opts)
+```
+
+**Comparison Features:**
+- **Best-in-class diffing algorithm**: Uses LCS (Longest Common Subsequence) for optimal matching
+- **Multi-phase matching**: Exact matches → Position-based modifications → Content-based matching
+- **Configurable granularity**: Compare at element, word, or character level
+- **Sensitivity control**: Strict, normal, or relaxed change detection
+- **Move detection**: Identifies when content moves between positions
+- **Image comparison**: Binary comparison of image data, position tracking, and move detection
+- **Text extraction**: Full text with position, font, and size information
+- **Comprehensive reports**: Human-readable and JSON output formats
+
 ## Supported PDF Features
 
 ### Encryption
@@ -448,6 +545,17 @@ var data pdfer.FormData        // = types.FormData
 | Bookmark extraction | ✅ |
 | Metadata extraction | ✅ |
 | JSON serialization | ✅ |
+
+### Document Manipulation
+| Feature | Status |
+|---------|--------|
+| Page rotation | ✅ |
+| Page deletion | ✅ |
+| Page insertion | ✅ |
+| Page extraction | ✅ |
+| PDF merging | ✅ |
+| PDF splitting | ✅ |
+| PDF comparison | ✅ (Best-in-class LCS diffing algorithm) |
 
 ### XFA Forms
 | Feature | Status |

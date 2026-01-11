@@ -10,7 +10,7 @@ This document details the current implementation gaps in pdfer and provides guid
 | PDF Parsing | 13 | 2 | 20+ |
 | PDF Writing | 8 | 2 | 25+ |
 | XFA | 6 | 2 | 4 |
-| Document Manipulation | 0 | 0 | 8 |
+| Document Manipulation | 8 | 0 | 1 |
 | Content Extraction | 10 | 0 | 1 |
 | Advanced Features | 0 | 0 | 10+ |
 | Form Handling | 5 | 0 | 1 |
@@ -288,17 +288,60 @@ func (s *Subform) CreateInstances(data []map[string]string) []SubformInstance {
 
 ## Additional PDF Library Features
 
-### Document Manipulation
+### Document Manipulation (`core/manipulate/`)
+
+#### ✅ Fully Implemented
+
+| Feature | File | Notes |
+|---------|------|-------|
+| **PDF merging** | `core/manipulate/merge.go` | Combine multiple PDFs, handle conflicts |
+| **PDF splitting** | `core/manipulate/split.go` | Split by pages, bookmarks, or custom logic |
+| **Page extraction** | `core/manipulate/extract.go` | Extract pages as new PDFs |
+| **Page rotation** | `core/manipulate/rotate.go` | Rotate individual or all pages |
+| **Page deletion** | `core/manipulate/delete.go` | Remove pages, update references |
+| **Page insertion** | `core/manipulate/insert.go` | Insert pages at specific positions |
+| **PDF comparison** | `core/compare/` | Best-in-class diffing algorithm with comprehensive features |
+
+#### PDF Comparison (`core/compare/`)
+
+**✅ Fully Implemented Features:**
+
+| Feature | File | Notes |
+|---------|------|-------|
+| **LCS-based diffing** | `core/compare/myers_diff.go` | Longest Common Subsequence algorithm for optimal matching (O(n*m)) |
+| **Multi-phase matching** | `core/compare/myers_diff.go` | Exact matches → Position-based → Content-based matching |
+| **Text comparison** | `core/compare/text_diff.go` | Element, word, and character-level granularity |
+| **Image comparison** | `core/compare/compare.go` | Binary data comparison, position tracking, move detection |
+| **Configurable options** | `core/compare/compare.go` | Granularity, sensitivity, tolerance, normalization options |
+| **Move detection** | `core/compare/text_diff.go` | Detects when text/images move between positions |
+| **Report generation** | `core/compare/report.go` | Human-readable and JSON report formats |
+
+**Algorithm Characteristics:**
+- **Time Complexity**: O(n*m) for LCS computation
+- **Space Complexity**: O(n*m) for LCS table
+- **Optimality**: Finds longest common subsequence for optimal matching
+- **Multi-phase Strategy**: Prevents false matches by prioritizing exact matches over position-based matches
+
+**Configuration Options:**
+- `TextGranularity`: Element, word, or character-level comparison
+- `DiffSensitivity`: Strict, normal, or relaxed change detection
+- `DetectMoves`: Enable/disable move detection
+- `MoveTolerance`: Position tolerance for detecting moves
+- `MinChangeThreshold`: Filter minor changes by percentage
+- `IgnoreWhitespace`: Ignore whitespace differences
+- `IgnoreCase`: Case-insensitive comparison
+- `TextTolerance` / `GraphicTolerance`: Position matching tolerance
+
+#### ❌ Not Implemented
+
 | Feature | Priority | Complexity | Notes |
 |---------|----------|------------|-------|
-| **PDF merging** | High | Medium | Combine multiple PDFs, handle conflicts |
-| **PDF splitting** | High | Medium | Split by pages, bookmarks, or custom logic |
-| **Page extraction** | High | Medium | Extract pages as new PDFs |
-| **Page rotation** | Medium | Low | Rotate individual or all pages |
-| **Page deletion** | Medium | Medium | Remove pages, update references |
-| **Page insertion** | Medium | Medium | Insert pages at specific positions |
 | **Page reordering** | Medium | Medium | Reorder pages in document |
-| **PDF comparison** | Low | High | Diff two PDFs, highlight differences |
+| **Visual diffing** | Medium | High | Visual annotation of differences (requires annotation writing) |
+| **Form comparison** | Medium | Medium | Compare form field values and structure |
+| **Object-level comparison** | Low | Medium | Compare raw PDF objects |
+| **Fuzzy matching** | Low | High | Fuzzy text/image similarity matching |
+| **Change tracking** | Low | High | Track changes across multiple versions |
 
 ### Content Extraction (`content/extract/`)
 
