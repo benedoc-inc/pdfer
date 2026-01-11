@@ -286,6 +286,100 @@ func TestEncodeRunLength(t *testing.T) {
 	}
 }
 
+func TestDecodeDCTDecode(t *testing.T) {
+	// Minimal valid JPEG: SOI (0xFF 0xD8) + some data
+	validJPEG := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46}
+
+	tests := []struct {
+		name    string
+		data    []byte
+		want    []byte
+		wantErr bool
+	}{
+		{
+			name:    "valid JPEG",
+			data:    validJPEG,
+			want:    validJPEG,
+			wantErr: false,
+		},
+		{
+			name:    "too short",
+			data:    []byte{0xFF},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name:    "invalid header",
+			data:    []byte{0xFF, 0xD9}, // EOI instead of SOI
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name:    "empty",
+			data:    []byte{},
+			want:    nil,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := DecodeDCTDecode(tt.data)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("DecodeDCTDecode() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && !bytes.Equal(got, tt.want) {
+				t.Errorf("DecodeDCTDecode() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEncodeDCTDecode(t *testing.T) {
+	// Minimal valid JPEG
+	validJPEG := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46}
+
+	tests := []struct {
+		name    string
+		data    []byte
+		want    []byte
+		wantErr bool
+	}{
+		{
+			name:    "valid JPEG",
+			data:    validJPEG,
+			want:    validJPEG,
+			wantErr: false,
+		},
+		{
+			name:    "invalid header",
+			data:    []byte{0xFF, 0xD9},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name:    "too short",
+			data:    []byte{0xFF},
+			want:    nil,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := EncodeDCTDecode(tt.data)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("EncodeDCTDecode() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && !bytes.Equal(got, tt.want) {
+				t.Errorf("EncodeDCTDecode() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDecodeFilter(t *testing.T) {
 	// Test that DecodeFilter dispatches correctly
 	hexEncoded := []byte("48656C6C6F>")
@@ -295,6 +389,16 @@ func TestDecodeFilter(t *testing.T) {
 	}
 	if string(result) != "Hello" {
 		t.Errorf("got %s, want Hello", string(result))
+	}
+
+	// Test DCTDecode
+	jpegData := []byte{0xFF, 0xD8, 0xFF, 0xE0}
+	result, err = DecodeFilter(jpegData, "/DCTDecode")
+	if err != nil {
+		t.Fatalf("DecodeFilter with DCTDecode failed: %v", err)
+	}
+	if !bytes.Equal(result, jpegData) {
+		t.Errorf("DCTDecode should return data as-is, got %v, want %v", result, jpegData)
 	}
 
 	// Test unsupported filter

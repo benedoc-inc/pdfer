@@ -2,6 +2,10 @@ package tests
 
 import (
 	"bytes"
+	"image"
+	"image/color"
+	"image/jpeg"
+	"os"
 	"strings"
 	"testing"
 
@@ -329,4 +333,191 @@ func TestE2E_ContentStreamOperators(t *testing.T) {
 			t.Errorf("Content stream should contain '%s', got:\n%s", exp, content)
 		}
 	}
+}
+
+// TestE2E_DCTDecodeJPEGImage tests parsing a PDF with JPEG images (DCTDecode filter)
+// and verifying the filter works correctly
+func TestE2E_DCTDecodeJPEGImage(t *testing.T) {
+	// First, create and save a test PDF with JPEG if it doesn't exist
+	testPDFPath := getTestResourcePath("test_jpeg.pdf")
+
+	var pdfBytes []byte
+	var err error
+
+	// Check if test PDF already exists
+	if _, err := os.Stat(testPDFPath); os.IsNotExist(err) {
+		t.Logf("Creating test PDF with JPEG image: %s", testPDFPath)
+
+		// Create a minimal JPEG image (10x10 pixel, RGB)
+		img := image.NewRGBA(image.Rect(0, 0, 10, 10))
+		for y := 0; y < 10; y++ {
+			for x := 0; x < 10; x++ {
+				// Create a simple pattern
+				r := uint8((x * 255) / 10)
+				g := uint8((y * 255) / 10)
+				b := uint8(128)
+				img.Set(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
+			}
+		}
+
+		// Encode as JPEG
+		var jpegBuf bytes.Buffer
+		err := jpeg.Encode(&jpegBuf, img, &jpeg.Options{Quality: 90})
+		if err != nil {
+			t.Fatalf("Failed to encode JPEG: %v", err)
+		}
+		jpegData := jpegBuf.Bytes()
+
+		// Create PDF with JPEG image
+		builder := writer.NewSimplePDFBuilder()
+		page := builder.AddPage(writer.PageSizeLetter)
+
+		// Add JPEG image to the PDF
+		imgInfo, err := builder.Writer().AddJPEGImage(jpegData, "Im1")
+		if err != nil {
+			t.Fatalf("Failed to add JPEG image: %v", err)
+		}
+
+		// Register image with page and draw it
+		imgName := page.AddImage(imgInfo)
+		page.Content().DrawImageAt(imgName, 72, 500, 100, 100)
+
+		builder.FinalizePage(page)
+
+		pdfBytes, err = builder.Bytes()
+		if err != nil {
+			t.Fatalf("Failed to create PDF: %v", err)
+		}
+
+		// Save to resources directory for future use
+		if err := ensureTestResourceDir(); err != nil {
+			t.Logf("Warning: Could not create resources directory: %v", err)
+		} else {
+			if err := os.WriteFile(testPDFPath, pdfBytes, 0644); err != nil {
+				t.Logf("Warning: Could not save test PDF: %v", err)
+			} else {
+				t.Logf("Saved test PDF to: %s", testPDFPath)
+			}
+		}
+	} else {
+		// Load existing test PDF
+		t.Logf("Loading existing test PDF: %s", testPDFPath)
+		pdfBytes, err = os.ReadFile(testPDFPath)
+		if err != nil {
+			t.Fatalf("Failed to read test PDF: %v", err)
+		}
+	}
+
+	t.Logf("Using PDF with JPEG: %d bytes", len(pdfBytes))
+
+	// Verify PDF contains DCTDecode filter
+	if !bytes.Contains(pdfBytes, []byte("/DCTDecode")) {
+		t.Error("PDF should contain /DCTDecode filter")
+	}
+
+	// Verify PDF contains image XObject markers
+	hasSubtype := bytes.Contains(pdfBytes, []byte("/Subtype"))
+	hasImage := bytes.Contains(pdfBytes, []byte("/Image"))
+	if !hasSubtype || !hasImage {
+		t.Error("PDF should contain image XObject (/Subtype and /Image)")
+	}
+
+	// Parse the PDF using unified API
+	pdf, err := parser.Open(pdfBytes)
+	if err != nil {
+		t.Fatalf("Failed to parse PDF: %v", err)
+	}
+
+	// Find image objects by searching for DCTDecode filter
+	// We need to find which object has the DCTDecode filter
+	var imageObjNum int
+	var imageObjData []byte
+
+	for _, objNum := range pdf.Objects() {
+		objData, err := pdf.GetObject(objNum)
+		if err != nil {
+			continue
+		}
+
+		// Check if this object has DCTDecode filter
+		objStr := string(objData)
+		if strings.Contains(objStr, "/DCTDecode") && strings.Contains(objStr, "/Subtype") && strings.Contains(objStr, "/Image") {
+			imageObjNum = objNum
+			imageObjData = objData
+			break
+		}
+	}
+
+	if imageObjNum == 0 {
+		t.Fatal("No image object with DCTDecode filter found in PDF")
+	}
+
+	t.Logf("Found image object: %d", imageObjNum)
+
+	// Get the image object
+	objData := imageObjData
+	if err != nil {
+		t.Fatalf("Failed to get image object: %v", err)
+	}
+
+	// Verify object contains DCTDecode filter
+	objStr := string(objData)
+	if !strings.Contains(objStr, "/DCTDecode") {
+		t.Error("Image object should contain /DCTDecode filter")
+	}
+
+	// Extract the stream data from the object
+	// Find stream keyword
+	streamIdx := bytes.Index(objData, []byte("stream"))
+	if streamIdx == -1 {
+		t.Fatal("Image object should contain stream data")
+	}
+
+	// Find endstream
+	endstreamIdx := bytes.Index(objData[streamIdx:], []byte("endstream"))
+	if endstreamIdx == -1 {
+		t.Fatal("Image object should contain endstream")
+	}
+
+	// Extract stream data (skip "stream\n" and before "endstream")
+	streamStart := streamIdx + 6 // "stream" is 6 bytes
+	// Skip EOL after "stream"
+	for streamStart < len(objData) && (objData[streamStart] == '\r' || objData[streamStart] == '\n') {
+		streamStart++
+	}
+	streamEnd := streamIdx + endstreamIdx
+	streamData := objData[streamStart:streamEnd]
+
+	t.Logf("Extracted stream data: %d bytes", len(streamData))
+
+	// Verify stream data starts with JPEG SOI marker
+	if len(streamData) < 2 || streamData[0] != 0xFF || streamData[1] != 0xD8 {
+		t.Errorf("Stream data should start with JPEG SOI marker (0xFF 0xD8), got 0x%02X 0x%02X",
+			streamData[0], streamData[1])
+	}
+
+	// Decode using DCTDecode filter
+	decoded, err := parser.DecodeFilter(streamData, "/DCTDecode")
+	if err != nil {
+		t.Fatalf("Failed to decode with DCTDecode: %v", err)
+	}
+
+	// DCTDecode is pass-through, so decoded should equal original
+	if !bytes.Equal(decoded, streamData) {
+		t.Error("DCTDecode should return data as-is (pass-through)")
+	}
+
+	// Verify decoded data is valid JPEG (DCTDecode is pass-through)
+	// The stream data should be valid JPEG bytes
+	if decoded[0] != 0xFF || decoded[1] != 0xD8 {
+		t.Error("Decoded data should be valid JPEG (SOI marker)")
+	}
+
+	// Verify we can parse the JPEG using image/jpeg
+	_, err = jpeg.Decode(bytes.NewReader(decoded))
+	if err != nil {
+		t.Errorf("Decoded data should be valid JPEG: %v", err)
+	}
+
+	t.Logf("Successfully created, parsed, and extracted JPEG image with DCTDecode filter")
 }

@@ -29,75 +29,142 @@ func DecryptPDF(pdfBytes []byte, password []byte, verbose bool) ([]byte, *types.
 	// Extract file ID from PDF trailer (needed for key derivation and U value computation)
 	fileID := ExtractFileID(pdfBytes, verbose)
 
-	// Derive encryption key from password
-	encryptKey, err := DeriveEncryptionKey(password, encrypt, fileID, verbose)
-	if err != nil {
-		return nil, nil, fmt.Errorf("error deriving encryption key: %v", err)
-	}
+	// For V5/R5/R6, we need to unwrap the encryption key from /UE
+	var encryptKey []byte
 
-	encrypt.EncryptKey = encryptKey
-
-	if verbose {
-		log.Printf("Derived encryption key (length: %d)", len(encryptKey))
-	}
-
-	// Verify password by checking U value
-	uValue, err := ComputeUValue(encryptKey, encrypt, fileID, verbose)
-	if err != nil {
-		return nil, nil, fmt.Errorf("error computing U value: %v", err)
-	}
-
-	// Compare with stored U value
-	// For revision 2: compare first 16 bytes
-	// For revision 3-4: compare first 16 bytes (the encrypted hash)
-	// Note: U value is 32 bytes for revision 3-4, but only first 16 are used for verification
-	uMatch := false
-	if len(encrypt.U) >= 16 && len(uValue) >= 16 {
-		if encrypt.R == 2 {
-			uMatch = bytes.Equal(uValue[:16], encrypt.U[:16])
-		} else {
-			// For revision 3-4, compare first 16 bytes
-			uMatch = bytes.Equal(uValue[:16], encrypt.U[:16])
+	if encrypt.R >= 5 {
+		// V5: Derive password key, verify U value, then unwrap actual encryption key from /UE
+		passwordKey, err := DeriveEncryptionKey(password, encrypt, fileID, verbose)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error deriving password key: %v", err)
 		}
-	}
 
-	if verbose {
-		if uMatch {
-			log.Printf("U value matches! Password verified")
-		} else {
-			log.Printf("U value mismatch - computed: %x (first 16), stored: %x (first 16)",
-				uValue[:min(16, len(uValue))], encrypt.U[:min(16, len(encrypt.U))])
-			log.Printf("Full computed U: %x", uValue)
-			log.Printf("Full stored U: %x", encrypt.U)
-		}
-	}
-
-	if !uMatch {
-		// Try owner password approach
 		if verbose {
-			log.Printf("User password failed, trying owner password approach...")
+			log.Printf("Derived password key (length: %d) for V5", len(passwordKey))
 		}
-		ownerKey, err := DeriveOwnerKey(password, encrypt, fileID, verbose)
-		if err == nil {
-			// Try to decrypt with owner key
-			userKey, err := DeriveUserKeyFromOwner(ownerKey, encrypt, verbose)
+
+		// Step 1: Verify U value to confirm password is correct
+		uMatch, err := VerifyUValueV5(password, passwordKey, encrypt, fileID, verbose)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error verifying U value: %v", err)
+		}
+
+		if !uMatch {
+			// Try owner password approach
+			if verbose {
+				log.Printf("User password U value verification failed, trying owner password...")
+			}
+			ownerPasswordKey, err2 := DeriveOwnerKeyV5(password, encrypt, fileID, verbose)
+			if err2 == nil {
+				// For owner password, we need to verify differently
+				// Owner password verification involves unwrapping /OE and checking if it works
+				ownerKey, err2 := UnwrapOwnerKeyV5(ownerPasswordKey, encrypt, verbose)
+				if err2 == nil {
+					// If unwrapping succeeded, owner password is correct
+					// The unwrapped owner key is the user encryption key
+					encryptKey = ownerKey
+					encrypt.EncryptKey = encryptKey
+					if verbose {
+						log.Printf("Owner password verified via /OE unwrapping")
+						log.Printf("Unwrapped encryption key (length: %d)", len(encryptKey))
+					}
+					uMatch = true
+				}
+			}
+		}
+
+		if !uMatch {
+			return nil, nil, fmt.Errorf("password incorrect or encryption parameters invalid")
+		}
+
+		// Step 2: Unwrap the actual encryption key from /UE (only if user password was used)
+		if encryptKey == nil {
+			unwrappedKey, err := UnwrapUserKeyV5(passwordKey, encrypt, verbose)
+			if err != nil {
+				return nil, nil, fmt.Errorf("error unwrapping encryption key from /UE: %v", err)
+			}
+
+			encryptKey = unwrappedKey
+			encrypt.EncryptKey = encryptKey
+			if verbose {
+				log.Printf("Unwrapped encryption key from /UE (length: %d)", len(encryptKey))
+			}
+		}
+
+		if verbose {
+			log.Printf("V5: Password verified and encryption key unwrapped successfully")
+		}
+	} else {
+		// V1-V4: Standard key derivation
+		encryptKey, err = DeriveEncryptionKey(password, encrypt, fileID, verbose)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error deriving encryption key: %v", err)
+		}
+
+		encrypt.EncryptKey = encryptKey
+
+		if verbose {
+			log.Printf("Derived encryption key (length: %d)", len(encryptKey))
+		}
+
+		// Verify password by checking U value
+		uValue, err := ComputeUValue(encryptKey, encrypt, fileID, verbose)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error computing U value: %v", err)
+		}
+
+		// Compare with stored U value
+		// For revision 2: compare first 16 bytes
+		// For revision 3-4: compare first 16 bytes (the encrypted hash)
+		// Note: U value is 32 bytes for revision 3-4, but only first 16 are used for verification
+		uMatch := false
+		if len(encrypt.U) >= 16 && len(uValue) >= 16 {
+			if encrypt.R == 2 {
+				uMatch = bytes.Equal(uValue[:16], encrypt.U[:16])
+			} else {
+				// For revision 3-4, compare first 16 bytes
+				uMatch = bytes.Equal(uValue[:16], encrypt.U[:16])
+			}
+		}
+
+		if verbose {
+			if uMatch {
+				log.Printf("U value matches! Password verified")
+			} else {
+				log.Printf("U value mismatch - computed: %x (first 16), stored: %x (first 16)",
+					uValue[:min(16, len(uValue))], encrypt.U[:min(16, len(encrypt.U))])
+				log.Printf("Full computed U: %x", uValue)
+				log.Printf("Full stored U: %x", encrypt.U)
+			}
+		}
+
+		if !uMatch {
+			// Try owner password approach
+			if verbose {
+				log.Printf("User password failed, trying owner password approach...")
+			}
+			ownerKey, err := DeriveOwnerKey(password, encrypt, fileID, verbose)
 			if err == nil {
-				uValue2, err := ComputeUValue(userKey, encrypt, fileID, verbose)
-				if err == nil && len(uValue2) >= 16 && len(encrypt.U) >= 16 {
-					if bytes.Equal(uValue2[:16], encrypt.U[:16]) {
-						if verbose {
-							log.Printf("Owner password verified! Using owner-derived user key")
+				// Try to decrypt with owner key
+				userKey, err := DeriveUserKeyFromOwner(ownerKey, encrypt, verbose)
+				if err == nil {
+					uValue2, err := ComputeUValue(userKey, encrypt, fileID, verbose)
+					if err == nil && len(uValue2) >= 16 && len(encrypt.U) >= 16 {
+						if bytes.Equal(uValue2[:16], encrypt.U[:16]) {
+							if verbose {
+								log.Printf("Owner password verified! Using owner-derived user key")
+							}
+							encrypt.EncryptKey = userKey
+							uMatch = true
 						}
-						encrypt.EncryptKey = userKey
-						uMatch = true
 					}
 				}
 			}
 		}
-	}
 
-	if !uMatch {
-		return nil, nil, fmt.Errorf("password incorrect or encryption parameters invalid")
+		if !uMatch {
+			return nil, nil, fmt.Errorf("password incorrect or encryption parameters invalid")
+		}
 	}
 
 	if verbose {

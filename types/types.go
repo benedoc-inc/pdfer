@@ -9,8 +9,10 @@ type PDFEncryption struct {
 	SubFilter       string
 	V               int
 	R               int
-	O               []byte // Owner password hash
-	U               []byte // User password hash
+	O               []byte // Owner password hash (V1-V4) or encrypted owner key (V5+)
+	U               []byte // User password hash (V1-V4) or encrypted user key (V5+)
+	UE              []byte // Encrypted user encryption key (V5+, AES-256)
+	OE              []byte // Encrypted owner encryption key (V5+, AES-256)
 	P               int32  // Permissions
 	EncryptMetadata bool
 	EncryptKey      []byte // Master encryption key

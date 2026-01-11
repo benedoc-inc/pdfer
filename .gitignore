@@ -5,16 +5,33 @@
 *.so
 *.dylib
 
-# Test outputs
+# Go build artifacts
+*.test
+*.out
+*.prof
+*.trace
+/bin/
+/dist/
+/build/
+/tmp/
+# Go test cache (if using -c flag)
+*.test.exe
+# Go build cache (if using custom build dirs)
+*.a
+
+# Test outputs and generated files
 tests/resources/*_rebuilt.pdf
 tests/resources/*_modified.pdf
 tests/resources/*_clean.pdf
 tests/resources/*_extracted.json
 tests/resources/scratch_*.pdf
-*.test
-*.out
+tests/resources/test_*.pdf
+# Ignore duplicate nested test directories (shouldn't exist, but just in case)
+tests/tests/
 coverage.html
 coverage.txt
+coverage.out
+*.coverprofile
 
 # IDE
 .idea/
@@ -29,3 +46,5 @@ Thumbs.db
 
 # Go
 vendor/
+go.work
+go.work.sum

@@ -6,8 +6,8 @@ This document details the current implementation gaps in pdfer and provides guid
 
 | Category | Implemented | Partial | Not Implemented |
 |----------|-------------|---------|-----------------|
-| Encryption | 3 | 1 | 1 |
-| PDF Parsing | 12 | 2 | 6 |
+| Encryption | 4 | 0 | 1 |
+| PDF Parsing | 13 | 2 | 5 |
 | PDF Writing | 8 | 2 | 6 |
 | XFA | 6 | 2 | 4 |
 
@@ -22,24 +22,16 @@ This document details the current implementation gaps in pdfer and provides guid
 | RC4 40-bit (V1, R2) | `decrypt.go` | Standard handler |
 | RC4 128-bit (V2, R3) | `decrypt.go` | Standard handler |
 | AES-128 CBC (V4, R4) | `decrypt.go` | With IV prefix handling |
-| Password verification | `key_derivation.go` | User and owner passwords |
-| Key derivation | `key_derivation.go` | Algorithm 2 per ISO 32000 |
+| AES-256 CBC (V5, R5/R6) | `decrypt.go`, `key_derivation.go` | SHA-256 key derivation, /UE/OE unwrapping |
+| Password verification | `key_derivation.go` | User and owner passwords (V1-V5) |
+| Key derivation | `key_derivation.go` | Algorithm 2 (V1-V4), 7.6.4.3.3 (V5+) |
 
-### ⚠️ Partial Implementation
+### ✅ Newly Implemented
 
-| Feature | Status | What's Missing |
-|---------|--------|----------------|
-| **AES-256 (V5, R5/R6)** | Partial | Key derivation uses V4 algorithm; needs SHA-256 based key derivation per ISO 32000-2 |
-
-**To implement AES-256:**
-```go
-// In key_derivation.go, add:
-func DeriveEncryptionKeyV5(password []byte, encrypt *PDFEncryption) ([]byte, error) {
-    // 1. Compute hash using SHA-256 (not MD5)
-    // 2. Use different algorithm per ISO 32000-2 section 7.6.4.3.3
-    // 3. Handle /UE and /OE entries for key unwrapping
-}
-```
+| Feature | File | Notes |
+|---------|------|-------|
+| **AES-256 (V5, R5/R6)** | `key_derivation.go` | SHA-256 based key derivation per ISO 32000-2 |
+| **Key unwrapping (/UE, /OE)** | `key_derivation.go` | AES-128 ECB mode for unwrapping encrypted keys |
 
 ### ❌ Not Implemented
 
@@ -77,6 +69,7 @@ func DeriveEncryptionKeyV5(password []byte, encrypt *PDFEncryption) ([]byte, err
 | **ASCIIHexDecode** | `filters.go` | Encode and decode hex text |
 | **ASCII85Decode** | `filters.go` | Encode and decode base-85 |
 | **RunLengthDecode** | `filters.go` | Simple RLE compression |
+| **DCTDecode** | `filters.go` | JPEG image pass-through filter |
 | **Incremental updates** | `incremental.go` | Parse PDFs with multiple revisions, /Prev chain |
 | **Byte-perfect parsing** | `document.go`, `document_parser.go` | Full PDF structure with raw bytes preserved |
 | **Unified API** | `api.go` | Clean `Open()`/`OpenWithOptions()` entry point with `PDF` type |
@@ -90,7 +83,6 @@ func DeriveEncryptionKeyV5(password []byte, encrypt *PDFEncryption) ([]byte, err
 | **CCITTFaxDecode** | Low | High | Fax image compression |
 | **JBIG2Decode** | Low | High | Bi-level image compression |
 | **JPXDecode** | Low | High | JPEG 2000 |
-| **DCTDecode** | Medium | Medium | JPEG (for image extraction) |
 
 ---
 
@@ -250,11 +242,11 @@ func (s *Subform) CreateInstances(data []map[string]string) []SubformInstance {
 ## Contribution Priority
 
 ### High Priority (Core Functionality)
-1. Incremental updates parsing
+1. Incremental updates parsing ✅
 2. Font embedding
-3. Image embedding  
-4. Page content streams
-5. AES-256 full support
+3. Image embedding ✅
+4. Page content streams ✅
+5. AES-256 full support ✅
 
 ### Medium Priority (Usability)
 1. Encryption on write

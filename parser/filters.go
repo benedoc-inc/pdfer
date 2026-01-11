@@ -9,7 +9,7 @@ import (
 )
 
 // DecodeFilter applies the appropriate filter to decode stream data
-// Supports: FlateDecode, ASCIIHexDecode, ASCII85Decode
+// Supports: FlateDecode, ASCIIHexDecode, ASCII85Decode, RunLengthDecode, DCTDecode
 func DecodeFilter(data []byte, filterName string) ([]byte, error) {
 	switch filterName {
 	case "/FlateDecode", "FlateDecode":
@@ -20,6 +20,8 @@ func DecodeFilter(data []byte, filterName string) ([]byte, error) {
 		return DecodeASCII85(data)
 	case "/RunLengthDecode", "RunLengthDecode":
 		return DecodeRunLength(data)
+	case "/DCTDecode", "DCTDecode":
+		return DecodeDCTDecode(data)
 	default:
 		return nil, fmt.Errorf("unsupported filter: %s", filterName)
 	}
@@ -319,4 +321,35 @@ func EncodeRunLength(data []byte) []byte {
 	result.WriteByte(128)
 
 	return result.Bytes()
+}
+
+// DecodeDCTDecode decodes DCTDecode filter data
+// DCTDecode is a pass-through filter for JPEG-compressed image data
+// The data is already in JPEG format, so we just return it as-is
+func DecodeDCTDecode(data []byte) ([]byte, error) {
+	// DCTDecode is a pass-through - JPEG data is already compressed
+	// Just validate it's valid JPEG by checking for JPEG markers
+	if len(data) < 2 {
+		return nil, fmt.Errorf("DCTDecode: data too short for JPEG")
+	}
+
+	// Check for JPEG SOI (Start of Image) marker: 0xFF 0xD8
+	if data[0] != 0xFF || data[1] != 0xD8 {
+		return nil, fmt.Errorf("DCTDecode: invalid JPEG header (expected 0xFF 0xD8, got 0x%02X 0x%02X)", data[0], data[1])
+	}
+
+	// Return data as-is (JPEG is already compressed)
+	return data, nil
+}
+
+// EncodeDCTDecode encodes data using DCTDecode filter
+// This is a pass-through - assumes data is already valid JPEG
+func EncodeDCTDecode(data []byte) ([]byte, error) {
+	// Validate JPEG header
+	if len(data) < 2 || data[0] != 0xFF || data[1] != 0xD8 {
+		return nil, fmt.Errorf("EncodeDCTDecode: data is not valid JPEG (missing SOI marker)")
+	}
+
+	// Return as-is (JPEG is already compressed)
+	return data, nil
 }

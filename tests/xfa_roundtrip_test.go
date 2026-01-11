@@ -12,24 +12,7 @@ import (
 	"github.com/benedoc-inc/pdfer/xfa"
 )
 
-// getTestResourcePath returns the path to a test resource file
-func getTestResourcePath(filename string) string {
-	// Try multiple possible locations
-	possiblePaths := []string{
-		filepath.Join("tests", "resources", filename),
-		filepath.Join("resources", filename),
-		filepath.Join("..", "tests", "resources", filename),
-		filepath.Join(".", "tests", "resources", filename),
-	}
-
-	for _, path := range possiblePaths {
-		if _, err := os.Stat(path); err == nil {
-			return path
-		}
-	}
-
-	return filepath.Join("tests", "resources", filename)
-}
+// getTestResourcePath is now in test_helpers.go
 
 // XFAData represents all XFA data extracted from a PDF
 type XFAData struct {

@@ -141,45 +141,70 @@ func ParseEncryptionDictionary(pdfBytes []byte, verbose bool) (*types.PDFEncrypt
 		// Default key length based on revision
 		if encrypt.R == 2 {
 			encrypt.KeyLength = 5 // 40 bits
+		} else if encrypt.R >= 5 {
+			encrypt.KeyLength = 32 // 256 bits for AES-256 (V5/R5/R6)
 		} else {
-			encrypt.KeyLength = 16 // 128 bits
+			encrypt.KeyLength = 16 // 128 bits for AES-128 (V4/R4)
 		}
 	}
 
-	// Parse /O (owner password hash) - binary data in parentheses
-	// Find /O in the dictionary, then extract the binary data between ( and )
-	oPattern := regexp.MustCompile(`/O\s*\(`)
-	oMatch := oPattern.FindStringIndex(dictContent)
-	if oMatch != nil {
-		oStartInDict := dictStart + oMatch[1] - 1 // Position of '('
-		parenStart := bytes.Index(pdfBytes[oStartInDict:], []byte("("))
-		if parenStart != -1 {
-			parenStart += oStartInDict + 1
-			parenEnd := bytes.Index(pdfBytes[parenStart:], []byte(")"))
-			if parenEnd != -1 {
-				encrypt.O = make([]byte, parenEnd)
-				copy(encrypt.O, pdfBytes[parenStart:parenStart+parenEnd])
-				if verbose {
-					log.Printf("Extracted O value: %d bytes", len(encrypt.O))
+	// Parse /O (owner password hash) - binary data in parentheses or hex string
+	// Try hex format first: /O <hex>
+	oHexPattern := regexp.MustCompile(`/O\s*<([0-9A-Fa-f]+)>`)
+	oHexMatch := oHexPattern.FindStringSubmatch(dictContent)
+	if oHexMatch != nil {
+		hexStr := oHexMatch[1]
+		encrypt.O = parseHexString(hexStr)
+		if verbose {
+			log.Printf("Extracted O value (hex): %d bytes", len(encrypt.O))
+		}
+	} else {
+		// Try binary format: /O (binary)
+		oPattern := regexp.MustCompile(`/O\s*\(`)
+		oMatch := oPattern.FindStringIndex(dictContent)
+		if oMatch != nil {
+			oStartInDict := dictStart + oMatch[1] - 1 // Position of '('
+			parenStart := bytes.Index(pdfBytes[oStartInDict:], []byte("("))
+			if parenStart != -1 {
+				parenStart += oStartInDict + 1
+				parenEnd := bytes.Index(pdfBytes[parenStart:], []byte(")"))
+				if parenEnd != -1 {
+					encrypt.O = make([]byte, parenEnd)
+					copy(encrypt.O, pdfBytes[parenStart:parenStart+parenEnd])
+					if verbose {
+						log.Printf("Extracted O value (binary): %d bytes", len(encrypt.O))
+					}
 				}
 			}
 		}
 	}
 
-	// Parse /U (user password hash) - binary data in parentheses
-	uPattern := regexp.MustCompile(`/U\s*\(`)
-	uMatch := uPattern.FindStringIndex(dictContent)
-	if uMatch != nil {
-		uStartInDict := dictStart + uMatch[1] - 1 // Position of '('
-		parenStart := bytes.Index(pdfBytes[uStartInDict:], []byte("("))
-		if parenStart != -1 {
-			parenStart += uStartInDict + 1
-			parenEnd := bytes.Index(pdfBytes[parenStart:], []byte(")"))
-			if parenEnd != -1 {
-				encrypt.U = make([]byte, parenEnd)
-				copy(encrypt.U, pdfBytes[parenStart:parenStart+parenEnd])
-				if verbose {
-					log.Printf("Extracted U value: %d bytes", len(encrypt.U))
+	// Parse /U (user password hash) - binary data in parentheses or hex string
+	// Try hex format first: /U <hex>
+	uHexPattern := regexp.MustCompile(`/U\s*<([0-9A-Fa-f]+)>`)
+	uHexMatch := uHexPattern.FindStringSubmatch(dictContent)
+	if uHexMatch != nil {
+		hexStr := uHexMatch[1]
+		encrypt.U = parseHexString(hexStr)
+		if verbose {
+			log.Printf("Extracted U value (hex): %d bytes", len(encrypt.U))
+		}
+	} else {
+		// Try binary format: /U (binary)
+		uPattern := regexp.MustCompile(`/U\s*\(`)
+		uMatch := uPattern.FindStringIndex(dictContent)
+		if uMatch != nil {
+			uStartInDict := dictStart + uMatch[1] - 1 // Position of '('
+			parenStart := bytes.Index(pdfBytes[uStartInDict:], []byte("("))
+			if parenStart != -1 {
+				parenStart += uStartInDict + 1
+				parenEnd := bytes.Index(pdfBytes[parenStart:], []byte(")"))
+				if parenEnd != -1 {
+					encrypt.U = make([]byte, parenEnd)
+					copy(encrypt.U, pdfBytes[parenStart:parenStart+parenEnd])
+					if verbose {
+						log.Printf("Extracted U value (binary): %d bytes", len(encrypt.U))
+					}
 				}
 			}
 		}
@@ -197,6 +222,67 @@ func ParseEncryptionDictionary(pdfBytes []byte, verbose bool) (*types.PDFEncrypt
 		encrypt.EncryptMetadata = false
 	} else {
 		encrypt.EncryptMetadata = true
+	}
+
+	// Parse /UE (encrypted user encryption key) - V5+ only
+	// Format: /UE <hex> or /UE (binary)
+	if encrypt.R >= 5 {
+		ueHexPattern := regexp.MustCompile(`/UE\s*<([0-9A-Fa-f]+)>`)
+		ueHexMatch := ueHexPattern.FindStringSubmatch(dictContent)
+		if ueHexMatch != nil {
+			hexStr := ueHexMatch[1]
+			encrypt.UE = parseHexString(hexStr)
+			if verbose {
+				log.Printf("Extracted UE value (hex): %d bytes", len(encrypt.UE))
+			}
+		} else {
+			uePattern := regexp.MustCompile(`/UE\s*\(`)
+			ueMatch := uePattern.FindStringIndex(dictContent)
+			if ueMatch != nil {
+				ueStartInDict := dictStart + ueMatch[1] - 1
+				parenStart := bytes.Index(pdfBytes[ueStartInDict:], []byte("("))
+				if parenStart != -1 {
+					parenStart += ueStartInDict + 1
+					parenEnd := bytes.Index(pdfBytes[parenStart:], []byte(")"))
+					if parenEnd != -1 {
+						encrypt.UE = make([]byte, parenEnd)
+						copy(encrypt.UE, pdfBytes[parenStart:parenStart+parenEnd])
+						if verbose {
+							log.Printf("Extracted UE value (binary): %d bytes", len(encrypt.UE))
+						}
+					}
+				}
+			}
+		}
+
+		// Parse /OE (encrypted owner encryption key) - V5+ only
+		oeHexPattern := regexp.MustCompile(`/OE\s*<([0-9A-Fa-f]+)>`)
+		oeHexMatch := oeHexPattern.FindStringSubmatch(dictContent)
+		if oeHexMatch != nil {
+			hexStr := oeHexMatch[1]
+			encrypt.OE = parseHexString(hexStr)
+			if verbose {
+				log.Printf("Extracted OE value (hex): %d bytes", len(encrypt.OE))
+			}
+		} else {
+			oePattern := regexp.MustCompile(`/OE\s*\(`)
+			oeMatch := oePattern.FindStringIndex(dictContent)
+			if oeMatch != nil {
+				oeStartInDict := dictStart + oeMatch[1] - 1
+				parenStart := bytes.Index(pdfBytes[oeStartInDict:], []byte("("))
+				if parenStart != -1 {
+					parenStart += oeStartInDict + 1
+					parenEnd := bytes.Index(pdfBytes[parenStart:], []byte(")"))
+					if parenEnd != -1 {
+						encrypt.OE = make([]byte, parenEnd)
+						copy(encrypt.OE, pdfBytes[oeStartInDict:oeStartInDict+parenEnd])
+						if verbose {
+							log.Printf("Extracted OE value (binary): %d bytes", len(encrypt.OE))
+						}
+					}
+				}
+			}
+		}
 	}
 
 	return encrypt, nil
