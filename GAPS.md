@@ -143,7 +143,9 @@ This document details the current implementation gaps in pdfer and provides guid
 |---------|------|-------|
 | **AcroForm parsing** | `acroform/parser.go` | Extract AcroForm structure and fields |
 | **Form field extraction** | `acroform/extract.go` | Extract field values and convert to FormSchema |
-| **Form field filling** | `acroform/fill.go` | Fill AcroForm fields with values (basic) |
+| **Form field filling** | `acroform/fill.go`, `acroform/replace.go` | Fill AcroForm fields with values (basic structure) |
+| **Form field creation** | `acroform/writer.go` | Create AcroForm fields programmatically |
+| **Form field validation** | `acroform/validation.go` | Validate field values against constraints |
 
 ### ❌ Not Implemented
 
