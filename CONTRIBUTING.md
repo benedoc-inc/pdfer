@@ -25,7 +25,18 @@ go test ./...                         # Run tests
 This project uses git hooks to maintain code quality:
 
 - **pre-commit**: Runs `gofmt` and `go vet` on staged files
-- **pre-push**: Runs the full test suite before pushing
+- **pre-push**: Runs the full test suite and enforces version bump requirement
+
+#### Version Bump Requirement
+
+**Pushing to `main` requires a version bump.** The pre-push hook will reject pushes to `main` if the version in `pdfer.go` hasn't changed from the remote version. This ensures every change to `main` has an associated version increment.
+
+To bump the version:
+1. Update the version string in `pdfer.go` (e.g., `0.6.0` → `0.7.0`)
+2. Commit the change: `git commit -m "chore: bump version to X.Y.Z"`
+3. Push normally - the hook will verify the version changed
+
+To override (not recommended): `git push --no-verify`
 
 The setup script configures these automatically. To skip hooks temporarily:
 ```bash

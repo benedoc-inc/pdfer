@@ -1,10 +1,64 @@
 #!/bin/bash
 # Pre-push hook for pdfer
 # Runs the full test suite before pushing
+# Also enforces version bump requirement for main branch
 
 set -e
 
 echo "Running pre-push checks..."
+
+# Check if pushing to main branch
+PUSHING_TO_MAIN=false
+while read local_ref local_sha remote_ref remote_sha; do
+    if [[ "$remote_ref" == "refs/heads/main" ]]; then
+        PUSHING_TO_MAIN=true
+        break
+    fi
+done
+
+if [ "$PUSHING_TO_MAIN" = true ]; then
+    echo "Pushing to main branch - checking version bump..."
+    
+    # Get current version from working directory
+    if [ ! -f "pdfer.go" ]; then
+        echo "❌ Error: pdfer.go not found"
+        exit 1
+    fi
+    
+    # Extract version using sed (more portable than grep -P)
+    CURRENT_VERSION=$(grep 'return "' pdfer.go | sed -n 's/.*return "\([^"]*\)".*/\1/p' | head -1)
+    if [ -z "$CURRENT_VERSION" ]; then
+        echo "❌ Error: Could not extract version from pdfer.go"
+        exit 1
+    fi
+    
+    # Get remote version (if remote exists)
+    REMOTE_VERSION=""
+    if git rev-parse --verify origin/main >/dev/null 2>&1; then
+        REMOTE_VERSION=$(git show origin/main:pdfer.go 2>/dev/null | grep 'return "' | sed -n 's/.*return "\([^"]*\)".*/\1/p' | head -1 || echo "")
+    fi
+    
+    # If remote version exists and matches current, reject push
+    if [ -n "$REMOTE_VERSION" ] && [ "$CURRENT_VERSION" = "$REMOTE_VERSION" ]; then
+        echo ""
+        echo "❌ ERROR: Version bump required!"
+        echo "   Current version: $CURRENT_VERSION"
+        echo "   Remote version:  $REMOTE_VERSION"
+        echo ""
+        echo "   Version numbers must be incremented before pushing to main."
+        echo "   Update the version in pdfer.go and commit the change."
+        echo ""
+        echo "   To override (not recommended), use: git push --no-verify"
+        echo ""
+        exit 1
+    fi
+    
+    if [ -n "$REMOTE_VERSION" ]; then
+        echo "✓ Version check passed: $REMOTE_VERSION -> $CURRENT_VERSION"
+    else
+        echo "✓ Version check passed: $CURRENT_VERSION (no remote version found)"
+    fi
+fi
 
 # Run all tests
 echo "Running tests..."
