@@ -85,10 +85,10 @@ See [GAPS.md](GAPS.md) for a comprehensive list of implementation gaps with:
 - Links to relevant specs
 
 ### High Priority
-1. Incremental updates parsing
-2. Font embedding (TrueType/OpenType subsetting)
-3. AES-256 full support
-4. Cross-reference stream writing
+1. Font embedding (TrueType/OpenType subsetting)
+2. AES-256 full support
+3. Cross-reference stream writing
+4. Linearized PDF support
 
 ### Good First Issues
 - Add LZWDecode filter

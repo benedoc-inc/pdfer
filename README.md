@@ -158,6 +158,30 @@ builder.FinalizePage(page)
 pdfBytes, _ := builder.Bytes()
 ```
 
+### Parse PDFs with Incremental Updates
+
+```go
+import "github.com/benedoc-inc/pdfer/parser"
+
+// Parse a PDF that has been edited multiple times
+pdfBytes, _ := os.ReadFile("edited.pdf")
+
+// Check how many revisions the PDF has
+revisions := parser.CountRevisions(pdfBytes)
+log.Printf("PDF has %d revisions", revisions)
+
+// Parse all revisions and merge object tables
+result, err := parser.ParseWithIncrementalUpdates(pdfBytes, false)
+if err != nil {
+    log.Fatal(err)
+}
+
+log.Printf("Found %d objects", len(result.Objects))
+
+// Extract a specific revision (e.g., the original before edits)
+originalPDF, _ := parser.ExtractRevision(pdfBytes, 1)
+```
+
 ### Build XFA PDF from XML Streams
 
 ```go
@@ -224,7 +248,7 @@ var data pdfer.FormData        // = types.FormData
 | PNG predictor filters | ✅ |
 | Image embedding (JPEG/PNG) | ✅ |
 | Page content streams | ✅ |
-| Incremental updates | ❌ |
+| Incremental updates | ✅ |
 | Linearized PDFs | ❌ |
 
 ### XFA Forms
@@ -246,7 +270,7 @@ var data pdfer.FormData        // = types.FormData
 See [GAPS.md](GAPS.md) for detailed implementation status and contribution opportunities.
 
 ### High Priority Gaps
-- [ ] **Incremental updates** - Parse PDFs with multiple revisions
+- [x] **Incremental updates** - Parse PDFs with multiple revisions ✅
 - [ ] **Font embedding** - TrueType/OpenType font subsetting
 - [x] **Image embedding** - JPEG, PNG image objects ✅
 - [x] **Page content streams** - Text and graphics operators ✅

@@ -7,7 +7,7 @@ This document details the current implementation gaps in pdfer and provides guid
 | Category | Implemented | Partial | Not Implemented |
 |----------|-------------|---------|-----------------|
 | Encryption | 3 | 1 | 1 |
-| PDF Parsing | 8 | 2 | 7 |
+| PDF Parsing | 9 | 2 | 6 |
 | PDF Writing | 8 | 2 | 6 |
 | XFA | 6 | 2 | 4 |
 
@@ -78,28 +78,25 @@ func DeriveEncryptionKeyV5(password []byte, encrypt *PDFEncryption) ([]byte, err
 | **ASCII85Decode** | `filters.go` | Encode and decode base-85 |
 | **RunLengthDecode** | `filters.go` | Simple RLE compression |
 
+### ✅ Newly Implemented
+
+| Feature | File | Notes |
+|---------|------|-------|
+| **ASCIIHexDecode** | `filters.go` | Encode and decode hex text |
+| **ASCII85Decode** | `filters.go` | Encode and decode base-85 |
+| **RunLengthDecode** | `filters.go` | Simple RLE compression |
+| **Incremental updates** | `incremental.go` | Parse PDFs with multiple revisions, /Prev chain |
+
 ### ❌ Not Implemented
 
 | Feature | Priority | Complexity | Notes |
 |---------|----------|------------|-------|
-| **Incremental updates** | High | Medium | Multiple xref sections, %%EOF markers |
 | **Linearized PDFs** | Medium | High | First-page optimization, hint tables |
 | **LZWDecode filter** | Low | Medium | Legacy compression, rarely used now |
 | **CCITTFaxDecode** | Low | High | Fax image compression |
 | **JBIG2Decode** | Low | High | Bi-level image compression |
 | **JPXDecode** | Low | High | JPEG 2000 |
 | **DCTDecode** | Medium | Medium | JPEG (for image extraction) |
-
-**To implement incremental updates:**
-```go
-// In parser.go, add:
-func ParseAllXRefSections(pdfBytes []byte) ([]*XRefSection, error) {
-    // 1. Find all %%EOF markers
-    // 2. Parse xref section before each
-    // 3. Chain /Prev references
-    // 4. Merge into final object map (later updates override earlier)
-}
-```
 
 ---
 
