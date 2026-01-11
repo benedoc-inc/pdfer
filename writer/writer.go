@@ -395,3 +395,23 @@ func (w *PDFWriter) Bytes() ([]byte, error) {
 	}
 	return buf.Bytes(), nil
 }
+
+// NextObjectNumber returns the next available object number
+func (w *PDFWriter) NextObjectNumber() int {
+	return w.nextObjNum
+}
+
+// GetObject returns an object's content (for reading existing objects)
+func (w *PDFWriter) GetObject(objNum int) ([]byte, error) {
+	obj, ok := w.objects[objNum]
+	if !ok {
+		return nil, fmt.Errorf("object %d not found", objNum)
+	}
+	if obj.Content != nil {
+		return obj.Content, nil
+	}
+	if obj.Stream != nil {
+		return obj.Stream, nil
+	}
+	return nil, fmt.Errorf("object %d has no content", objNum)
+}

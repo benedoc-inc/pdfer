@@ -218,3 +218,13 @@ func (b *SimplePDFBuilder) Bytes() ([]byte, error) {
 
 	return b.writer.Bytes()
 }
+
+// PagesObjNum returns the pages object number
+func (b *SimplePDFBuilder) PagesObjNum() int {
+	return b.pagesObjNum
+}
+
+// Pages returns the list of page object numbers
+func (b *SimplePDFBuilder) Pages() []int {
+	return b.pages
+}
