@@ -30,20 +30,20 @@ func extractStreamDataFromObject(objData []byte, objNum int, encryptInfo *types.
 		}
 		return objData, nil
 	}
-	
+
 	// Find endstream
 	endstreamIdx := bytes.Index(objData[streamIdx:], []byte("endstream"))
 	if endstreamIdx == -1 {
 		return nil, fmt.Errorf("endstream not found in object %d", objNum)
 	}
 	endstreamIdx += streamIdx
-	
+
 	// Get /Length from dictionary if available
 	dictEnd := streamIdx
 	dictStr := string(objData[:dictEnd])
 	lengthPattern := regexp.MustCompile(`/Length\s+(\d+)`)
 	lengthMatch := lengthPattern.FindStringSubmatch(dictStr)
-	
+
 	// Skip "stream" and EOL
 	dataStart := streamIdx + 6
 	if dataStart < len(objData) && objData[dataStart] == '\r' {
@@ -52,7 +52,7 @@ func extractStreamDataFromObject(objData []byte, objNum int, encryptInfo *types.
 	if dataStart < len(objData) && objData[dataStart] == '\n' {
 		dataStart++
 	}
-	
+
 	var streamData []byte
 	if lengthMatch != nil {
 		length, _ := strconv.Atoi(lengthMatch[1])
@@ -64,11 +64,11 @@ func extractStreamDataFromObject(objData []byte, objNum int, encryptInfo *types.
 	} else {
 		streamData = objData[dataStart:endstreamIdx]
 	}
-	
+
 	// Check if FlateDecode filter is present
-	if bytes.Contains(objData[:streamIdx], []byte("/FlateDecode")) || 
-	   bytes.Contains(objData[:streamIdx], []byte("/Filter/FlateDecode")) ||
-	   bytes.Contains(objData[:streamIdx], []byte("/Filter /FlateDecode")) {
+	if bytes.Contains(objData[:streamIdx], []byte("/FlateDecode")) ||
+		bytes.Contains(objData[:streamIdx], []byte("/Filter/FlateDecode")) ||
+		bytes.Contains(objData[:streamIdx], []byte("/Filter /FlateDecode")) {
 		// Decompress
 		zlibReader, err := zlib.NewReader(bytes.NewReader(streamData))
 		if err == nil {
@@ -90,7 +90,7 @@ func extractStreamDataFromObject(objData []byte, objNum int, encryptInfo *types.
 			log.Printf("Decompression failed for object %d, returning raw stream data", objNum)
 		}
 	}
-	
+
 	return streamData, nil
 }
 
@@ -203,7 +203,7 @@ func ExtractAllXFAStreams(pdfBytes []byte, encryptInfo *types.PDFEncryption, ver
 	}
 
 	if verbose {
-		log.Printf("Found XFA array content: %s", xfaArrayContent[:types.Min(200, len(xfaArrayContent))])
+		log.Printf("Found XFA array content: %s", xfaArrayContent[:min(200, len(xfaArrayContent))])
 	}
 
 	// Parse XFA array: format is (name) N M R (name) N M R ...
@@ -246,7 +246,7 @@ func ExtractAllXFAStreams(pdfBytes []byte, encryptInfo *types.PDFEncryption, ver
 				continue
 			}
 		}
-		
+
 		// Extract stream data from the object
 		streamData, err := extractStreamDataFromObject(objData, objNum, encryptInfo, verbose)
 		if err != nil {
@@ -372,7 +372,7 @@ func BuildPDFFromXFAStreams(streams *XFAStreams, verbose bool) ([]byte, error) {
 
 	// Collect all non-nil streams
 	var xfaStreams []writer.XFAStreamData
-	
+
 	if streams.Template != nil && len(streams.Template.Data) > 0 {
 		xfaStreams = append(xfaStreams, writer.XFAStreamData{
 			Name:     "template",

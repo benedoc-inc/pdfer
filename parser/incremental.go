@@ -7,12 +7,10 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
-
-	"github.com/benedoc-inc/pdfer/types"
 )
 
-// XRefSection represents a single cross-reference section from a PDF
-type XRefSection struct {
+// xrefSection represents a single cross-reference section from a PDF
+type xrefSection struct {
 	StartXRef int64                     // Byte offset where this xref section starts
 	Objects   map[int]int64             // Object number -> byte offset (Type 1 entries)
 	Streams   map[int]ObjectStreamEntry // Object number -> object stream info (Type 2 entries)
@@ -22,28 +20,28 @@ type XRefSection struct {
 	Size      int                       // /Size from trailer
 }
 
-// IncrementalParser handles PDFs with multiple revisions (incremental updates)
-type IncrementalParser struct {
+// incrementalParser handles PDFs with multiple revisions (incremental updates)
+type incrementalParser struct {
 	pdfBytes      []byte
-	sections      []*XRefSection            // Ordered from oldest to newest
+	sections      []*xrefSection            // Ordered from oldest to newest
 	mergedObjs    map[int]int64             // Final merged object map
 	mergedStreams map[int]ObjectStreamEntry // Final merged object stream entries
 	verbose       bool
 }
 
-// NewIncrementalParser creates a new parser for handling incremental updates
-func NewIncrementalParser(pdfBytes []byte, verbose bool) *IncrementalParser {
-	return &IncrementalParser{
+// newincrementalParser creates a new parser for handling incremental updates
+func newIncrementalParser(pdfBytes []byte, verbose bool) *incrementalParser {
+	return &incrementalParser{
 		pdfBytes:      pdfBytes,
-		sections:      make([]*XRefSection, 0),
+		sections:      make([]*xrefSection, 0),
 		mergedObjs:    make(map[int]int64),
 		mergedStreams: make(map[int]ObjectStreamEntry),
 		verbose:       verbose,
 	}
 }
 
-// Parse parses all xref sections in the PDF and merges them
-func (p *IncrementalParser) Parse() error {
+// parse parses all xref sections in the PDF and merges them
+func (p *incrementalParser) parse() error {
 	// Strategy 1: Find startxref before last %%EOF and follow /Prev chain
 	// This is the standard approach per PDF spec
 
@@ -64,31 +62,31 @@ func (p *IncrementalParser) Parse() error {
 	return nil
 }
 
-// GetObjectMap returns the merged object map
-func (p *IncrementalParser) GetObjectMap() map[int]int64 {
+// getObjectMap returns the merged object map
+func (p *incrementalParser) getObjectMap() map[int]int64 {
 	return p.mergedObjs
 }
 
-// GetObjectStreamMap returns the merged object stream entries
-func (p *IncrementalParser) GetObjectStreamMap() map[int]ObjectStreamEntry {
+// getObjectStreamMap returns the merged object stream entries
+func (p *incrementalParser) getObjectStreamMap() map[int]ObjectStreamEntry {
 	return p.mergedStreams
 }
 
-// GetFullXRefResult returns both regular objects and object stream entries
-func (p *IncrementalParser) GetFullXRefResult() *XRefResult {
+// getFullXRefResult returns both regular objects and object stream entries
+func (p *incrementalParser) getFullXRefResult() *XRefResult {
 	return &XRefResult{
 		Objects:       p.mergedObjs,
 		ObjectStreams: p.mergedStreams,
 	}
 }
 
-// GetSections returns all parsed xref sections (oldest first)
-func (p *IncrementalParser) GetSections() []*XRefSection {
+// getSections returns all parsed xref sections (oldest first)
+func (p *incrementalParser) getSections() []*xrefSection {
 	return p.sections
 }
 
 // findLastStartXRef finds the startxref value before the last %%EOF
-func (p *IncrementalParser) findLastStartXRef() (int64, error) {
+func (p *incrementalParser) findLastStartXRef() (int64, error) {
 	// Search backwards from end for %%EOF
 	pdfStr := string(p.pdfBytes)
 
@@ -130,7 +128,7 @@ func (p *IncrementalParser) findLastStartXRef() (int64, error) {
 }
 
 // parseXRefChain parses xref sections following the /Prev chain
-func (p *IncrementalParser) parseXRefChain(startXRef int64) error {
+func (p *incrementalParser) parseXRefChain(startXRef int64) error {
 	visited := make(map[int64]bool) // Prevent infinite loops
 	offsets := []int64{startXRef}
 
@@ -164,7 +162,7 @@ func (p *IncrementalParser) parseXRefChain(startXRef int64) error {
 
 	// Parse each section
 	for _, offset := range offsets {
-		section, err := p.parseXRefSection(offset)
+		section, err := p.parsexrefSection(offset)
 		if err != nil {
 			if p.verbose {
 				fmt.Printf("Warning: failed to parse xref at offset %d: %v\n", offset, err)
@@ -182,7 +180,7 @@ func (p *IncrementalParser) parseXRefChain(startXRef int64) error {
 }
 
 // findPrevOffset finds the /Prev value in the trailer at the given xref offset
-func (p *IncrementalParser) findPrevOffset(startXRef int64) (int64, error) {
+func (p *incrementalParser) findPrevOffset(startXRef int64) (int64, error) {
 	if startXRef >= int64(len(p.pdfBytes)) {
 		return 0, fmt.Errorf("startXRef out of bounds")
 	}
@@ -237,7 +235,7 @@ func (p *IncrementalParser) findPrevOffset(startXRef int64) (int64, error) {
 	// Find the dictionary end (before "stream" keyword)
 	streamIdx := bytes.Index(section, []byte("stream"))
 	if streamIdx == -1 {
-		streamIdx = types.Min(2000, len(section))
+		streamIdx = min(2000, len(section))
 	}
 
 	dictSection := string(section[:streamIdx])
@@ -250,41 +248,41 @@ func (p *IncrementalParser) findPrevOffset(startXRef int64) (int64, error) {
 	return strconv.ParseInt(match[1], 10, 64)
 }
 
-// parseXRefSection parses a single xref section at the given offset
-func (p *IncrementalParser) parseXRefSection(startXRef int64) (*XRefSection, error) {
+// parsexrefSection parses a single xref section at the given offset
+func (p *incrementalParser) parsexrefSection(startXRef int64) (*xrefSection, error) {
 	if startXRef >= int64(len(p.pdfBytes)) {
 		return nil, fmt.Errorf("startXRef out of bounds: %d >= %d", startXRef, len(p.pdfBytes))
 	}
 
 	xrefData := p.pdfBytes[startXRef:]
-	xrefStr := string(xrefData[:types.Min(5000, len(xrefData))])
+	xrefStr := string(xrefData[:min(5000, len(xrefData))])
 
 	// Determine type and parse
 	if bytes.HasPrefix(xrefData, []byte("xref")) {
 		// Traditional xref table
-		return p.parseTraditionalXRefSection(startXRef)
+		return p.parseTraditionalxrefSection(startXRef)
 	}
 
 	// Cross-reference stream
 	// Check for object header pattern
 	if regexp.MustCompile(`^\d+\s+\d+\s+obj`).MatchString(xrefStr) ||
-		bytes.Contains(xrefData[:types.Min(100, len(xrefData))], []byte("obj")) {
+		bytes.Contains(xrefData[:min(100, len(xrefData))], []byte("obj")) {
 		return p.parseXRefStreamSection(startXRef)
 	}
 
 	return nil, fmt.Errorf("unrecognized xref format at offset %d", startXRef)
 }
 
-// parseTraditionalXRefSection parses a traditional xref table
-func (p *IncrementalParser) parseTraditionalXRefSection(startXRef int64) (*XRefSection, error) {
-	section := &XRefSection{
+// parseTraditionalxrefSection parses a traditional xref table
+func (p *incrementalParser) parseTraditionalxrefSection(startXRef int64) (*xrefSection, error) {
+	section := &xrefSection{
 		StartXRef: startXRef,
 		Objects:   make(map[int]int64),
 		Streams:   make(map[int]ObjectStreamEntry),
 	}
 
 	xrefData := p.pdfBytes[startXRef:]
-	xrefStr := string(xrefData[:types.Min(10000, len(xrefData))])
+	xrefStr := string(xrefData[:min(10000, len(xrefData))])
 
 	// Parse xref entries
 	lines := regexp.MustCompile(`\r?\n`).Split(xrefStr, -1)
@@ -387,8 +385,8 @@ func (p *IncrementalParser) parseTraditionalXRefSection(startXRef int64) (*XRefS
 }
 
 // parseXRefStreamSection parses a cross-reference stream
-func (p *IncrementalParser) parseXRefStreamSection(startXRef int64) (*XRefSection, error) {
-	section := &XRefSection{
+func (p *incrementalParser) parseXRefStreamSection(startXRef int64) (*xrefSection, error) {
+	section := &xrefSection{
 		StartXRef: startXRef,
 		Objects:   make(map[int]int64),
 		Streams:   make(map[int]ObjectStreamEntry),
@@ -405,7 +403,7 @@ func (p *IncrementalParser) parseXRefStreamSection(startXRef int64) (*XRefSectio
 
 	// Extract trailer info from stream dictionary
 	xrefData := p.pdfBytes[startXRef:]
-	xrefStr := string(xrefData[:types.Min(2000, len(xrefData))])
+	xrefStr := string(xrefData[:min(2000, len(xrefData))])
 
 	if match := regexp.MustCompile(`/Root\s+(\d+\s+\d+\s+R)`).FindStringSubmatch(xrefStr); match != nil {
 		section.Root = match[1]
@@ -429,7 +427,7 @@ func (p *IncrementalParser) parseXRefStreamSection(startXRef int64) (*XRefSectio
 }
 
 // mergeSections merges all xref sections (older entries first, newer override)
-func (p *IncrementalParser) mergeSections() {
+func (p *incrementalParser) mergeSections() {
 	// sections are already ordered oldest to newest
 	for _, section := range p.sections {
 		// Regular objects
@@ -471,26 +469,26 @@ func CountRevisions(pdfBytes []byte) int {
 	return len(FindAllEOFMarkers(pdfBytes))
 }
 
-// ParseWithIncrementalUpdates parses a PDF handling incremental updates
+// parseWithIncrementalUpdates parses a PDF handling incremental updates
 // Returns the merged object map with all revisions combined
-func ParseWithIncrementalUpdates(pdfBytes []byte, verbose bool) (*XRefResult, error) {
-	parser := NewIncrementalParser(pdfBytes, verbose)
-	if err := parser.Parse(); err != nil {
+func parseWithIncrementalUpdates(pdfBytes []byte, verbose bool) (*XRefResult, error) {
+	parser := newIncrementalParser(pdfBytes, verbose)
+	if err := parser.parse(); err != nil {
 		return nil, err
 	}
-	return parser.GetFullXRefResult(), nil
+	return parser.getFullXRefResult(), nil
 }
 
-// ParseCrossReferenceTableIncremental is a drop-in replacement for ParseCrossReferenceTable
+// parseCrossReferenceTableIncremental is a drop-in replacement for ParseCrossReferenceTable
 // that handles incremental updates
-func ParseCrossReferenceTableIncremental(pdfBytes []byte, verbose bool) (map[int]int64, error) {
-	result, err := ParseWithIncrementalUpdates(pdfBytes, verbose)
+func parseCrossReferenceTableIncremental(pdfBytes []byte, verbose bool) (map[int]int64, error) {
+	result, err := parseWithIncrementalUpdates(pdfBytes, verbose)
 	if err != nil {
 		return nil, err
 	}
 
 	// Merge object streams into main map for backwards compatibility
-	// Note: This loses the object stream information, use ParseWithIncrementalUpdates for full info
+	// Note: This loses the object stream information, use parseWithIncrementalUpdates for full info
 	merged := make(map[int]int64)
 	for k, v := range result.Objects {
 		merged[k] = v

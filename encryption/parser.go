@@ -73,7 +73,7 @@ func ParseEncryptionDictionary(pdfBytes []byte, verbose bool) (*types.PDFEncrypt
 	dictContent := pdfStr[dictStart:dictEnd]
 
 	if verbose {
-		log.Printf("Encrypt dictionary content (first 200 chars): %s", dictContent[:types.Min(200, len(dictContent))])
+		log.Printf("Encrypt dictionary content (first 200 chars): %s", dictContent[:min(200, len(dictContent))])
 	}
 
 	encrypt := &types.PDFEncryption{}
@@ -93,8 +93,8 @@ func ParseEncryptionDictionary(pdfBytes []byte, verbose bool) (*types.PDFEncrypt
 		matchPos := strings.Index(dictContent, match[0])
 		beforeMatch := dictContent[:matchPos]
 		// If we see /CF or /StdCF before this, it's nested - skip
-		if !strings.Contains(beforeMatch[types.Max(0, len(beforeMatch)-50):], "/CF") &&
-			!strings.Contains(beforeMatch[types.Max(0, len(beforeMatch)-50):], "/StdCF") {
+		if !strings.Contains(beforeMatch[max(0, len(beforeMatch)-50):], "/CF") &&
+			!strings.Contains(beforeMatch[max(0, len(beforeMatch)-50):], "/StdCF") {
 			encrypt.V, _ = strconv.Atoi(match[1])
 			break
 		}
@@ -106,8 +106,8 @@ func ParseEncryptionDictionary(pdfBytes []byte, verbose bool) (*types.PDFEncrypt
 	for _, match := range matches {
 		matchPos := strings.Index(dictContent, match[0])
 		beforeMatch := dictContent[:matchPos]
-		if !strings.Contains(beforeMatch[types.Max(0, len(beforeMatch)-50):], "/CF") &&
-			!strings.Contains(beforeMatch[types.Max(0, len(beforeMatch)-50):], "/StdCF") {
+		if !strings.Contains(beforeMatch[max(0, len(beforeMatch)-50):], "/CF") &&
+			!strings.Contains(beforeMatch[max(0, len(beforeMatch)-50):], "/StdCF") {
 			encrypt.R, _ = strconv.Atoi(match[1])
 			break
 		}
@@ -121,7 +121,7 @@ func ParseEncryptionDictionary(pdfBytes []byte, verbose bool) (*types.PDFEncrypt
 		matchPos := strings.Index(dictContent, match[0])
 		beforeMatch := dictContent[:matchPos]
 		// Top-level /Length should not be inside /CF
-		if !strings.Contains(beforeMatch[types.Max(0, len(beforeMatch)-50):], "/CF") {
+		if !strings.Contains(beforeMatch[max(0, len(beforeMatch)-50):], "/CF") {
 			keyBits, _ := strconv.Atoi(match[1])
 			if keyBits > 0 {
 				encrypt.KeyLength = keyBits / 8

@@ -32,8 +32,8 @@ func findObjectBoundaries(pdfBytes []byte, objIndex int, objNum int, objName str
 
 	// Search in a window around the given index first
 	if objIndex >= 0 && objIndex < len(pdfBytes) {
-		searchStart := types.Max(0, objIndex-2000)
-		searchEnd := types.Min(len(pdfBytes), objIndex+2000)
+		searchStart := max(0, objIndex-2000)
+		searchEnd := min(len(pdfBytes), objIndex+2000)
 		searchArea := pdfBytes[searchStart:searchEnd]
 
 		patternPos := bytes.Index(searchArea, objPattern)
@@ -63,8 +63,8 @@ func findObjectBoundaries(pdfBytes []byte, objIndex int, objNum int, objName str
 			// Try searching for just the number "212" followed by whitespace and "0" near the offset
 			// This handles cases where the object header format is slightly different
 			numStr := fmt.Sprintf("%d", objNum)
-			searchStart := types.Max(0, objIndex-1000)
-			searchEnd := types.Min(len(pdfBytes), objIndex+1000)
+			searchStart := max(0, objIndex-1000)
+			searchEnd := min(len(pdfBytes), objIndex+1000)
 			searchArea := pdfBytes[searchStart:searchEnd]
 
 			// Look for number pattern
@@ -94,8 +94,8 @@ func findObjectBoundaries(pdfBytes []byte, objIndex int, objNum int, objName str
 	// If still not found, try searching for "obj" keyword near the offset and verify object number
 	if objKeywordPos == -1 {
 		searchWindow := 5000 // Very large window for encrypted PDFs
-		searchStart := types.Max(0, objIndex-searchWindow)
-		searchEnd := types.Min(len(pdfBytes), objIndex+searchWindow)
+		searchStart := max(0, objIndex-searchWindow)
+		searchEnd := min(len(pdfBytes), objIndex+searchWindow)
 		searchArea := pdfBytes[searchStart:searchEnd]
 
 		// Search for "obj" keyword (not encrypted)
@@ -133,9 +133,9 @@ func findObjectBoundaries(pdfBytes []byte, objIndex int, objNum int, objName str
 		// Try starting slightly before the offset (in case there's a short header)
 		// Then decrypt a larger chunk to ensure we get the full object
 		searchBack := 200 // Search backwards for potential header
-		objStart = types.Max(0, objIndex-searchBack)
+		objStart = max(0, objIndex-searchBack)
 		estimatedSize := 10000 // Larger estimate for AcroForm with XFA
-		objEnd = types.Min(len(pdfBytes), objIndex+estimatedSize)
+		objEnd = min(len(pdfBytes), objIndex+estimatedSize)
 		objContent = pdfBytes[objStart:objEnd]
 
 		if verbose {
@@ -293,7 +293,7 @@ func findAndDecryptAcroForm(pdfBytes []byte, acroFormObjNum int, encryptInfo *ty
 					// Try decrypting from the xref offset position
 					// decryptInChunks will try different alignments, but we should start from xref position
 					decryptStart := relativeXrefOffset
-					decryptLen := types.Min(10000, len(objContent)-decryptStart)
+					decryptLen := min(10000, len(objContent)-decryptStart)
 					// Round down to multiple of 16 for AES
 					decryptLen = (decryptLen / 16) * 16
 					if decryptLen >= 16 {
@@ -309,23 +309,23 @@ func findAndDecryptAcroForm(pdfBytes []byte, acroFormObjNum int, encryptInfo *ty
 							decryptedContent = decryptedData
 							if verbose {
 								log.Printf("Successfully decrypted AcroForm (no header/endobj): %d bytes", len(decryptedContent))
-								
+
 								// Output full structure for debugging
 								log.Printf("=== DECRYPTED ACROFORM STRUCTURE ===")
 								log.Printf("Content length: %d bytes", len(decryptedContent))
-								
+
 								// Hex dump of first 2000 bytes
-								previewLen := types.Min(2000, len(decryptedContent))
+								previewLen := min(2000, len(decryptedContent))
 								log.Printf("First %d bytes (hex dump):", previewLen)
 								for i := 0; i < previewLen; i += 16 {
-									end := types.Min(i+16, previewLen)
+									end := min(i+16, previewLen)
 									hexPart := fmt.Sprintf("%04x: ", i)
 									for j := i; j < end; j++ {
 										hexPart += fmt.Sprintf("%02x ", decryptedContent[j])
 									}
 									log.Printf("%s", hexPart)
 								}
-								
+
 								// ASCII dump
 								log.Printf("First %d bytes (ASCII, non-printable as .):", previewLen)
 								asciiLine := ""
@@ -344,14 +344,14 @@ func findAndDecryptAcroForm(pdfBytes []byte, acroFormObjNum int, encryptInfo *ty
 								if asciiLine != "" {
 									log.Printf("%s", asciiLine)
 								}
-								
+
 								// Check for PDF markers
 								if bytes.Contains(decryptedContent, []byte("<<")) {
 									dictStart := bytes.Index(decryptedContent, []byte("<<"))
 									log.Printf("Found '<<' at offset %d", dictStart)
 									// Show context around dictionary start
-									ctxStart := types.Max(0, dictStart-50)
-									ctxEnd := types.Min(len(decryptedContent), dictStart+200)
+									ctxStart := max(0, dictStart-50)
+									ctxEnd := min(len(decryptedContent), dictStart+200)
 									log.Printf("Context around '<<' (offset %d-%d): %q", ctxStart, ctxEnd, string(decryptedContent[ctxStart:ctxEnd]))
 								}
 								if bytes.Contains(decryptedContent, []byte("/XFA")) {
@@ -438,7 +438,7 @@ func decryptInChunks(encryptedData []byte, objNum, genNum int, encryptInfo *type
 		// Try different start offsets to find correct alignment
 		// Encrypted data should be a multiple of 16 bytes (including IV)
 		// Try up to 200 bytes of alignment (UniPDF tries many offsets)
-		maxOffset := types.Min(200, len(encryptedData))
+		maxOffset := min(200, len(encryptedData))
 		for offset := 0; offset < maxOffset; offset++ {
 			testStart := offset
 			testEnd := len(encryptedData)
@@ -492,8 +492,8 @@ func decryptInChunks(encryptedData []byte, objNum, genNum int, encryptInfo *type
 							log.Printf("Decrypted preview: %q", decrypted)
 						} else if len(decrypted) > 200 {
 							// Show a sample from the middle where dictionary might be
-							midStart := types.Max(0, len(decrypted)/2-100)
-							midEnd := types.Min(len(decrypted), midStart+200)
+							midStart := max(0, len(decrypted)/2-100)
+							midEnd := min(len(decrypted), midStart+200)
 							log.Printf("Decrypted preview (middle section): %q", decrypted[midStart:midEnd])
 						}
 					}
@@ -508,7 +508,7 @@ func decryptInChunks(encryptedData []byte, objNum, genNum int, encryptInfo *type
 				} else if verbose && offset == 0 {
 					// Log first attempt to see what we're getting
 					log.Printf("Decryption at offset %d succeeded but no PDF markers found, length=%d, preview: %q",
-						offset, len(decrypted), decrypted[:types.Min(100, len(decrypted))])
+						offset, len(decrypted), decrypted[:min(100, len(decrypted))])
 				}
 			}
 		}
@@ -559,7 +559,7 @@ func findXFAArrayContent(decryptedContent []byte, verbose bool) (string, error) 
 			if verbose {
 				log.Printf("Found dictionary start at offset %d, end at %d (length: %d bytes)", dictStart, dictEnd, len(dictContent))
 				// Show the actual dictionary content to verify it's valid
-				previewLen := types.Min(200, len(dictContent))
+				previewLen := min(200, len(dictContent))
 				log.Printf("Dictionary content preview: %q", dictContent[:previewLen])
 			}
 
@@ -618,11 +618,11 @@ func findXFAArrayContent(decryptedContent []byte, verbose bool) (string, error) 
 			log.Printf("XFA not found in decrypted content (length: %d bytes)", len(decryptedContent))
 			// Show content around dictionary start if found
 			if dictStart != -1 {
-				previewStart := types.Max(0, dictStart-50)
-				previewEnd := types.Min(len(decryptedContent), dictStart+500)
+				previewStart := max(0, dictStart-50)
+				previewEnd := min(len(decryptedContent), dictStart+500)
 				log.Printf("Content around dictionary start (offset %d): %q", dictStart, decryptedContent[previewStart:previewEnd])
 			} else {
-				log.Printf("Decrypted content preview (first 500 bytes): %q", decryptedContent[:types.Min(500, len(decryptedContent))])
+				log.Printf("Decrypted content preview (first 500 bytes): %q", decryptedContent[:min(500, len(decryptedContent))])
 			}
 		}
 		return "", fmt.Errorf("XFA entry not found in AcroForm")
@@ -665,11 +665,11 @@ func extractGenerationNumber(objContent []byte, objNum int) int {
 	// Find object header pattern: "objNum genNum obj"
 	// Try multiple patterns to handle different whitespace
 	patterns := []*regexp.Regexp{
-		regexp.MustCompile(fmt.Sprintf(`%d\s+(\d+)\s+obj`, objNum)),           // Standard: "123 0 obj"
-		regexp.MustCompile(fmt.Sprintf(`%d\s+(\d+)\s+obj`, objNum)),           // With tabs
-		regexp.MustCompile(fmt.Sprintf(`%d\s*(\d+)\s*obj`, objNum)),           // Flexible whitespace
+		regexp.MustCompile(fmt.Sprintf(`%d\s+(\d+)\s+obj`, objNum)), // Standard: "123 0 obj"
+		regexp.MustCompile(fmt.Sprintf(`%d\s+(\d+)\s+obj`, objNum)), // With tabs
+		regexp.MustCompile(fmt.Sprintf(`%d\s*(\d+)\s*obj`, objNum)), // Flexible whitespace
 	}
-	
+
 	for _, pattern := range patterns {
 		match := pattern.FindSubmatch(objContent)
 		if match != nil && len(match) > 1 {
@@ -679,12 +679,12 @@ func extractGenerationNumber(objContent []byte, objNum int) int {
 			}
 		}
 	}
-	
+
 	// Also try searching in a larger window if objContent is large
 	// Sometimes the header might be further in if there's padding
 	if len(objContent) > 1000 {
 		// Search first 500 bytes more carefully
-		searchArea := objContent[:types.Min(500, len(objContent))]
+		searchArea := objContent[:min(500, len(objContent))]
 		for _, pattern := range patterns {
 			match := pattern.FindSubmatch(searchArea)
 			if match != nil && len(match) > 1 {
@@ -695,7 +695,7 @@ func extractGenerationNumber(objContent []byte, objNum int) int {
 			}
 		}
 	}
-	
+
 	// Default to 0 if not found (most PDF objects are generation 0)
 	return 0
 }
@@ -746,7 +746,7 @@ func extractStreamFromPDF(pdfBytes []byte, streamObjNum int, encryptInfo *types.
 	dictContent := string(objContent[dataStart:streamKeywordPos])
 	lengthPattern := regexp.MustCompile(`/Length\s+(\d+)`)
 	lengthMatch := lengthPattern.FindStringSubmatch(dictContent)
-	
+
 	var streamLength int
 	if lengthMatch != nil {
 		streamLength, _ = strconv.Atoi(lengthMatch[1])
@@ -755,7 +755,7 @@ func extractStreamFromPDF(pdfBytes []byte, streamObjNum int, encryptInfo *types.
 	// Extract stream data
 	// Skip "stream" keyword (6 bytes) and EOL
 	streamDataStart := streamKeywordPos + 6
-	
+
 	// Skip exactly one EOL marker per PDF spec
 	if streamDataStart < len(objContent) && objContent[streamDataStart] == '\r' {
 		streamDataStart++
@@ -763,7 +763,7 @@ func extractStreamFromPDF(pdfBytes []byte, streamObjNum int, encryptInfo *types.
 	if streamDataStart < len(objContent) && objContent[streamDataStart] == '\n' {
 		streamDataStart++
 	}
-	
+
 	// Use /Length if available, otherwise find endstream
 	var streamContent []byte
 	if streamLength > 0 && streamDataStart+streamLength <= len(objContent) {
@@ -776,7 +776,7 @@ func extractStreamFromPDF(pdfBytes []byte, streamObjNum int, encryptInfo *types.
 		}
 		streamContent = objContent[streamDataStart : streamDataStart+endstreamPos]
 	}
-	
+
 	streamDataEnd := streamDataStart + len(streamContent)
 
 	if verbose {

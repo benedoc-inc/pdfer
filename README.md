@@ -8,6 +8,7 @@ A pure Go library for PDF processing with comprehensive XFA (XML Forms Architect
 ## Features
 
 - **Pure Go** - No CGO, no external dependencies
+- **Unified API** - Clean `parser.Open()` entry point for all PDF operations
 - **PDF Decryption** - RC4 (40/128-bit) and AES (128/256-bit)
 - **XFA Processing** - Extract, parse, modify, and rebuild XFA forms
 - **PDF Generation** - Create PDFs from scratch with text, graphics, and images
@@ -16,6 +17,8 @@ A pure Go library for PDF processing with comprehensive XFA (XML Forms Architect
 - **Object Streams** - Full support for compressed object storage
 - **Cross-Reference Streams** - Parse modern PDF xref streams with predictor filters
 - **Stream Filters** - FlateDecode, ASCIIHexDecode, ASCII85Decode, RunLengthDecode
+- **Incremental Updates** - Parse PDFs with multiple revisions, follow /Prev chains
+- **Byte-Perfect Parsing** - Preserve exact bytes for reconstruction of original PDF
 
 ## Installation
 
@@ -24,6 +27,61 @@ go get github.com/benedoc-inc/pdfer
 ```
 
 ## Quick Start
+
+### Open and Parse a PDF (Unified API)
+
+```go
+import "github.com/benedoc-inc/pdfer/parser"
+
+// Open a PDF
+pdf, err := parser.Open(pdfBytes)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Get basic info
+log.Printf("Version: %s", pdf.Version())
+log.Printf("Objects: %d", pdf.ObjectCount())
+log.Printf("Revisions: %d", pdf.RevisionCount())
+
+// Get an object
+obj, err := pdf.GetObject(1)
+if err != nil {
+    log.Fatal(err)
+}
+log.Printf("Object 1: %s", string(obj))
+
+// List all objects
+for _, num := range pdf.Objects() {
+    log.Printf("Object %d exists", num)
+}
+```
+
+### Open an Encrypted PDF
+
+```go
+pdf, err := parser.OpenWithOptions(pdfBytes, parser.ParseOptions{
+    Password: []byte("secret"),
+    Verbose:  true,
+})
+```
+
+### Byte-Perfect PDF Parsing
+
+```go
+// Parse preserving exact bytes for reconstruction
+pdf, err := parser.OpenWithOptions(pdfBytes, parser.ParseOptions{
+    BytePerfect: true,
+})
+
+// Reconstruct identical PDF
+reconstructed := pdf.Bytes()
+// bytes.Equal(reconstructed, pdfBytes) == true
+
+// Access raw object data with byte offsets
+rawObj, _ := pdf.GetRawObject(1)
+log.Printf("Object at offset %d, raw bytes: %d", rawObj.Offset, len(rawObj.RawBytes))
+```
 
 ### Extract XFA from an Encrypted PDF
 
@@ -180,6 +238,36 @@ log.Printf("Found %d objects", len(result.Objects))
 
 // Extract a specific revision (e.g., the original before edits)
 originalPDF, _ := parser.ExtractRevision(pdfBytes, 1)
+```
+
+### Byte-Perfect PDF Parsing
+
+```go
+import "github.com/benedoc-inc/pdfer/parser"
+
+// Parse PDF with full byte preservation
+pdfBytes, _ := os.ReadFile("document.pdf")
+doc, err := parser.ParsePDFDocument(pdfBytes)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Access individual revisions and objects
+log.Printf("PDF has %d revisions, %d objects", doc.RevisionCount(), doc.ObjectCount())
+
+// Get raw bytes of any object
+obj := doc.GetObject(1)
+log.Printf("Object 1: %d bytes", len(obj.RawBytes))
+
+// Stream objects have parsed components
+if obj.IsStream {
+    log.Printf("Dictionary: %s", string(obj.DictRaw))
+    log.Printf("Stream data: %d bytes", len(obj.StreamRaw))
+}
+
+// Reconstruct the PDF (byte-identical to original)
+reconstructed := doc.Bytes()
+// reconstructed == pdfBytes
 ```
 
 ### Build XFA PDF from XML Streams

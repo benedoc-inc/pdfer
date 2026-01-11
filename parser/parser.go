@@ -12,7 +12,7 @@ import (
 )
 
 // ParsePDFTrailer parses the PDF trailer to find object references
-func ParsePDFTrailer(pdfBytes []byte) (*types.PDFTrailer, error) {
+func ParsePDFTrailer(pdfBytes []byte) (*PDFTrailer, error) {
 	pdfStr := string(pdfBytes)
 
 	// Find trailer - search from the end (trailer is usually near EOF)
@@ -63,7 +63,7 @@ func ParsePDFTrailer(pdfBytes []byte) (*types.PDFTrailer, error) {
 
 	trailerSection := pdfStr[trailerStart:trailerEnd]
 
-	trailer := &types.PDFTrailer{}
+	trailer := &PDFTrailer{}
 
 	// Extract Root reference
 	rootPattern := regexp.MustCompile(`/Root\s+(\d+)\s+(\d+)\s+R`)
@@ -156,7 +156,7 @@ func ParseCrossReferenceTableWithEncryption(pdfBytes []byte, startXRef int64, en
 
 	// Read from startxref position to determine type
 	xrefSection := pdfBytes[startXRef:]
-	xrefStr := string(xrefSection[:types.Min(5000, len(xrefSection))])
+	xrefStr := string(xrefSection[:min(5000, len(xrefSection))])
 
 	// Check if it's a cross-reference stream (PDF 1.5+)
 	// Cross-reference streams have /Type/XRef and /W[widths]
@@ -175,7 +175,7 @@ func ParseTraditionalXRefTable(pdfBytes []byte, startXRef int64) (map[int]int64,
 
 	// Read from startxref position
 	xrefSection := pdfBytes[startXRef:]
-	xrefStr := string(xrefSection[:types.Min(10000, len(xrefSection))])
+	xrefStr := string(xrefSection[:min(10000, len(xrefSection))])
 
 	// Find xref keyword
 	xrefPos := strings.Index(xrefStr, "xref")

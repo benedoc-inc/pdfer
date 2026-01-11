@@ -27,31 +27,31 @@ func parseObjectStructure(pdfBytes []byte, objNum, genNum int, objOffset int64, 
 		regexp.MustCompile(fmt.Sprintf(`%d\s+%d\s+obj`, objNum, genNum)),
 		regexp.MustCompile(fmt.Sprintf(`\s%d\s+%d\s+obj`, objNum, genNum)), // With leading space
 	}
-	
+
 	var headerMatch []int
 	var searchStart, searchEnd int
-	
+
 	// Try searching near xref offset first (most common case)
-	searchStart = types.Max(0, int(objOffset)-200)
-	searchEnd = types.Min(len(pdfBytes), int(objOffset)+2000)
+	searchStart = max(0, int(objOffset)-200)
+	searchEnd = min(len(pdfBytes), int(objOffset)+2000)
 	searchArea := pdfBytes[searchStart:searchEnd]
-	
+
 	for _, pattern := range headerPatterns {
 		headerMatch = pattern.FindIndex(searchArea)
 		if headerMatch != nil {
 			break
 		}
 	}
-	
+
 	// If not found, try wider search
 	if headerMatch == nil {
 		if verbose {
 			log.Printf("Object header not found near offset %d, trying wider search", objOffset)
 		}
-		searchStart = types.Max(0, int(objOffset)-1000)
-		searchEnd = types.Min(len(pdfBytes), int(objOffset)+5000)
+		searchStart = max(0, int(objOffset)-1000)
+		searchEnd = min(len(pdfBytes), int(objOffset)+5000)
 		searchArea = pdfBytes[searchStart:searchEnd]
-		
+
 		for _, pattern := range headerPatterns {
 			headerMatch = pattern.FindIndex(searchArea)
 			if headerMatch != nil {
@@ -59,7 +59,7 @@ func parseObjectStructure(pdfBytes []byte, objNum, genNum int, objOffset int64, 
 			}
 		}
 	}
-	
+
 	if headerMatch == nil {
 		// Last resort: search entire file (slow but might work)
 		if verbose {
@@ -74,11 +74,11 @@ func parseObjectStructure(pdfBytes []byte, objNum, genNum int, objOffset int64, 
 			}
 		}
 	}
-	
+
 	if headerMatch == nil {
 		return nil, fmt.Errorf("object header %d %d obj not found", objNum, genNum)
 	}
-	
+
 	objStart := searchStart + headerMatch[1] // Position after "obj"
 	if verbose {
 		log.Printf("Found object header at offset %d (absolute: %d)", headerMatch[0], searchStart+headerMatch[0])
@@ -128,11 +128,11 @@ func parseObjectStructure(pdfBytes []byte, objNum, genNum int, objOffset int64, 
 	isStream := false
 	streamDataStart := -1
 	streamDataEnd := -1
-	
+
 	if streamPos+6 <= len(pdfBytes) && bytes.Equal(pdfBytes[streamPos:streamPos+6], []byte("stream")) {
 		isStream = true
 		streamPos += 6
-		
+
 		// Skip EOL after "stream" (PyPDF lines 611-619)
 		if streamPos < len(pdfBytes) {
 			if pdfBytes[streamPos] == '\r' {
@@ -144,9 +144,9 @@ func parseObjectStructure(pdfBytes []byte, objNum, genNum int, objOffset int64, 
 				streamPos++
 			}
 		}
-		
+
 		streamDataStart = streamPos
-		
+
 		// Find "endstream"
 		endstreamPos := bytes.Index(pdfBytes[streamDataStart:], []byte("endstream"))
 		if endstreamPos == -1 {
@@ -159,7 +159,7 @@ func parseObjectStructure(pdfBytes []byte, objNum, genNum int, objOffset int64, 
 	// The dictionary structure itself is NOT encrypted, but string values are
 	// For encrypted PDFs, the entire dictionary content between << and >> is encrypted
 	dictContent := pdfBytes[dictStart+2 : dictEnd-2] // Remove "<< " and " >>"
-	
+
 	if encryptInfo != nil && len(dictContent) > 0 {
 		// Try direct decryption first
 		decryptedDict, err := encryption.DecryptObject(dictContent, objNum, genNum, encryptInfo)
@@ -178,19 +178,19 @@ func parseObjectStructure(pdfBytes []byte, objNum, genNum int, objOffset int64, 
 
 	// Step 7: Reconstruct object
 	result := make([]byte, 0, len(dictContent)+1000)
-	
+
 	// Object header
 	result = append(result, []byte(fmt.Sprintf("%d %d obj\n", objNum, genNum))...)
-	
+
 	// Dictionary
 	result = append(result, []byte("<<")...)
 	result = append(result, dictContent...)
 	result = append(result, []byte(">>")...)
-	
+
 	// Stream data (if present) - decrypt it
 	if isStream {
 		result = append(result, []byte("\nstream\n")...)
-		
+
 		if encryptInfo != nil {
 			streamData := pdfBytes[streamDataStart:streamDataEnd]
 			decryptedStream, err := encryption.DecryptObject(streamData, objNum, genNum, encryptInfo)
@@ -201,12 +201,11 @@ func parseObjectStructure(pdfBytes []byte, objNum, genNum int, objOffset int64, 
 		} else {
 			result = append(result, pdfBytes[streamDataStart:streamDataEnd]...)
 		}
-		
+
 		result = append(result, []byte("\nendstream")...)
 	}
-	
+
 	result = append(result, []byte("\nendobj")...)
-	
+
 	return result, nil
 }
-

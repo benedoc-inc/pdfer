@@ -16,22 +16,6 @@ type PDFEncryption struct {
 	EncryptKey      []byte // Master encryption key
 }
 
-// PDFTrailer represents PDF trailer information
-type PDFTrailer struct {
-	RootRef    string
-	EncryptRef string
-	InfoRef    string
-	StartXRef  int64
-}
-
-// PDFObject represents a PDF object
-type PDFObject struct {
-	Number     int
-	Generation int
-	Offset     int64
-	Content    []byte
-}
-
 // FormData represents the data to fill into the form
 type FormData map[string]interface{}
 

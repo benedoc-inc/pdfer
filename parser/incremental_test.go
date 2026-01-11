@@ -135,19 +135,19 @@ func TestCountRevisions(t *testing.T) {
 func TestIncrementalParser_Parse(t *testing.T) {
 	pdf := createIncrementalPDF()
 
-	parser := NewIncrementalParser(pdf, true)
-	err := parser.Parse()
+	parser := newIncrementalParser(pdf, true)
+	err := parser.parse()
 	if err != nil {
 		t.Fatalf("Parse failed: %v", err)
 	}
 
-	sections := parser.GetSections()
+	sections := parser.getSections()
 	if len(sections) != 2 {
 		t.Errorf("Expected 2 sections, got %d", len(sections))
 	}
 
 	// Check merged objects
-	objMap := parser.GetObjectMap()
+	objMap := parser.getObjectMap()
 
 	// Should have objects 1-5
 	for i := 1; i <= 5; i++ {
@@ -178,9 +178,9 @@ func TestIncrementalParser_Parse(t *testing.T) {
 func TestParseWithIncrementalUpdates(t *testing.T) {
 	pdf := createIncrementalPDF()
 
-	result, err := ParseWithIncrementalUpdates(pdf, false)
+	result, err := parseWithIncrementalUpdates(pdf, false)
 	if err != nil {
-		t.Fatalf("ParseWithIncrementalUpdates failed: %v", err)
+		t.Fatalf("parseWithIncrementalUpdates failed: %v", err)
 	}
 
 	// Should have at least 5 objects
@@ -232,18 +232,18 @@ func TestIncrementalParser_SingleRevision(t *testing.T) {
 	// Test with a simple single-revision PDF
 	pdf := createSimplePDF()
 
-	parser := NewIncrementalParser(pdf, false)
-	err := parser.Parse()
+	parser := newIncrementalParser(pdf, false)
+	err := parser.parse()
 	if err != nil {
 		t.Fatalf("Parse failed: %v", err)
 	}
 
-	sections := parser.GetSections()
+	sections := parser.getSections()
 	if len(sections) != 1 {
 		t.Errorf("Expected 1 section, got %d", len(sections))
 	}
 
-	objMap := parser.GetObjectMap()
+	objMap := parser.getObjectMap()
 	if len(objMap) == 0 {
 		t.Error("Should have parsed some objects")
 	}
@@ -254,13 +254,13 @@ func TestIncrementalParser_SingleRevision(t *testing.T) {
 func TestPrevChain(t *testing.T) {
 	pdf := createIncrementalPDF()
 
-	parser := NewIncrementalParser(pdf, false)
-	err := parser.Parse()
+	parser := newIncrementalParser(pdf, false)
+	err := parser.parse()
 	if err != nil {
 		t.Fatalf("Parse failed: %v", err)
 	}
 
-	sections := parser.GetSections()
+	sections := parser.getSections()
 
 	// First section (oldest) should have Prev = 0
 	if sections[0].Prev != 0 {

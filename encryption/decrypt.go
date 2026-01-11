@@ -66,7 +66,7 @@ func DecryptPDF(pdfBytes []byte, password []byte, verbose bool) ([]byte, *types.
 			log.Printf("U value matches! Password verified")
 		} else {
 			log.Printf("U value mismatch - computed: %x (first 16), stored: %x (first 16)",
-				uValue[:types.Min(16, len(uValue))], encrypt.U[:types.Min(16, len(encrypt.U))])
+				uValue[:min(16, len(uValue))], encrypt.U[:min(16, len(encrypt.U))])
 			log.Printf("Full computed U: %x", uValue)
 			log.Printf("Full stored U: %x", encrypt.U)
 		}
@@ -173,7 +173,7 @@ func DecryptObject(objBytes []byte, objNum, genNum int, encrypt *types.PDFEncryp
 		// RC4 encryption
 		// PyPDF line 922: rc4_key = key_hash.digest()[: min(n + 5, 16)]
 		rc4KeyHash := keyHash.Sum(nil)
-		rc4Key := rc4KeyHash[:types.Min(n+5, 16)]
+		rc4Key := rc4KeyHash[:min(n+5, 16)]
 
 		cipher, err := rc4.NewCipher(rc4Key)
 		if err != nil {
@@ -188,7 +188,7 @@ func DecryptObject(objBytes []byte, objNum, genNum int, encrypt *types.PDFEncryp
 		// PyPDF line 926: aes128_key = key_hash.digest()[: min(n + 5, 16)]
 		keyHash.Write([]byte{0x73, 0x41, 0x6C, 0x54}) // "sAlT"
 		aesKeyHash := keyHash.Sum(nil)
-		aesKeyLen := types.Min(n+5, 16)
+		aesKeyLen := min(n+5, 16)
 		aesKey := aesKeyHash[:aesKeyLen]
 
 		// PyPDF CryptAES.decrypt (lines 73-88):

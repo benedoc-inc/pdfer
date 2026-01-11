@@ -27,7 +27,7 @@ func ParseXRefStreamWithEncryption(pdfBytes []byte, startXRef int64, encryptInfo
 	// The xref stream object should be at startXRef
 	// Find object number - it should be at or near startXRef
 	xrefSection := pdfBytes[startXRef:]
-	xrefStr := string(xrefSection[:types.Min(500, len(xrefSection))])
+	xrefStr := string(xrefSection[:min(500, len(xrefSection))])
 
 	// Find object number - it should be near the start (usually the first thing)
 	objPattern := regexp.MustCompile(`(\d+)\s+0\s+obj`)

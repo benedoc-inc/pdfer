@@ -7,7 +7,7 @@ This document details the current implementation gaps in pdfer and provides guid
 | Category | Implemented | Partial | Not Implemented |
 |----------|-------------|---------|-----------------|
 | Encryption | 3 | 1 | 1 |
-| PDF Parsing | 9 | 2 | 6 |
+| PDF Parsing | 12 | 2 | 6 |
 | PDF Writing | 8 | 2 | 6 |
 | XFA | 6 | 2 | 4 |
 
@@ -77,15 +77,9 @@ func DeriveEncryptionKeyV5(password []byte, encrypt *PDFEncryption) ([]byte, err
 | **ASCIIHexDecode** | `filters.go` | Encode and decode hex text |
 | **ASCII85Decode** | `filters.go` | Encode and decode base-85 |
 | **RunLengthDecode** | `filters.go` | Simple RLE compression |
-
-### ✅ Newly Implemented
-
-| Feature | File | Notes |
-|---------|------|-------|
-| **ASCIIHexDecode** | `filters.go` | Encode and decode hex text |
-| **ASCII85Decode** | `filters.go` | Encode and decode base-85 |
-| **RunLengthDecode** | `filters.go` | Simple RLE compression |
 | **Incremental updates** | `incremental.go` | Parse PDFs with multiple revisions, /Prev chain |
+| **Byte-perfect parsing** | `document.go`, `document_parser.go` | Full PDF structure with raw bytes preserved |
+| **Unified API** | `api.go` | Clean `Open()`/`OpenWithOptions()` entry point with `PDF` type |
 
 ### ❌ Not Implemented
 

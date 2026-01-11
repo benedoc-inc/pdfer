@@ -57,7 +57,7 @@ func DeriveEncryptionKey(password []byte, encrypt *types.PDFEncryption, fileID [
 	if len(fileID) > 0 {
 		hash.Write(fileID)
 		if verbose {
-			log.Printf("Using file ID in key derivation: %d bytes, hex: %x", len(fileID), fileID[:types.Min(16, len(fileID))])
+			log.Printf("Using file ID in key derivation: %d bytes, hex: %x", len(fileID), fileID[:min(16, len(fileID))])
 		}
 	} else {
 		if verbose {
@@ -242,7 +242,7 @@ func DeriveOwnerKey(ownerPassword []byte, encrypt *types.PDFEncryption, fileID [
 		if err != nil {
 			return nil, err
 		}
-		cipher.XORKeyStream(decryptedO, encrypt.O[:types.Min(32, len(encrypt.O))])
+		cipher.XORKeyStream(decryptedO, encrypt.O[:min(32, len(encrypt.O))])
 	}
 
 	// Now derive user key from decrypted O (which is the user password hash)
@@ -308,7 +308,7 @@ func ExtractFileID(pdfBytes []byte, verbose bool) []byte {
 			if parenEnd != -1 {
 				fileID := pdfBytes[parenStart : parenStart+parenEnd]
 				if verbose {
-					log.Printf("Extracted file ID[0] (binary): %d bytes, hex: %x", len(fileID), fileID[:types.Min(16, len(fileID))])
+					log.Printf("Extracted file ID[0] (binary): %d bytes, hex: %x", len(fileID), fileID[:min(16, len(fileID))])
 				}
 				return fileID
 			}
