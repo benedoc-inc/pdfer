@@ -13,7 +13,7 @@ This document details the current implementation gaps in pdfer and provides guid
 | Document Manipulation | 0 | 0 | 8 |
 | Content Extraction | 0 | 0 | 7 |
 | Advanced Features | 0 | 0 | 10+ |
-| Form Handling | 0 | 0 | 5 |
+| Form Handling | 5 | 0 | 1 |
 | Font Features | 1 | 0 | 5 |
 | Image Features | 2 | 0 | 6 |
 | Error Handling | 0 | 0 | 5 |
@@ -137,16 +137,6 @@ This document details the current implementation gaps in pdfer and provides guid
 |---------|------|-------|
 | **Font embedding** | `font/font.go`, `font/pdf.go` | TrueType/OpenType font embedding with subsetting support |
 
-### ✅ Newly Implemented
-
-| Feature | File | Notes |
-|---------|------|-------|
-| **AcroForm parsing** | `acroform/parser.go` | Extract AcroForm structure and fields |
-| **Form field extraction** | `acroform/extract.go` | Extract field values and convert to FormSchema |
-| **Form field filling** | `acroform/fill.go`, `acroform/replace.go` | Fill AcroForm fields with values (basic structure) |
-| **Form field creation** | `acroform/writer.go` | Create AcroForm fields programmatically |
-| **Form field validation** | `acroform/validation.go` | Validate field values against constraints |
-
 ### ❌ Not Implemented
 
 | Feature | Priority | Complexity | Notes |
@@ -156,14 +146,10 @@ This document details the current implementation gaps in pdfer and provides guid
 | **Object streams** | Medium | Medium | Compress objects on write |
 | **Digital signatures** | Low | Very High | PKCS#7, CMS signing |
 | **Incremental save** | Medium | Medium | Append without rewriting |
-| **AcroForm creation** | High | High | Create new AcroForm fields programmatically |
-| **Form field validation** | Medium | Medium | Validate field values before filling |
-| **Form flattening** | Medium | High | Convert form fields to static content |
 | **Advanced graphics** | Medium | High | Curves (bezier), arcs, gradients, patterns |
 | **Transparency/alpha** | Medium | High | Alpha channels, blend modes, soft masks |
 | **Annotations (write)** | High | High | Links, comments, highlights, form fields |
 | **Bookmarks/outlines (write)** | Medium | Medium | Create document navigation structure |
-| **Form fields (AcroForm)** | High | High | Create and fill AcroForm fields |
 | **Watermarks** | Medium | Medium | Add text/image watermarks to pages |
 | **Page manipulation** | High | Medium | Rotate, delete, reorder, insert pages |
 | **PDF optimization** | Medium | High | Remove unused objects, compress streams |
@@ -353,13 +339,26 @@ func (s *Subform) CreateInstances(data []map[string]string) []SubformInstance {
 | **3D content** | Low | Very High | 3D annotations, U3D, PRC support |
 | **Multimedia** | Low | Very High | Video, audio, rich media annotations |
 
-### Form Handling
+## Form Handling (`acroform/`)
+
+### ✅ Fully Implemented
+
+| Feature | File | Notes |
+|---------|------|-------|
+| **AcroForm parsing** | `acroform/parser.go` | Extract AcroForm structure and fields recursively |
+| **Form field extraction** | `acroform/extract.go` | Extract field values and convert to FormSchema |
+| **Form field filling** | `acroform/fill_streams.go`, `acroform/replace.go` | Fill AcroForm fields with values, handles direct objects and object streams |
+| **Form field creation** | `acroform/writer.go` | Create AcroForm fields programmatically (text, checkbox, radio, choice, button) |
+| **Form field validation** | `acroform/validation.go` | Validate field values against constraints (required, max length, patterns, ranges) |
+| **Appearance streams** | `acroform/appearance.go` | Generate appearance streams for checkboxes, text fields, buttons |
+| **Field actions** | `acroform/actions.go` | Add actions to fields (URI, JavaScript, GoTo, Submit, Reset) |
+| **Form flattening** | `acroform/flatten.go` | Convert form fields to static content (removes interactivity) |
+| **Object stream support** | `acroform/stream_rebuild.go`, `acroform/stream_finder.go` | Handle form fields within compressed object streams |
+
+### ❌ Not Implemented
+
 | Feature | Priority | Complexity | Notes |
 |---------|----------|------------|-------|
-| **AcroForm support** | High | High | Full AcroForm parsing and creation |
-| **Form field filling** | High | Medium | Fill AcroForm fields programmatically |
-| **Form field validation** | Medium | Medium | Validate form field values |
-| **Form flattening** | Medium | High | Convert form fields to static content |
 | **Digital signatures (forms)** | Low | Very High | Sign form fields, signature fields |
 
 ### Font Features

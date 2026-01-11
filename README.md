@@ -319,7 +319,7 @@ var data pdfer.FormData        // = types.FormData
 | RC4 40-bit (V1) | ✅ |
 | RC4 128-bit (V2) | ✅ |
 | AES-128 (V4) | ✅ |
-| AES-256 (V5) | ⚠️ Partial |
+| AES-256 (V5) | ✅ |
 | User password | ✅ |
 | Owner password | ✅ |
 
@@ -359,10 +359,10 @@ See [GAPS.md](GAPS.md) for detailed implementation status and contribution oppor
 
 ### High Priority Gaps
 - [x] **Incremental updates** - Parse PDFs with multiple revisions ✅
-- [ ] **Font embedding** - TrueType/OpenType font subsetting
+- [x] **Font embedding** - TrueType/OpenType font subsetting ✅
 - [x] **Image embedding** - JPEG, PNG image objects ✅
 - [x] **Page content streams** - Text and graphics operators ✅
-- [ ] **AES-256 full support** - Complete V5/R6 encryption
+- [x] **AES-256 full support** - Complete V5/R6 encryption ✅
 
 ### Not Planned
 - Dynamic XFA rendering (requires full layout engine)

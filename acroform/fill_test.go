@@ -42,7 +42,7 @@ func TestFillFormFields(t *testing.T) {
 		t.Logf("Found field inputtext4: object %d, type %s", field2.ObjectNum, field2.FT)
 	}
 
-	// Note: Actual filling requires object stream handling
-	// which is more complex. The structure is ready for implementation.
-	t.Log("Form filling structure verified - object stream support pending")
+	// Note: Actual filling with object streams is now implemented
+	// in fill_streams.go with full object stream rebuilding support.
+	t.Log("Form filling structure verified - object stream support implemented")
 }

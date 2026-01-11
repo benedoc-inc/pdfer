@@ -195,14 +195,3 @@ func updateFieldContent(fieldData []byte, field *Field, value interface{}) ([]by
 
 	return []byte(newFieldStr), nil
 }
-
-// rebuildObjectStream rebuilds an object stream with updated objects
-// This uses the RebuildObjectStream function from stream_rebuild.go
-func rebuildObjectStream(pdfBytes []byte, streamObjNum int, encryptInfo *types.PDFEncryption, verbose bool) error {
-	// This is called for each stream that needs rebuilding
-	// The actual rebuilding is handled by RebuildObjectStream with updates
-	if verbose {
-		fmt.Printf("Object stream %d marked for rebuild\n", streamObjNum)
-	}
-	return nil
-}
