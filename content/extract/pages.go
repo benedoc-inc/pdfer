@@ -191,6 +191,34 @@ func extractPage(pdfBytes []byte, pdf *parse.PDF, pageObjNum int, pageStr string
 		}
 	}
 
+	// Extract resources FIRST (needed for font decoders for text extraction)
+	var resourcesStr string
+	resourcesRef := extractDictValue(pageStr, "/Resources")
+	if resourcesRef != "" {
+		// Resources is a reference to another object
+		resourcesObjNum, err := parseObjectRef(resourcesRef)
+		if err == nil {
+			resourcesObj, err := pdf.GetObject(resourcesObjNum)
+			if err == nil {
+				resourcesStr = string(resourcesObj)
+				page.Resources = extractResources(resourcesStr, pdf, verbose)
+			}
+		}
+	} else {
+		// Resources might be inline - extract the Resources dictionary from page string
+		resourcesDictStr := extractInlineDict(pageStr, "/Resources")
+		if resourcesDictStr != "" {
+			resourcesStr = resourcesDictStr
+			page.Resources = extractResources(resourcesStr, pdf, verbose)
+		}
+	}
+
+	// Extract font decoders for text extraction
+	var fontDecoders map[string]*FontDecoder
+	if resourcesStr != "" {
+		fontDecoders = extractFontDecoders(resourcesStr, pdf, verbose)
+	}
+
 	// Extract content streams
 	contents := extractDictValue(pageStr, "/Contents")
 	if contents != "" {
@@ -263,29 +291,10 @@ func extractPage(pdfBytes []byte, pdf *parse.PDF, pageObjNum int, pageStr string
 				}
 			}
 
-			textElements, graphics, images := parseContentStream(contentStr, pdf, pageObjNum, verbose)
+			textElements, graphics, images := parseContentStreamWithDecoders(contentStr, pdf, pageObjNum, fontDecoders, verbose)
 			page.Text = append(page.Text, textElements...)
 			page.Graphics = append(page.Graphics, graphics...)
 			page.Images = append(page.Images, images...)
-		}
-	}
-
-	// Extract resources
-	resourcesRef := extractDictValue(pageStr, "/Resources")
-	if resourcesRef != "" {
-		// Resources is a reference to another object
-		resourcesObjNum, err := parseObjectRef(resourcesRef)
-		if err == nil {
-			resourcesObj, err := pdf.GetObject(resourcesObjNum)
-			if err == nil {
-				page.Resources = extractResources(string(resourcesObj), pdf, verbose)
-			}
-		}
-	} else {
-		// Resources might be inline - extract the Resources dictionary from page string
-		resourcesDictStr := extractInlineDict(pageStr, "/Resources")
-		if resourcesDictStr != "" {
-			page.Resources = extractResources(resourcesDictStr, pdf, verbose)
 		}
 	}
 

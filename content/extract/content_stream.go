@@ -11,12 +11,15 @@ import (
 
 // parseContentStream parses a PDF content stream and extracts text, graphics, and images
 func parseContentStream(contentStr string, pdf *parse.PDF, pageNum int, verbose bool) ([]types.TextElement, []types.Graphic, []types.ImageRef) {
+	// Call with nil decoders for backward compatibility
+	return parseContentStreamWithDecoders(contentStr, pdf, pageNum, nil, verbose)
+}
+
+// parseContentStreamWithDecoders parses a PDF content stream with font decoding support
+func parseContentStreamWithDecoders(contentStr string, pdf *parse.PDF, pageNum int, fontDecoders map[string]*FontDecoder, verbose bool) ([]types.TextElement, []types.Graphic, []types.ImageRef) {
 	var textElements []types.TextElement
 	var graphics []types.Graphic
 	var imageRefs []types.ImageRef
-
-	// Decompress if needed (content streams are usually FlateDecode compressed)
-	// For now, assume contentStr is already decompressed
 
 	// Parse text state
 	textState := &textState{
@@ -92,6 +95,10 @@ func parseContentStream(contentStr string, pdf *parse.PDF, pageNum int, verbose 
 			if size, err := strconv.ParseFloat(match[2], 64); err == nil {
 				textState.fontSize = size
 			}
+			// Set font decoder if available
+			if fontDecoders != nil {
+				textState.decoder = fontDecoders[textState.fontName]
+			}
 			continue
 		}
 
@@ -119,27 +126,44 @@ func parseContentStream(contentStr string, pdf *parse.PDF, pageNum int, verbose 
 			continue
 		}
 
-		// Show text (Tj operator) - literal string
+		// Show text (Tj operator) - literal string or hex string
 		if match := regexp.MustCompile(`^\(([^)]*)\)\s+Tj`).FindStringSubmatch(line); match != nil {
-			text := unescapePDFString(match[1])
+			// Literal string
+			rawText := unescapePDFString(match[1])
+			text := decodeTextWithFont(rawText, textState.decoder, false)
+			textElement := createTextElement(text, textState)
+			textElements = append(textElements, textElement)
+			continue
+		}
+		if match := regexp.MustCompile(`^<([0-9A-Fa-f\s]*)>\s+Tj`).FindStringSubmatch(line); match != nil {
+			// Hex string
+			text := decodeTextWithFont(match[1], textState.decoder, true)
 			textElement := createTextElement(text, textState)
 			textElements = append(textElements, textElement)
 			continue
 		}
 
-		// Show text next line (') - literal string
+		// Show text next line (') - literal string or hex string
 		if match := regexp.MustCompile(`^\(([^)]*)\)\s+'`).FindStringSubmatch(line); match != nil {
-			text := unescapePDFString(match[1])
+			rawText := unescapePDFString(match[1])
+			text := decodeTextWithFont(rawText, textState.decoder, false)
 			textElement := createTextElement(text, textState)
 			textElements = append(textElements, textElement)
 			// Move to next line (simplified - would need leading)
 			textState.y -= textState.fontSize * 1.2
 			continue
 		}
+		if match := regexp.MustCompile(`^<([0-9A-Fa-f\s]*)>\s+'`).FindStringSubmatch(line); match != nil {
+			text := decodeTextWithFont(match[1], textState.decoder, true)
+			textElement := createTextElement(text, textState)
+			textElements = append(textElements, textElement)
+			textState.y -= textState.fontSize * 1.2
+			continue
+		}
 
 		// Show text array (TJ operator)
 		if match := regexp.MustCompile(`^\[([^\]]+)\]\s+TJ`).FindStringSubmatch(line); match != nil {
-			text := parseTextArray(match[1])
+			text := parseTextArrayWithDecoder(match[1], textState.decoder)
 			textElement := createTextElement(text, textState)
 			textElements = append(textElements, textElement)
 			continue
@@ -315,6 +339,7 @@ type textState struct {
 	textRise    float64
 	textMatrix  [6]float64
 	inText      bool
+	decoder     *FontDecoder // Current font decoder for text extraction
 }
 
 // graphicsState tracks the current graphics rendering state
@@ -347,6 +372,11 @@ func createTextElement(text string, state *textState) types.TextElement {
 // parseTextArray parses a TJ text array and concatenates strings
 // Format: [ (text1) -50 (text2) ] where numbers are adjustments
 func parseTextArray(arrStr string) string {
+	return parseTextArrayWithDecoder(arrStr, nil)
+}
+
+// parseTextArrayWithDecoder parses a TJ text array with font decoding
+func parseTextArrayWithDecoder(arrStr string, decoder *FontDecoder) string {
 	var result strings.Builder
 
 	// Remove brackets if present
@@ -354,19 +384,101 @@ func parseTextArray(arrStr string) string {
 	arrStr = strings.TrimPrefix(arrStr, "[")
 	arrStr = strings.TrimSuffix(arrStr, "]")
 
-	// Parse elements - strings in parentheses or numbers
-	// Pattern: (text) or number
-	pattern := regexp.MustCompile(`\(([^)]*)\)|([\d\.\-]+)`)
-	matches := pattern.FindAllStringSubmatch(arrStr, -1)
-
-	for _, match := range matches {
-		if match[1] != "" {
-			// It's a string
-			result.WriteString(unescapePDFString(match[1]))
+	// Parse elements - strings in parentheses, hex strings, or numbers
+	// Pattern: (text) or <hex> or number
+	// We need to handle both literal and hex strings
+	i := 0
+	for i < len(arrStr) {
+		// Skip whitespace
+		for i < len(arrStr) && (arrStr[i] == ' ' || arrStr[i] == '\t' || arrStr[i] == '\n' || arrStr[i] == '\r') {
+			i++
 		}
-		// Numbers are adjustments, we ignore them for text extraction
+		if i >= len(arrStr) {
+			break
+		}
+
+		if arrStr[i] == '(' {
+			// Literal string - find matching closing paren (handle escapes)
+			start := i + 1
+			depth := 1
+			i++
+			for i < len(arrStr) && depth > 0 {
+				if arrStr[i] == '\\' && i+1 < len(arrStr) {
+					i += 2 // Skip escaped character
+					continue
+				}
+				if arrStr[i] == '(' {
+					depth++
+				} else if arrStr[i] == ')' {
+					depth--
+				}
+				i++
+			}
+			if depth == 0 {
+				rawText := unescapePDFString(arrStr[start : i-1])
+				text := decodeTextWithFont(rawText, decoder, false)
+				result.WriteString(text)
+			}
+		} else if arrStr[i] == '<' {
+			// Hex string - find closing >
+			start := i + 1
+			i++
+			for i < len(arrStr) && arrStr[i] != '>' {
+				i++
+			}
+			if i < len(arrStr) {
+				hexStr := arrStr[start:i]
+				text := decodeTextWithFont(hexStr, decoder, true)
+				result.WriteString(text)
+				i++ // Skip >
+			}
+		} else if arrStr[i] == '-' || arrStr[i] == '.' || (arrStr[i] >= '0' && arrStr[i] <= '9') {
+			// Number (adjustment) - skip it
+			for i < len(arrStr) && (arrStr[i] == '-' || arrStr[i] == '.' || (arrStr[i] >= '0' && arrStr[i] <= '9')) {
+				i++
+			}
+		} else {
+			i++ // Skip unknown character
+		}
 	}
 
+	return result.String()
+}
+
+// decodeTextWithFont decodes raw text bytes using the font's encoding
+func decodeTextWithFont(rawText string, decoder *FontDecoder, isHex bool) string {
+	if decoder == nil {
+		// No decoder available - return as-is (original behavior)
+		if isHex {
+			// Decode hex to bytes and return as Latin-1
+			return decodeHexToLatin1(rawText)
+		}
+		return rawText
+	}
+
+	if isHex {
+		return decoder.DecodeHex(rawText)
+	}
+	return decoder.Decode([]byte(rawText))
+}
+
+// decodeHexToLatin1 decodes a hex string to Latin-1 text (fallback when no font decoder)
+func decodeHexToLatin1(hexStr string) string {
+	hexStr = strings.ReplaceAll(hexStr, " ", "")
+	hexStr = strings.ReplaceAll(hexStr, "\n", "")
+	hexStr = strings.ReplaceAll(hexStr, "\r", "")
+
+	// Pad if odd length
+	if len(hexStr)%2 != 0 {
+		hexStr += "0"
+	}
+
+	var result strings.Builder
+	for i := 0; i < len(hexStr); i += 2 {
+		if val, err := strconv.ParseInt(hexStr[i:i+2], 16, 32); err == nil {
+			result.WriteRune(rune(val))
+		}
+	}
 	return result.String()
 }
 
