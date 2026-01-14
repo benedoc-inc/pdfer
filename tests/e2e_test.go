@@ -714,3 +714,79 @@ func TestE2E_MetadataAutoModDate(t *testing.T) {
 
 	t.Logf("Auto ModDate: %q", extractedMetadata.ModDate)
 }
+
+// TestE2E_XRefStreamRoundTrip tests creating a PDF with xref stream and parsing it back
+func TestE2E_XRefStreamRoundTrip(t *testing.T) {
+	// Create a PDF with xref stream
+	builder := write.NewSimplePDFBuilder()
+	builder.Writer().UseXRefStream(true)
+
+	// Set metadata
+	metadata := &types.DocumentMetadata{
+		Title:  "XRef Stream Test",
+		Author: "Test Author",
+	}
+	builder.Writer().SetMetadata(metadata)
+
+	// Add a page
+	page := builder.AddPage(write.PageSizeLetter)
+	fontName := page.AddStandardFont("Helvetica")
+	page.Content().
+		BeginText().
+		SetFont(fontName, 24).
+		SetTextPosition(72, 720).
+		ShowText("XRef Stream Test Document").
+		EndText()
+
+	builder.FinalizePage(page)
+
+	// Generate PDF
+	pdfBytes, err := builder.Bytes()
+	if err != nil {
+		t.Fatalf("Failed to create PDF: %v", err)
+	}
+
+	t.Logf("Created PDF with xref stream: %d bytes", len(pdfBytes))
+
+	// Verify PDF contains xref stream markers
+	if !bytes.Contains(pdfBytes, []byte("/Type")) || !bytes.Contains(pdfBytes, []byte("XRef")) {
+		t.Error("PDF should contain xref stream")
+	}
+
+	// Verify it does NOT contain traditional xref table
+	if bytes.Contains(pdfBytes, []byte("xref\n0 ")) {
+		t.Error("PDF should not contain traditional xref table")
+	}
+
+	// Parse the PDF back
+	pdf, err := parse.Open(pdfBytes)
+	if err != nil {
+		t.Fatalf("Failed to parse PDF: %v", err)
+	}
+
+	// Verify we can access objects
+	if pdf.ObjectCount() == 0 {
+		t.Error("PDF should have objects")
+	}
+
+	// Verify PDF structure
+	trailer := pdf.Trailer()
+	if trailer == nil {
+		t.Fatal("Trailer should not be nil")
+	}
+	if trailer.RootRef == "" {
+		t.Error("Trailer should have Root reference")
+	}
+
+	// Verify metadata can be extracted
+	extractedMetadata, err := extract.ExtractMetadata(pdfBytes, pdf, false)
+	if err != nil {
+		t.Fatalf("Failed to extract metadata: %v", err)
+	}
+
+	if extractedMetadata.Title != metadata.Title {
+		t.Errorf("Title mismatch: got %q, want %q", extractedMetadata.Title, metadata.Title)
+	}
+
+	t.Logf("XRef stream round-trip successful: %d objects, title: %q", pdf.ObjectCount(), extractedMetadata.Title)
+}

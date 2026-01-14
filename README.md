@@ -22,6 +22,7 @@ A pure Go library for PDF processing with comprehensive XFA (XML Forms Architect
 - **Byte-Perfect Parsing** - Preserve exact bytes for reconstruction of original PDF
 - **Structured Error Handling** - Categorized error types with codes, context, and standard library compatibility
 - **Warning System** - Collect and manage non-fatal warnings during PDF processing
+- **Cross-Reference Streams** - Write modern compressed xref streams (PDF 1.5+) for smaller, more efficient PDFs
 
 ## Installation
 
@@ -194,6 +195,9 @@ import "github.com/benedoc-inc/pdfer/types"
 
 // Create a simple PDF with text and graphics
 builder := write.NewSimplePDFBuilder()
+
+// Enable cross-reference stream (PDF 1.5+ modern format, more efficient)
+builder.Writer().UseXRefStream(true)
 
 // Set document metadata
 metadata := &types.DocumentMetadata{
@@ -676,7 +680,8 @@ if warnings.HasWarnings() {
 | Feature | Status |
 |---------|--------|
 | Cross-reference tables | ✅ |
-| Cross-reference streams | ✅ |
+| Cross-reference streams (read) | ✅ |
+| Cross-reference streams (write) | ✅ |
 | Object streams (ObjStm) | ✅ |
 | FlateDecode filter | ✅ |
 | ASCIIHexDecode filter | ✅ |

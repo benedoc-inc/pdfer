@@ -32,14 +32,15 @@ type Dictionary map[string]interface{}
 
 // PDFWriter builds PDF files from scratch
 type PDFWriter struct {
-	objects     map[int]*PDFObject
-	nextObjNum  int
-	rootRef     string
-	infoRef     string
-	encryptRef  string
-	encryptInfo *types.PDFEncryption
-	fileID      []byte
-	pdfVersion  string
+	objects       map[int]*PDFObject
+	nextObjNum    int
+	rootRef       string
+	infoRef       string
+	encryptRef    string
+	encryptInfo   *types.PDFEncryption
+	fileID        []byte
+	pdfVersion    string
+	useXRefStream bool // If true, use cross-reference stream instead of table
 }
 
 // NewPDFWriter creates a new PDF writer
@@ -60,6 +61,12 @@ func (w *PDFWriter) SetVersion(version string) {
 func (w *PDFWriter) SetEncryption(encryptInfo *types.PDFEncryption, fileID []byte) {
 	w.encryptInfo = encryptInfo
 	w.fileID = fileID
+}
+
+// UseXRefStream enables cross-reference stream writing (PDF 1.5+)
+// If true, writes a compressed cross-reference stream instead of traditional xref table
+func (w *PDFWriter) UseXRefStream(enable bool) {
+	w.useXRefStream = enable
 }
 
 // AddObject adds a new object and returns its object number
@@ -217,41 +224,71 @@ func (w *PDFWriter) Write(out io.Writer) error {
 		buf.WriteString("\nendobj\n")
 	}
 
-	// Write xref table
-	xrefPos := int64(buf.Len())
-	buf.WriteString("xref\n")
-	buf.WriteString(fmt.Sprintf("0 %d\n", w.nextObjNum))
+	var xrefPos int64
 
-	// Entry for object 0 (always free, points to next free object)
-	buf.WriteString(fmt.Sprintf("%010d %05d f \n", 0, 65535))
-
-	// Entries for each object
-	for i := 1; i < w.nextObjNum; i++ {
-		if pos, ok := positions[i]; ok {
-			buf.WriteString(fmt.Sprintf("%010d %05d n \n", pos, 0))
-		} else {
-			// Free object
-			buf.WriteString(fmt.Sprintf("%010d %05d f \n", 0, 1))
+	// Write cross-reference (stream or table)
+	if w.useXRefStream {
+		// Write cross-reference stream
+		var err error
+		xrefPos, err = w.writeXRefStream(&buf, positions)
+		if err != nil {
+			return fmt.Errorf("failed to write xref stream: %v", err)
 		}
-	}
 
-	// Write trailer
-	buf.WriteString("trailer\n<<\n")
-	buf.WriteString(fmt.Sprintf("/Size %d\n", w.nextObjNum))
-	if w.rootRef != "" {
-		buf.WriteString(fmt.Sprintf("/Root %s\n", w.rootRef))
+		// Write trailer (xref streams still need a trailer with /Root, /Info, etc.)
+		buf.WriteString("trailer\n<<\n")
+		buf.WriteString(fmt.Sprintf("/Size %d\n", w.nextObjNum))
+		if w.rootRef != "" {
+			buf.WriteString(fmt.Sprintf("/Root %s\n", w.rootRef))
+		}
+		if w.infoRef != "" {
+			buf.WriteString(fmt.Sprintf("/Info %s\n", w.infoRef))
+		}
+		if w.encryptRef != "" {
+			buf.WriteString(fmt.Sprintf("/Encrypt %s\n", w.encryptRef))
+		}
+		if len(w.fileID) > 0 {
+			hexID := fmt.Sprintf("%X", w.fileID)
+			buf.WriteString(fmt.Sprintf("/ID [<%s><%s>]\n", hexID, hexID))
+		}
+		buf.WriteString(">>\n")
+	} else {
+		// Write traditional xref table
+		xrefPos = int64(buf.Len())
+		buf.WriteString("xref\n")
+		buf.WriteString(fmt.Sprintf("0 %d\n", w.nextObjNum))
+
+		// Entry for object 0 (always free, points to next free object)
+		buf.WriteString(fmt.Sprintf("%010d %05d f \n", 0, 65535))
+
+		// Entries for each object
+		for i := 1; i < w.nextObjNum; i++ {
+			if pos, ok := positions[i]; ok {
+				buf.WriteString(fmt.Sprintf("%010d %05d n \n", pos, 0))
+			} else {
+				// Free object
+				buf.WriteString(fmt.Sprintf("%010d %05d f \n", 0, 1))
+			}
+		}
+
+		// Write trailer
+		buf.WriteString("trailer\n<<\n")
+		buf.WriteString(fmt.Sprintf("/Size %d\n", w.nextObjNum))
+		if w.rootRef != "" {
+			buf.WriteString(fmt.Sprintf("/Root %s\n", w.rootRef))
+		}
+		if w.infoRef != "" {
+			buf.WriteString(fmt.Sprintf("/Info %s\n", w.infoRef))
+		}
+		if w.encryptRef != "" {
+			buf.WriteString(fmt.Sprintf("/Encrypt %s\n", w.encryptRef))
+		}
+		if len(w.fileID) > 0 {
+			hexID := fmt.Sprintf("%X", w.fileID)
+			buf.WriteString(fmt.Sprintf("/ID [<%s><%s>]\n", hexID, hexID))
+		}
+		buf.WriteString(">>\n")
 	}
-	if w.infoRef != "" {
-		buf.WriteString(fmt.Sprintf("/Info %s\n", w.infoRef))
-	}
-	if w.encryptRef != "" {
-		buf.WriteString(fmt.Sprintf("/Encrypt %s\n", w.encryptRef))
-	}
-	if len(w.fileID) > 0 {
-		hexID := fmt.Sprintf("%X", w.fileID)
-		buf.WriteString(fmt.Sprintf("/ID [<%s><%s>]\n", hexID, hexID))
-	}
-	buf.WriteString(">>\n")
 
 	// Write startxref
 	buf.WriteString(fmt.Sprintf("startxref\n%d\n%%%%EOF\n", xrefPos))

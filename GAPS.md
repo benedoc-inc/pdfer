@@ -138,13 +138,13 @@ This document details the current implementation gaps in pdfer and provides guid
 |---------|------|-------|
 | **Font embedding** | `resources/font/font.go`, `resources/font/pdf.go` | TrueType/OpenType font embedding with subsetting support |
 | **Metadata writing** | `core/write/metadata.go` | Set document Info dictionary metadata (title, author, dates, custom fields) |
+| **Cross-reference streams** | `core/write/xref_stream.go` | Write modern compressed xref streams (PDF 1.5+) instead of traditional tables |
 
 ### ❌ Not Implemented
 
 | Feature | Priority | Complexity | Notes |
 |---------|----------|------------|-------|
 | **Encryption on write** | Medium | Medium | Generate new encrypted PDFs |
-| **Cross-reference streams** | Medium | Medium | Write modern xref format |
 | **Object streams** | Medium | Medium | Compress objects on write |
 | **Digital signatures** | Low | Very High | PKCS#7, CMS signing |
 | **Incremental save** | Medium | Medium | Append without rewriting |
@@ -506,7 +506,7 @@ func (s *Subform) CreateInstances(data []map[string]string) []SubformInstance {
 
 ### Medium Priority (Usability)
 1. Encryption on write
-2. Cross-reference stream writing
+2. Cross-reference stream writing ✅ (Modern xref stream format implemented)
 3. Subform repetition in XFA
 4. Better error messages ✅ (Structured error types implemented)
 5. Warning system ✅ (Non-fatal warning collection implemented)
