@@ -62,5 +62,5 @@ type XFALocaleSet = types.XFALocaleSet
 
 // Version returns the library version.
 func Version() string {
-	return "0.9.3"
+	return "0.9.4"
 }
