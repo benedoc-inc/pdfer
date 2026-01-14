@@ -227,6 +227,7 @@ func (p *PDF) parseStandard() error {
 		p.trailer = &TrailerInfo{
 			Size:       lastSection.Size,
 			RootRef:    lastSection.Root,
+			InfoRef:    lastSection.Info,
 			EncryptRef: lastSection.Encrypt,
 		}
 		p.xref.Size = lastSection.Size

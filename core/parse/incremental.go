@@ -16,6 +16,7 @@ type xrefSection struct {
 	Streams   map[int]ObjectStreamEntry // Object number -> object stream info (Type 2 entries)
 	Prev      int64                     // Offset of previous xref section (from /Prev in trailer)
 	Root      string                    // /Root reference from trailer
+	Info      string                    // /Info reference from trailer
 	Encrypt   string                    // /Encrypt reference from trailer
 	Size      int                       // /Size from trailer
 }
@@ -364,6 +365,9 @@ func (p *incrementalParser) parseTraditionalxrefSection(startXRef int64) (*xrefS
 			if match := regexp.MustCompile(`/Root\s+(\d+\s+\d+\s+R)`).FindStringSubmatch(trailerDict); match != nil {
 				section.Root = match[1]
 			}
+			if match := regexp.MustCompile(`/Info\s+(\d+\s+\d+\s+R)`).FindStringSubmatch(trailerDict); match != nil {
+				section.Info = match[1]
+			}
 			if match := regexp.MustCompile(`/Encrypt\s+(\d+\s+\d+\s+R)`).FindStringSubmatch(trailerDict); match != nil {
 				section.Encrypt = match[1]
 			}
@@ -407,6 +411,9 @@ func (p *incrementalParser) parseXRefStreamSection(startXRef int64) (*xrefSectio
 
 	if match := regexp.MustCompile(`/Root\s+(\d+\s+\d+\s+R)`).FindStringSubmatch(xrefStr); match != nil {
 		section.Root = match[1]
+	}
+	if match := regexp.MustCompile(`/Info\s+(\d+\s+\d+\s+R)`).FindStringSubmatch(xrefStr); match != nil {
+		section.Info = match[1]
 	}
 	if match := regexp.MustCompile(`/Encrypt\s+(\d+\s+\d+\s+R)`).FindStringSubmatch(xrefStr); match != nil {
 		section.Encrypt = match[1]

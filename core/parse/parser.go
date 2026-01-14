@@ -72,6 +72,13 @@ func ParsePDFTrailer(pdfBytes []byte) (*PDFTrailer, error) {
 		trailer.RootRef = rootMatch[0]
 	}
 
+	// Extract Info reference
+	infoPattern := regexp.MustCompile(`/Info\s+(\d+)\s+(\d+)\s+R`)
+	infoMatch := infoPattern.FindStringSubmatch(trailerSection)
+	if infoMatch != nil {
+		trailer.InfoRef = infoMatch[0]
+	}
+
 	// Extract Encrypt reference
 	encryptPattern := regexp.MustCompile(`/Encrypt\s+(\d+)\s+(\d+)\s+R`)
 	encryptMatch := encryptPattern.FindStringSubmatch(trailerSection)

@@ -88,6 +88,36 @@ func parseInfoDict(infoStr string, metadata *types.DocumentMetadata, verbose boo
 			}
 		}
 	}
+
+	// Extract custom fields (any field that's not a standard field)
+	// Pattern: /FieldName (value)
+	customPattern := regexp.MustCompile(`/([A-Za-z0-9_]+)\s*\(([^)]*)\)`)
+	standardFields := map[string]bool{
+		"Title":        true,
+		"Author":       true,
+		"Subject":      true,
+		"Keywords":     true,
+		"Creator":      true,
+		"Producer":     true,
+		"CreationDate": true,
+		"ModDate":      true,
+	}
+
+	allMatches := customPattern.FindAllStringSubmatch(infoStr, -1)
+	for _, match := range allMatches {
+		if len(match) >= 3 {
+			fieldName := match[1]
+			fieldValue := unescapePDFString(match[2])
+
+			// Skip if it's a standard field (already extracted)
+			if !standardFields[fieldName] {
+				if metadata.Custom == nil {
+					metadata.Custom = make(map[string]string)
+				}
+				metadata.Custom[fieldName] = fieldValue
+			}
+		}
+	}
 }
 
 // extractMetadataFromBytes extracts metadata by searching PDF bytes
