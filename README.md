@@ -190,12 +190,22 @@ os.WriteFile("filled.pdf", updatedPDF, 0644)
 
 ```go
 import "github.com/benedoc-inc/pdfer/core/write"
+import "github.com/benedoc-inc/pdfer/types"
 
 // Create a simple PDF with text and graphics
 builder := write.NewSimplePDFBuilder()
 
+// Set document metadata
+metadata := &types.DocumentMetadata{
+    Title:   "My Document",
+    Author:  "John Doe",
+    Subject: "Example PDF",
+    Creator: "pdfer",
+}
+builder.Writer().SetMetadata(metadata)
+
 // Add a page
-page := builder.AddPage(writer.PageSizeLetter)
+page := builder.AddPage(write.PageSizeLetter)
 
 // Add a font and get its resource name
 fontName := page.AddStandardFont("Helvetica")
@@ -556,6 +566,48 @@ if err != nil {
 - **I/O errors**: File system errors
 
 All errors implement `errors.Is()` and `errors.Unwrap()` for compatibility with the standard library.
+
+### Metadata Writing
+
+Set document metadata when creating PDFs:
+
+```go
+import "github.com/benedoc-inc/pdfer/core/write"
+import "github.com/benedoc-inc/pdfer/types"
+
+writer := write.NewPDFWriter()
+
+// Set metadata using DocumentMetadata
+metadata := &types.DocumentMetadata{
+    Title:        "My Document",
+    Author:       "John Doe",
+    Subject:      "Example",
+    Keywords:     "pdf, example",
+    Creator:      "pdfer",
+    Producer:     "pdfer 0.9.2",
+    CreationDate: "2024-01-15T10:30:00Z",
+    ModDate:      "2024-01-16T14:45:00Z",
+    Custom: map[string]string{
+        "CustomField": "CustomValue",
+    },
+}
+writer.SetMetadata(metadata)
+
+// Or use convenience method with map
+writer.SetMetadataFields(map[string]string{
+    "title":  "My Document",
+    "author": "John Doe",
+})
+
+// Dates are automatically formatted to PDF format (D:YYYYMMDDHHmmSSOHH'mm)
+// If ModDate is not provided, current time is used
+```
+
+**Supported Metadata Fields:**
+- Title, Author, Subject, Keywords
+- Creator, Producer
+- CreationDate, ModDate (ISO 8601 or PDF format)
+- Custom fields (any key-value pairs)
 
 ### Warning System
 

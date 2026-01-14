@@ -130,12 +130,14 @@ This document details the current implementation gaps in pdfer and provides guid
 |---------|--------|----------------|
 | **Dictionary writing** | Basic | Complex nested structures may not format correctly |
 | **String encryption** | Partial | Only stream data encrypted, not string objects in dictionaries |
+| **XMP metadata** | Not implemented | Only Info dictionary metadata supported, XMP not yet implemented |
 
 ### ✅ Newly Implemented
 
 | Feature | File | Notes |
 |---------|------|-------|
 | **Font embedding** | `resources/font/font.go`, `resources/font/pdf.go` | TrueType/OpenType font embedding with subsetting support |
+| **Metadata writing** | `core/write/metadata.go` | Set document Info dictionary metadata (title, author, dates, custom fields) |
 
 ### ❌ Not Implemented
 
@@ -153,7 +155,6 @@ This document details the current implementation gaps in pdfer and provides guid
 | **Watermarks** | Medium | Medium | Add text/image watermarks to pages |
 | **Page manipulation** | High | Medium | Rotate, delete, reorder, insert pages |
 | **PDF optimization** | Medium | High | Remove unused objects, compress streams |
-| **Metadata (write)** | Medium | Low | Set document info, XMP metadata |
 | **WebP support** | Low | Medium | WebP image embedding (requires external decoder) |
 | **Font subsetting (advanced)** | Low | High | Full TTF subsetting with table rebuilding |
 | **Type 1 fonts** | Low | Medium | PostScript Type 1 font support |
@@ -512,7 +513,7 @@ func (s *Subform) CreateInstances(data []map[string]string) []SubformInstance {
 5. **Advanced graphics** - Curves, gradients, patterns
 6. **Annotations** - Create links, comments, highlights
 7. **Bookmarks** - Create navigation structure
-8. **Metadata handling** - Read/write document metadata
+8. **Metadata handling** - Read/write document metadata ✅ (Info dictionary write implemented)
 9. **PDF optimization** - Remove unused objects, compress
 10. **Accessibility** - Tagged PDF, structure tree
 

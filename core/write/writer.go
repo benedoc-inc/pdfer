@@ -303,7 +303,9 @@ func (w *PDFWriter) formatValue(value interface{}) string {
 		if strings.HasPrefix(v, "/") || strings.HasSuffix(v, " R") {
 			return v
 		}
+		// If it's already escaped (contains \( or \)), use as-is
 		// Otherwise, it's a string - format as PDF string
+		// Note: escapePDFString in metadata.go returns escaped content without parentheses
 		return "(" + v + ")"
 	case []byte:
 		return "<" + fmt.Sprintf("%X", v) + ">"
