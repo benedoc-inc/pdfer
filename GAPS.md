@@ -16,7 +16,7 @@ This document details the current implementation gaps in pdfer and provides guid
 | Form Handling | 5 | 0 | 1 |
 | Font Features | 1 | 0 | 5 |
 | Image Features | 6 | 0 | 2 |
-| Error Handling | 0 | 0 | 5 |
+| Error Handling | 2 | 0 | 3 |
 
 ---
 
@@ -468,12 +468,25 @@ func (s *Subform) CreateInstances(data []map[string]string) []SubformInstance {
 | **Image scaling** | Medium | Low | Scale images before embedding (currently done via DrawImageAt) |
 
 ### Error Handling & Validation
+
+#### ✅ Fully Implemented
+
+| Feature | File | Notes |
+|---------|------|-------|
+| **Structured error types** | `types/errors.go` | PDFError with error codes, context support, errors.Is/Unwrap compatibility |
+| **Error codes** | `types/errors.go` | Categorized error codes (parsing, encryption, forms, content, write, I/O) |
+| **Error wrapping** | `types/errors.go` | WrapError/WrapErrorf for chaining errors with context |
+| **Sentinel errors** | `types/errors.go` | Pre-defined sentinel errors for use with errors.Is() |
+| **Helper functions** | `types/errors.go` | IsPDFError, GetErrorCode, IsNotFound, IsEncryptionError, IsValidationError |
+| **Warning system** | `types/warnings.go` | Warning types, WarningCollector for non-fatal issues, level-based filtering |
+| **Warning integration** | `core/parse/api.go` | Warning collector support in ParseOptions and PDF struct |
+
+#### ❌ Not Implemented
+
 | Feature | Priority | Complexity | Notes |
 |---------|----------|------------|-------|
-| **Better error messages** | High | Medium | Detailed, actionable error messages |
 | **Error recovery** | Medium | High | Graceful handling of corrupted PDFs |
 | **PDF validation** | Medium | High | Validate PDF structure, compliance |
-| **Warning system** | Medium | Low | Non-fatal warnings for issues |
 | **Diagnostic mode** | Low | Medium | Detailed diagnostic information |
 
 ## Contribution Priority
@@ -494,7 +507,8 @@ func (s *Subform) CreateInstances(data []map[string]string) []SubformInstance {
 1. Encryption on write
 2. Cross-reference stream writing
 3. Subform repetition in XFA
-4. Better error messages
+4. Better error messages ✅ (Structured error types implemented)
+5. Warning system ✅ (Non-fatal warning collection implemented)
 5. **Advanced graphics** - Curves, gradients, patterns
 6. **Annotations** - Create links, comments, highlights
 7. **Bookmarks** - Create navigation structure

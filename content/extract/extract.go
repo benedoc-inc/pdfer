@@ -34,7 +34,10 @@ func ExtractContent(pdfBytes []byte, password []byte, verbose bool) (*types.Cont
 	// Extract metadata
 	metadata, err := ExtractMetadata(pdfBytes, pdf, verbose)
 	if err != nil {
-		if verbose {
+		// Use warning collector if available, otherwise fall back to verbose logging
+		if pdf.Warnings() != nil {
+			pdf.Warnings().AddWarningf(types.WarningLevelWarning, "failed to extract metadata: %v", err)
+		} else if verbose {
 			fmt.Printf("Warning: failed to extract metadata: %v\n", err)
 		}
 	} else {
@@ -51,7 +54,10 @@ func ExtractContent(pdfBytes []byte, password []byte, verbose bool) (*types.Cont
 	// Extract bookmarks/outlines
 	bookmarks, err := ExtractBookmarks(pdfBytes, pdf, verbose)
 	if err != nil {
-		if verbose {
+		// Use warning collector if available, otherwise fall back to verbose logging
+		if pdf.Warnings() != nil {
+			pdf.Warnings().AddWarningf(types.WarningLevelWarning, "failed to extract bookmarks: %v", err)
+		} else if verbose {
 			fmt.Printf("Warning: failed to extract bookmarks: %v\n", err)
 		}
 	} else {

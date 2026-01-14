@@ -20,6 +20,8 @@ A pure Go library for PDF processing with comprehensive XFA (XML Forms Architect
 - **Stream Filters** - FlateDecode, ASCIIHexDecode, ASCII85Decode, RunLengthDecode
 - **Incremental Updates** - Parse PDFs with multiple revisions, follow /Prev chains
 - **Byte-Perfect Parsing** - Preserve exact bytes for reconstruction of original PDF
+- **Structured Error Handling** - Categorized error types with codes, context, and standard library compatibility
+- **Warning System** - Collect and manage non-fatal warnings during PDF processing
 
 ## Installation
 
@@ -506,6 +508,106 @@ result, _ := compare.ComparePDFsWithOptions(pdf1Bytes, pdf2Bytes, nil, nil, opts
 - **Text extraction**: Full text with position, font, and size information
 - **Comprehensive reports**: Human-readable and JSON output formats
 
+## Error Handling
+
+The library provides structured error handling with categorized error types:
+
+```go
+import "github.com/benedoc-inc/pdfer/types"
+import "errors"
+
+pdf, err := parse.Open(pdfBytes)
+if err != nil {
+    // Check for specific error types
+    if errors.Is(err, types.ErrWrongPassword) {
+        log.Println("Incorrect password")
+    } else if errors.Is(err, types.ErrObjectNotFound) {
+        log.Println("Object not found")
+    }
+    
+    // Get error code
+    if code, ok := types.GetErrorCode(err); ok {
+        log.Printf("Error code: %s", code)
+    }
+    
+    // Check error category
+    if types.IsEncryptionError(err) {
+        log.Println("Encryption-related error")
+    } else if types.IsNotFound(err) {
+        log.Println("Resource not found")
+    }
+    
+    // Access structured error details
+    if pdfErr, ok := types.IsPDFError(err); ok {
+        log.Printf("Code: %s, Message: %s", pdfErr.Code, pdfErr.Message)
+        if pdfErr.Context != nil {
+            log.Printf("Context: %v", pdfErr.Context)
+        }
+    }
+}
+```
+
+**Error Categories:**
+- **Parsing errors**: Invalid PDF, malformed structure, object not found
+- **Encryption errors**: Wrong password, decryption failed, unsupported crypto
+- **Form errors**: No forms, invalid form, field not found, validation errors
+- **Content errors**: Extraction errors, font errors, image errors
+- **Write errors**: Write failures, invalid input
+- **I/O errors**: File system errors
+
+All errors implement `errors.Is()` and `errors.Unwrap()` for compatibility with the standard library.
+
+### Warning System
+
+The library provides a warning system for collecting non-fatal issues during PDF processing:
+
+```go
+import "github.com/benedoc-inc/pdfer/types"
+import "github.com/benedoc-inc/pdfer/core/parse"
+
+// Create a warning collector
+warnings := types.NewWarningCollector(true)
+
+// Use it in ParseOptions
+pdf, err := parse.OpenWithOptions(pdfBytes, parse.ParseOptions{
+    Warnings: warnings,
+})
+
+// Check for warnings after processing
+if warnings.HasWarnings() {
+    log.Printf("Found %d warnings", warnings.Count())
+    
+    // Get all warnings
+    for _, warning := range warnings.Warnings() {
+        log.Printf("[%s] %s", warning.Level, warning.Message)
+    }
+    
+    // Filter by level
+    errors := warnings.FilterByLevel(types.WarningLevelError)
+    for _, warning := range errors {
+        log.Printf("Error-level warning: %s", warning.Message)
+    }
+    
+    // Filter by code
+    fontWarnings := warnings.GetByCode("MISSING_FONT")
+    for _, warning := range fontWarnings {
+        log.Printf("Font warning: %s", warning.Message)
+    }
+}
+```
+
+**Warning Levels:**
+- `WarningLevelInfo` - Informational messages
+- `WarningLevelWarning` - Non-critical issues
+- `WarningLevelError` - Non-fatal errors that should be reported
+
+**Warning Features:**
+- Collect warnings during PDF operations
+- Filter by level or code
+- Add context to warnings
+- Enable/disable collection
+- Access warnings programmatically
+
 ## Supported PDF Features
 
 ### Encryption
@@ -581,6 +683,8 @@ See [GAPS.md](GAPS.md) for detailed implementation status and contribution oppor
 - [x] **Image embedding** - JPEG, PNG image objects ✅
 - [x] **Page content streams** - Text and graphics operators ✅
 - [x] **AES-256 full support** - Complete V5/R6 encryption ✅
+- [x] **Structured error handling** - Categorized error types with codes and context ✅
+- [x] **Warning system** - Non-fatal warning collection and management ✅
 
 ### Not Planned
 - Dynamic XFA rendering (requires full layout engine)

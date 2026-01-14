@@ -34,9 +34,10 @@ import (
 
 // ParseOptions configures PDF parsing behavior
 type ParseOptions struct {
-	Password    []byte // Password for encrypted PDFs (empty for unencrypted)
-	Verbose     bool   // Enable verbose logging
-	BytePerfect bool   // Preserve exact bytes for reconstruction
+	Password    []byte                  // Password for encrypted PDFs (empty for unencrypted)
+	Verbose     bool                    // Enable verbose logging
+	BytePerfect bool                    // Preserve exact bytes for reconstruction
+	Warnings    *types.WarningCollector // Optional warning collector for non-fatal issues
 }
 
 // PDF represents a parsed PDF document.
@@ -343,4 +344,23 @@ func (p *PDF) Raw() []byte {
 // Document returns the underlying PDFDocument (only for BytePerfect mode)
 func (p *PDF) Document() *PDFDocument {
 	return p.doc
+}
+
+// Warnings returns the warning collector if one was provided in ParseOptions
+func (p *PDF) Warnings() *types.WarningCollector {
+	return p.opts.Warnings
+}
+
+// addWarning adds a warning if a warning collector is available
+func (p *PDF) addWarning(level types.WarningLevel, message string) {
+	if p.opts.Warnings != nil {
+		p.opts.Warnings.AddWarning(level, message)
+	}
+}
+
+// addWarningf adds a formatted warning if a warning collector is available
+func (p *PDF) addWarningf(level types.WarningLevel, format string, args ...interface{}) {
+	if p.opts.Warnings != nil {
+		p.opts.Warnings.AddWarningf(level, format, args...)
+	}
 }
