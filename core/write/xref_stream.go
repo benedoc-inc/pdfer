@@ -8,7 +8,11 @@ import (
 
 // writeXRefStream writes a cross-reference stream instead of a traditional xref table
 // Returns the position where the xref stream object starts
-func (w *PDFWriter) writeXRefStream(buf *bytes.Buffer, positions map[int]int64) (int64, error) {
+// objStreamMap maps object numbers to (streamObjNum, index) for Type 2 entries
+func (w *PDFWriter) writeXRefStream(buf *bytes.Buffer, positions map[int]int64, objStreamMap map[int]struct {
+	streamObjNum int
+	index        int
+}) (int64, error) {
 	// Reserve object number for xref stream
 	xrefStreamObjNum := w.nextObjNum
 	totalObjects := w.nextObjNum + 1 // Include the xref stream itself
@@ -33,7 +37,29 @@ func (w *PDFWriter) writeXRefStream(buf *bytes.Buffer, positions map[int]int64) 
 	// Calculate bytes needed for offset
 	w1 := 1 // Type field: 1 byte (0=free, 1=in-use, 2=compressed)
 	w2 := calculateBytesNeeded(maxOffset)
-	w3 := 1 // Generation: 1 byte (usually 0)
+	// For Type 2 entries, w2 is stream object number, w3 is index
+	// Need enough bytes for max object number and max index
+	maxStreamObjNum := int64(0)
+	maxIndex := int64(0)
+	if objStreamMap != nil {
+		for _, info := range objStreamMap {
+			if int64(info.streamObjNum) > maxStreamObjNum {
+				maxStreamObjNum = int64(info.streamObjNum)
+			}
+			if int64(info.index) > maxIndex {
+				maxIndex = int64(info.index)
+			}
+		}
+	}
+	// w2 needs to handle both offsets and stream object numbers
+	if maxStreamObjNum > maxOffset {
+		w2 = calculateBytesNeeded(maxStreamObjNum)
+	}
+	// w3 needs to handle both generation (usually 0) and index
+	w3 := calculateBytesNeeded(maxIndex)
+	if w3 < 1 {
+		w3 = 1 // At least 1 byte
+	}
 
 	// Build binary stream data
 	// Include entry for xref stream object itself
@@ -49,6 +75,21 @@ func (w *PDFWriter) writeXRefStream(buf *bytes.Buffer, positions map[int]int64) 
 	// Entries for each existing object
 	for i := 1; i < w.nextObjNum; i++ {
 		entry := make([]byte, w1+w2+w3)
+
+		// Check if object is in an object stream (Type 2)
+		if objStreamMap != nil {
+			if streamInfo, inStream := objStreamMap[i]; inStream {
+				// Type 2: compressed object in object stream
+				entry[0] = 2
+				// Field 2: object stream number
+				writeBigEndian(entry[w1:], int64(streamInfo.streamObjNum), w2)
+				// Field 3: index within stream
+				writeBigEndian(entry[w1+w2:], int64(streamInfo.index), w3)
+				streamData = append(streamData, entry...)
+				continue
+			}
+		}
+
 		if pos, ok := positions[i]; ok {
 			// Type 1: in-use object
 			entry[0] = 1

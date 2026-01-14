@@ -23,7 +23,9 @@ A pure Go library for PDF processing with comprehensive XFA (XML Forms Architect
 - **Structured Error Handling** - Categorized error types with codes, context, and standard library compatibility
 - **Warning System** - Collect and manage non-fatal warnings during PDF processing
 - **Cross-Reference Streams** - Write modern compressed xref streams (PDF 1.5+) for smaller, more efficient PDFs
+- **Object Streams** - Compress objects into object streams (ObjStm) for significantly smaller file sizes
 - **Bookmarks/Outlines** - Create hierarchical document navigation with page destinations
+- **Watermarks** - Add text or image watermarks to pages with rotation, opacity, and positioning
 
 ## Installation
 
@@ -197,8 +199,9 @@ import "github.com/benedoc-inc/pdfer/types"
 // Create a simple PDF with text and graphics
 builder := write.NewSimplePDFBuilder()
 
-// Enable cross-reference stream (PDF 1.5+ modern format, more efficient)
-builder.Writer().UseXRefStream(true)
+// Enable modern PDF features (PDF 1.5+)
+builder.Writer().UseXRefStream(true)  // Compressed xref streams
+builder.Writer().UseObjectStream(true) // Compress objects (requires xref streams)
 
 // Set document metadata
 metadata := &types.DocumentMetadata{
@@ -225,6 +228,19 @@ bookmarks := []types.Bookmark{
     },
 }
 builder.SetBookmarks(bookmarks)
+
+// Add watermark to page
+page.AddTextWatermark("DRAFT", 72, 45) // Text, font size, angle
+
+// Or use full watermark options
+watermarkOpts := &write.WatermarkOptions{
+    Text:     "CONFIDENTIAL",
+    FontSize: 60,
+    Angle:    30,
+    Opacity:  0.3,
+    Color:    &write.Color{R: 1.0, G: 0, B: 0}, // Red
+}
+page.AddWatermark(watermarkOpts)
 
 // Add encryption (optional)
 userPassword := []byte("mypassword")

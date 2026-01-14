@@ -141,18 +141,18 @@ This document details the current implementation gaps in pdfer and provides guid
 | **Cross-reference streams** | `core/write/xref_stream.go` | Write modern compressed xref streams (PDF 1.5+) instead of traditional tables |
 | **Bookmarks/outlines (write)** | `core/write/bookmarks.go` | Create document navigation structure with hierarchical bookmarks |
 | **Encryption on write** | `core/write/encryption_v5.go`, `core/write/encryption_helper.go` | Generate new encrypted PDFs with AES-256 (V5/R5) encryption |
+| **Object streams** | `core/write/object_stream.go` | Compress objects into object streams (ObjStm) for smaller file sizes |
+| **Watermarks** | `core/write/watermark.go` | Add text and image watermarks to pages with rotation and opacity |
 
 ### ❌ Not Implemented
 
 | Feature | Priority | Complexity | Notes |
 |---------|----------|------------|-------|
-| **Object streams** | Medium | Medium | Compress objects on write |
 | **Digital signatures** | Low | Very High | PKCS#7, CMS signing |
 | **Incremental save** | Medium | Medium | Append without rewriting |
 | **Advanced graphics** | Medium | High | Curves (bezier), arcs, gradients, patterns |
 | **Transparency/alpha** | Medium | High | Alpha channels, blend modes, soft masks |
 | **Annotations (write)** | High | High | Links, comments, highlights, form fields |
-| **Watermarks** | Medium | Medium | Add text/image watermarks to pages |
 | **Page manipulation** | High | Medium | Rotate, delete, reorder, insert pages |
 | **PDF optimization** | Medium | High | Remove unused objects, compress streams |
 | **WebP support** | Low | Medium | WebP image embedding (requires external decoder) |
@@ -507,6 +507,8 @@ func (s *Subform) CreateInstances(data []map[string]string) []SubformInstance {
 ### Medium Priority (Usability)
 1. Encryption on write ✅ (AES-256 encryption with user/owner passwords implemented)
 2. Cross-reference stream writing ✅ (Modern xref stream format implemented)
+3. Object streams ✅ (Object compression into ObjStm implemented)
+4. Watermarks ✅ (Text and image watermarks with rotation/opacity implemented)
 3. Subform repetition in XFA
 4. Better error messages ✅ (Structured error types implemented)
 5. Warning system ✅ (Non-fatal warning collection implemented)

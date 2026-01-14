@@ -32,16 +32,17 @@ type Dictionary map[string]interface{}
 
 // PDFWriter builds PDF files from scratch
 type PDFWriter struct {
-	objects       map[int]*PDFObject
-	nextObjNum    int
-	rootRef       string
-	infoRef       string
-	encryptRef    string
-	outlinesRef   string // Outlines/bookmarks reference
-	encryptInfo   *types.PDFEncryption
-	fileID        []byte
-	pdfVersion    string
-	useXRefStream bool // If true, use cross-reference stream instead of table
+	objects         map[int]*PDFObject
+	nextObjNum      int
+	rootRef         string
+	infoRef         string
+	encryptRef      string
+	outlinesRef     string // Outlines/bookmarks reference
+	encryptInfo     *types.PDFEncryption
+	fileID          []byte
+	pdfVersion      string
+	useXRefStream   bool // If true, use cross-reference stream instead of table
+	useObjectStream bool // If true, compress objects into object streams
 }
 
 // NewPDFWriter creates a new PDF writer
@@ -68,6 +69,17 @@ func (w *PDFWriter) SetEncryption(encryptInfo *types.PDFEncryption, fileID []byt
 // If true, writes a compressed cross-reference stream instead of traditional xref table
 func (w *PDFWriter) UseXRefStream(enable bool) {
 	w.useXRefStream = enable
+}
+
+// UseObjectStream enables object stream writing (PDF 1.5+)
+// If true, compresses objects into object streams (ObjStm) for smaller file sizes
+// Note: Object streams require xref streams, so this automatically enables xref streams
+func (w *PDFWriter) UseObjectStream(enable bool) {
+	w.useObjectStream = enable
+	if enable {
+		// Object streams require xref streams (Type 2 entries)
+		w.useXRefStream = true
+	}
 }
 
 // AddObject adds a new object and returns its object number
@@ -254,7 +266,14 @@ func (w *PDFWriter) Write(out io.Writer) error {
 	buf.WriteString(fmt.Sprintf("%%PDF-%s\n", w.pdfVersion))
 	buf.Write([]byte{0x25, 0xE2, 0xE3, 0xCF, 0xD3, 0x0A}) // Binary marker
 
-	// Collect and sort object numbers
+	// Create object streams if enabled (before writing objects)
+	// This may add new object stream objects to w.objects
+	objStreamMap, _, err := w.createObjectStreams()
+	if err != nil {
+		return fmt.Errorf("failed to create object streams: %v", err)
+	}
+
+	// Collect and sort object numbers (after object streams are created)
 	var objNums []int
 	for num := range w.objects {
 		objNums = append(objNums, num)
@@ -268,6 +287,13 @@ func (w *PDFWriter) Write(out io.Writer) error {
 		obj := w.objects[objNum]
 		if obj.IsFree {
 			continue
+		}
+
+		// Skip objects that are in object streams (they'll be referenced via Type 2)
+		if objStreamMap != nil {
+			if _, inStream := objStreamMap[objNum]; inStream {
+				continue
+			}
 		}
 
 		positions[objNum] = int64(buf.Len())
@@ -313,8 +339,7 @@ func (w *PDFWriter) Write(out io.Writer) error {
 	// Write cross-reference (stream or table)
 	if w.useXRefStream {
 		// Write cross-reference stream
-		var err error
-		xrefPos, err = w.writeXRefStream(&buf, positions)
+		xrefPos, err = w.writeXRefStream(&buf, positions, objStreamMap)
 		if err != nil {
 			return fmt.Errorf("failed to write xref stream: %v", err)
 		}
@@ -388,7 +413,7 @@ func (w *PDFWriter) Write(out io.Writer) error {
 	buf.WriteString(fmt.Sprintf("startxref\n%d\n%%%%EOF\n", xrefPos))
 
 	// Write to output
-	_, err := out.Write(buf.Bytes())
+	_, err = out.Write(buf.Bytes())
 	return err
 }
 
