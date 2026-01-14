@@ -23,6 +23,7 @@ A pure Go library for PDF processing with comprehensive XFA (XML Forms Architect
 - **Structured Error Handling** - Categorized error types with codes, context, and standard library compatibility
 - **Warning System** - Collect and manage non-fatal warnings during PDF processing
 - **Cross-Reference Streams** - Write modern compressed xref streams (PDF 1.5+) for smaller, more efficient PDFs
+- **Bookmarks/Outlines** - Create hierarchical document navigation with page destinations
 
 ## Installation
 
@@ -207,6 +208,28 @@ metadata := &types.DocumentMetadata{
     Creator: "pdfer",
 }
 builder.Writer().SetMetadata(metadata)
+
+// Add bookmarks for navigation
+bookmarks := []types.Bookmark{
+    {
+        Title:      "Introduction",
+        PageNumber: 1,
+    },
+    {
+        Title:      "Chapter 1",
+        PageNumber: 2,
+        Children: []types.Bookmark{
+            {Title: "Section 1.1", PageNumber: 2},
+            {Title: "Section 1.2", PageNumber: 3},
+        },
+    },
+}
+builder.SetBookmarks(bookmarks)
+
+// Add encryption (optional)
+userPassword := []byte("mypassword")
+ownerPassword := []byte("ownerpassword")
+builder.Writer().SetupEncryptionWithPasswords(userPassword, ownerPassword, -3904, true)
 
 // Add a page
 page := builder.AddPage(write.PageSizeLetter)

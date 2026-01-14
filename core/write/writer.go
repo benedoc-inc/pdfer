@@ -37,6 +37,7 @@ type PDFWriter struct {
 	rootRef       string
 	infoRef       string
 	encryptRef    string
+	outlinesRef   string // Outlines/bookmarks reference
 	encryptInfo   *types.PDFEncryption
 	fileID        []byte
 	pdfVersion    string
@@ -157,6 +158,84 @@ func (w *PDFWriter) SetInfo(objNum int) {
 	w.infoRef = fmt.Sprintf("%d 0 R", objNum)
 }
 
+// updateCatalogWithOutlines updates the catalog object to include /Outlines reference
+func (w *PDFWriter) updateCatalogWithOutlines() {
+	if w.outlinesRef == "" || w.rootRef == "" {
+		return
+	}
+
+	// Parse root object number from rootRef (format: "N 0 R")
+	rootObjNum := 0
+	fmt.Sscanf(w.rootRef, "%d 0 R", &rootObjNum)
+	if rootObjNum == 0 {
+		return
+	}
+
+	// Get catalog object
+	catalogObj, ok := w.objects[rootObjNum]
+	if !ok || catalogObj == nil {
+		return
+	}
+
+	// Parse catalog dictionary if it's a Dictionary, otherwise parse as string
+	var catalogDict Dictionary
+	if catalogObj.Dict != nil {
+		catalogDict = catalogObj.Dict
+	} else {
+		// Try to parse from Content
+		catalogStr := string(catalogObj.Content)
+		// Simple parsing - find dictionary entries
+		// For now, rebuild the dictionary properly
+		// Extract existing entries and rebuild
+		if strings.Contains(catalogStr, "/Type") && strings.Contains(catalogStr, "/Pages") {
+			// Rebuild with /Outlines
+			catalogDict = Dictionary{
+				"/Type":  "/Catalog",
+				"/Pages": extractDictValueFromString(catalogStr, "/Pages"),
+			}
+			if pagesRef := extractDictValueFromString(catalogStr, "/Pages"); pagesRef != "" {
+				catalogDict["/Pages"] = pagesRef
+			}
+		} else {
+			// Fallback: just add /Outlines to string
+			catalogStr := string(catalogObj.Content)
+			if !strings.Contains(catalogStr, "/Outlines") {
+				lastIdx := strings.LastIndex(catalogStr, ">>")
+				if lastIdx > 0 {
+					catalogStr = catalogStr[:lastIdx] + fmt.Sprintf("/Outlines %s ", w.outlinesRef) + catalogStr[lastIdx:]
+					catalogObj.Content = []byte(catalogStr)
+				}
+			}
+			return
+		}
+	}
+
+	// Add /Outlines to dictionary
+	catalogDict["/Outlines"] = w.outlinesRef
+
+	// Update catalog object
+	catalogObj.Content = w.formatDictionary(catalogDict)
+	catalogObj.Dict = catalogDict
+}
+
+// extractDictValueFromString extracts a dictionary value from a string representation
+func extractDictValueFromString(dictStr, key string) string {
+	// Simple regex-like extraction
+	keyPattern := key + " "
+	idx := strings.Index(dictStr, keyPattern)
+	if idx == -1 {
+		return ""
+	}
+	start := idx + len(keyPattern)
+	// Find the value (could be a reference, array, etc.)
+	// For simplicity, extract until space or >
+	end := start
+	for end < len(dictStr) && dictStr[end] != ' ' && dictStr[end] != '>' && dictStr[end] != '\n' {
+		end++
+	}
+	return dictStr[start:end]
+}
+
 // SetEncryptRef sets the encrypt dictionary object reference
 func (w *PDFWriter) SetEncryptRef(objNum int) {
 	w.encryptRef = fmt.Sprintf("%d 0 R", objNum)
@@ -164,6 +243,11 @@ func (w *PDFWriter) SetEncryptRef(objNum int) {
 
 // Write outputs the complete PDF to the given writer
 func (w *PDFWriter) Write(out io.Writer) error {
+	// Update catalog with outlines before writing
+	if w.outlinesRef != "" {
+		w.updateCatalogWithOutlines()
+	}
+
 	var buf bytes.Buffer
 
 	// Write header
@@ -244,6 +328,11 @@ func (w *PDFWriter) Write(out io.Writer) error {
 		if w.infoRef != "" {
 			buf.WriteString(fmt.Sprintf("/Info %s\n", w.infoRef))
 		}
+		if w.outlinesRef != "" {
+			// Outlines reference goes in the catalog, not trailer
+			// We'll update the catalog object if it exists
+			w.updateCatalogWithOutlines()
+		}
 		if w.encryptRef != "" {
 			buf.WriteString(fmt.Sprintf("/Encrypt %s\n", w.encryptRef))
 		}
@@ -279,6 +368,11 @@ func (w *PDFWriter) Write(out io.Writer) error {
 		}
 		if w.infoRef != "" {
 			buf.WriteString(fmt.Sprintf("/Info %s\n", w.infoRef))
+		}
+		if w.outlinesRef != "" {
+			// Outlines reference goes in the catalog, not trailer
+			// We'll update the catalog object if it exists
+			w.updateCatalogWithOutlines()
 		}
 		if w.encryptRef != "" {
 			buf.WriteString(fmt.Sprintf("/Encrypt %s\n", w.encryptRef))

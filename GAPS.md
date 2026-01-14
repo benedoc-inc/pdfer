@@ -139,19 +139,19 @@ This document details the current implementation gaps in pdfer and provides guid
 | **Font embedding** | `resources/font/font.go`, `resources/font/pdf.go` | TrueType/OpenType font embedding with subsetting support |
 | **Metadata writing** | `core/write/metadata.go` | Set document Info dictionary metadata (title, author, dates, custom fields) |
 | **Cross-reference streams** | `core/write/xref_stream.go` | Write modern compressed xref streams (PDF 1.5+) instead of traditional tables |
+| **Bookmarks/outlines (write)** | `core/write/bookmarks.go` | Create document navigation structure with hierarchical bookmarks |
+| **Encryption on write** | `core/write/encryption_v5.go`, `core/write/encryption_helper.go` | Generate new encrypted PDFs with AES-256 (V5/R5) encryption |
 
 ### ❌ Not Implemented
 
 | Feature | Priority | Complexity | Notes |
 |---------|----------|------------|-------|
-| **Encryption on write** | Medium | Medium | Generate new encrypted PDFs |
 | **Object streams** | Medium | Medium | Compress objects on write |
 | **Digital signatures** | Low | Very High | PKCS#7, CMS signing |
 | **Incremental save** | Medium | Medium | Append without rewriting |
 | **Advanced graphics** | Medium | High | Curves (bezier), arcs, gradients, patterns |
 | **Transparency/alpha** | Medium | High | Alpha channels, blend modes, soft masks |
 | **Annotations (write)** | High | High | Links, comments, highlights, form fields |
-| **Bookmarks/outlines (write)** | Medium | Medium | Create document navigation structure |
 | **Watermarks** | Medium | Medium | Add text/image watermarks to pages |
 | **Page manipulation** | High | Medium | Rotate, delete, reorder, insert pages |
 | **PDF optimization** | Medium | High | Remove unused objects, compress streams |
@@ -505,14 +505,14 @@ func (s *Subform) CreateInstances(data []map[string]string) []SubformInstance {
 10. **Page manipulation** - Rotate, delete, reorder pages
 
 ### Medium Priority (Usability)
-1. Encryption on write
+1. Encryption on write ✅ (AES-256 encryption with user/owner passwords implemented)
 2. Cross-reference stream writing ✅ (Modern xref stream format implemented)
 3. Subform repetition in XFA
 4. Better error messages ✅ (Structured error types implemented)
 5. Warning system ✅ (Non-fatal warning collection implemented)
 5. **Advanced graphics** - Curves, gradients, patterns
 6. **Annotations** - Create links, comments, highlights
-7. **Bookmarks** - Create navigation structure
+7. **Bookmarks** - Create navigation structure ✅ (Bookmark/outline writing implemented)
 8. **Metadata handling** - Read/write document metadata ✅ (Info dictionary write implemented)
 9. **PDF optimization** - Remove unused objects, compress
 10. **Accessibility** - Tagged PDF, structure tree

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/benedoc-inc/pdfer/resources/font"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 // PageSize represents standard page dimensions in points (1 point = 1/72 inch)
@@ -217,6 +218,19 @@ func (b *SimplePDFBuilder) Bytes() ([]byte, error) {
 	b.writer.SetRoot(b.catalogObjNum)
 
 	return b.writer.Bytes()
+}
+
+// SetBookmarks sets bookmarks for the document
+// pageObjNums will be automatically built from the pages if nil
+func (b *SimplePDFBuilder) SetBookmarks(bookmarks []types.Bookmark) error {
+	// Build page object number map if not provided
+	pageObjNums := make(map[int]int)
+	for i, pageNum := range b.pages {
+		pageObjNums[i+1] = pageNum // 1-based page numbers
+	}
+
+	_, err := b.writer.SetBookmarks(bookmarks, pageObjNums)
+	return err
 }
 
 // PagesObjNum returns the pages object number
