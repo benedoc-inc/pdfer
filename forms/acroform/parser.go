@@ -51,7 +51,7 @@ func ParseAcroForm(pdfBytes []byte, encryptInfo *types.PDFEncryption, verbose bo
 		Verbose:  verbose,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse PDF: %w", err)
+		return nil, types.WrapError(types.ErrCodeMalformedPDF, "failed to parse PDF", err)
 	}
 
 	// Search for /AcroForm in the PDF
@@ -72,21 +72,21 @@ func parseAcroFormFromBytes(pdfBytes []byte, encryptInfo *types.PDFEncryption, v
 		// Try inline AcroForm
 		acroFormInlinePattern := regexp.MustCompile(`/AcroForm\s*<<`)
 		if acroFormInlinePattern.FindStringIndex(pdfStr) == nil {
-			return nil, fmt.Errorf("AcroForm not found in PDF")
+			return nil, types.NewPDFError(types.ErrCodeNoForms, "AcroForm not found in PDF")
 		}
 		// Inline AcroForm - would need more complex parsing
-		return nil, fmt.Errorf("inline AcroForm not yet supported")
+		return nil, types.NewPDFError(types.ErrCodeUnsupportedPDF, "inline AcroForm not yet supported")
 	}
 
 	acroFormObjNum, err := strconv.Atoi(acroFormMatch[1])
 	if err != nil {
-		return nil, fmt.Errorf("invalid AcroForm object number: %v", err)
+		return nil, types.WrapError(types.ErrCodeInvalidObject, "invalid AcroForm object number", err)
 	}
 
 	// Get AcroForm object
 	acroFormData, err := parse.GetObject(pdfBytes, acroFormObjNum, encryptInfo, verbose)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get AcroForm object %d: %w", acroFormObjNum, err)
+		return nil, types.WrapErrorf(types.ErrCodeObjectNotFound, err, "failed to get AcroForm object %d", acroFormObjNum)
 	}
 
 	acroForm := &AcroForm{
@@ -95,7 +95,7 @@ func parseAcroFormFromBytes(pdfBytes []byte, encryptInfo *types.PDFEncryption, v
 
 	// Parse AcroForm dictionary
 	if err := parseAcroFormDict(acroFormData, acroForm, pdfBytes, encryptInfo, verbose); err != nil {
-		return nil, fmt.Errorf("failed to parse AcroForm dictionary: %w", err)
+		return nil, types.WrapError(types.ErrCodeInvalidForm, "failed to parse AcroForm dictionary", err)
 	}
 
 	return acroForm, nil
@@ -117,7 +117,7 @@ func parseAcroFormDict(data []byte, acroForm *AcroForm, pdfBytes []byte, encrypt
 	fieldsPattern := regexp.MustCompile(`/Fields\s*\[([^\]]*)\]`)
 	fieldsMatch := fieldsPattern.FindStringSubmatch(dataStr)
 	if fieldsMatch == nil {
-		return fmt.Errorf("Fields array not found in AcroForm")
+		return types.NewPDFError(types.ErrCodeInvalidForm, "Fields array not found in AcroForm")
 	}
 
 	fieldsStr := fieldsMatch[1]
@@ -151,7 +151,7 @@ func parseAcroFormDict(data []byte, acroForm *AcroForm, pdfBytes []byte, encrypt
 func parseField(pdfBytes []byte, objNum, genNum int, encryptInfo *types.PDFEncryption, verbose bool) (*Field, error) {
 	fieldData, err := parse.GetObject(pdfBytes, objNum, encryptInfo, verbose)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get field object: %w", err)
+		return nil, types.WrapError(types.ErrCodeFieldNotFound, "failed to get field object", err)
 	}
 
 	field := &Field{

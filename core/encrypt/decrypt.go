@@ -6,7 +6,6 @@ import (
 	"crypto/cipher"
 	"crypto/md5"
 	"crypto/rc4"
-	"fmt"
 	"log"
 
 	"github.com/benedoc-inc/pdfer/types"
@@ -19,7 +18,7 @@ func DecryptPDF(pdfBytes []byte, password []byte, verbose bool) ([]byte, *types.
 	// Parse encryption dictionary
 	encrypt, err := ParseEncryptionDictionary(pdfBytes, verbose)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error parsing encryption dictionary: %v", err)
+		return nil, nil, types.WrapError(types.ErrCodeInvalidObject, "error parsing encryption dictionary", err)
 	}
 
 	if verbose {
@@ -36,7 +35,7 @@ func DecryptPDF(pdfBytes []byte, password []byte, verbose bool) ([]byte, *types.
 		// V5: Derive password key, verify U value, then unwrap actual encryption key from /UE
 		passwordKey, err := DeriveEncryptionKey(password, encrypt, fileID, verbose)
 		if err != nil {
-			return nil, nil, fmt.Errorf("error deriving password key: %v", err)
+			return nil, nil, types.WrapError(types.ErrCodeDecryptionFailed, "error deriving password key", err)
 		}
 
 		if verbose {
@@ -46,7 +45,7 @@ func DecryptPDF(pdfBytes []byte, password []byte, verbose bool) ([]byte, *types.
 		// Step 1: Verify U value to confirm password is correct
 		uMatch, err := VerifyUValueV5(password, passwordKey, encrypt, fileID, verbose)
 		if err != nil {
-			return nil, nil, fmt.Errorf("error verifying U value: %v", err)
+			return nil, nil, types.WrapError(types.ErrCodeDecryptionFailed, "error verifying U value", err)
 		}
 
 		if !uMatch {
@@ -74,14 +73,14 @@ func DecryptPDF(pdfBytes []byte, password []byte, verbose bool) ([]byte, *types.
 		}
 
 		if !uMatch {
-			return nil, nil, fmt.Errorf("password incorrect or encryption parameters invalid")
+			return nil, nil, types.NewPDFError(types.ErrCodeWrongPassword, "password incorrect or encryption parameters invalid")
 		}
 
 		// Step 2: Unwrap the actual encryption key from /UE (only if user password was used)
 		if encryptKey == nil {
 			unwrappedKey, err := UnwrapUserKeyV5(passwordKey, encrypt, verbose)
 			if err != nil {
-				return nil, nil, fmt.Errorf("error unwrapping encryption key from /UE: %v", err)
+				return nil, nil, types.WrapError(types.ErrCodeDecryptionFailed, "error unwrapping encryption key from /UE", err)
 			}
 
 			encryptKey = unwrappedKey
@@ -98,7 +97,7 @@ func DecryptPDF(pdfBytes []byte, password []byte, verbose bool) ([]byte, *types.
 		// V1-V4: Standard key derivation
 		encryptKey, err = DeriveEncryptionKey(password, encrypt, fileID, verbose)
 		if err != nil {
-			return nil, nil, fmt.Errorf("error deriving encryption key: %v", err)
+			return nil, nil, types.WrapError(types.ErrCodeDecryptionFailed, "error deriving encryption key", err)
 		}
 
 		encrypt.EncryptKey = encryptKey
@@ -110,7 +109,7 @@ func DecryptPDF(pdfBytes []byte, password []byte, verbose bool) ([]byte, *types.
 		// Verify password by checking U value
 		uValue, err := ComputeUValue(encryptKey, encrypt, fileID, verbose)
 		if err != nil {
-			return nil, nil, fmt.Errorf("error computing U value: %v", err)
+			return nil, nil, types.WrapError(types.ErrCodeDecryptionFailed, "error computing U value", err)
 		}
 
 		// Compare with stored U value
@@ -163,7 +162,7 @@ func DecryptPDF(pdfBytes []byte, password []byte, verbose bool) ([]byte, *types.
 		}
 
 		if !uMatch {
-			return nil, nil, fmt.Errorf("password incorrect or encryption parameters invalid")
+			return nil, nil, types.NewPDFError(types.ErrCodeWrongPassword, "password incorrect or encryption parameters invalid")
 		}
 	}
 
@@ -174,7 +173,7 @@ func DecryptPDF(pdfBytes []byte, password []byte, verbose bool) ([]byte, *types.
 	// Decrypt PDF objects
 	decryptedPDF, err := DecryptPDFObjects(pdfBytes, encrypt, verbose)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error decrypting PDF objects: %v", err)
+		return nil, nil, types.WrapError(types.ErrCodeDecryptionFailed, "error decrypting PDF objects", err)
 	}
 
 	return decryptedPDF, encrypt, nil
@@ -262,7 +261,7 @@ func DecryptObject(objBytes []byte, objNum, genNum int, encrypt *types.PDFEncryp
 		// Line 74: iv = data[:16]
 		// Line 75: data = data[16:]
 		if len(objBytes) < 16 {
-			return objBytes, fmt.Errorf("AES: Buf len < 16 (%d)", len(objBytes))
+			return objBytes, types.NewPDFErrorf(types.ErrCodeStreamError, "AES: buffer length < 16 (%d)", len(objBytes)).WithContext("length", len(objBytes))
 		}
 
 		iv := objBytes[:16]
@@ -275,7 +274,7 @@ func DecryptObject(objBytes []byte, objNum, genNum int, encrypt *types.PDFEncryp
 
 		// Line 81-83: if len(data) % 16 != 0: pad it (robustness check)
 		if len(data)%16 != 0 {
-			return data, fmt.Errorf("AES buf length not multiple of 16 (%d)", len(data))
+			return data, types.NewPDFErrorf(types.ErrCodeStreamError, "AES buffer length not multiple of 16 (%d)", len(data)).WithContext("length", len(data))
 		}
 
 		// Line 85-87: cipher = Cipher(self.alg, CBC(iv)); decryptor = cipher.decryptor(); d = decryptor.update(data) + decryptor.finalize()
@@ -295,7 +294,7 @@ func DecryptObject(objBytes []byte, objNum, genNum int, encrypt *types.PDFEncryp
 
 		paddingLen := int(decrypted[len(decrypted)-1])
 		if paddingLen > len(decrypted) {
-			return decrypted, fmt.Errorf("invalid pad length: %d > %d", paddingLen, len(decrypted))
+			return decrypted, types.NewPDFErrorf(types.ErrCodeStreamError, "invalid padding length: %d > %d", paddingLen, len(decrypted)).WithContext("padding_length", paddingLen).WithContext("data_length", len(decrypted))
 		}
 
 		return decrypted[:len(decrypted)-paddingLen], nil

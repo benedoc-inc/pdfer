@@ -28,8 +28,6 @@
 package parse
 
 import (
-	"fmt"
-
 	"github.com/benedoc-inc/pdfer/core/encrypt"
 	"github.com/benedoc-inc/pdfer/types"
 )
@@ -87,7 +85,7 @@ func Open(data []byte) (*PDF, error) {
 // OpenWithOptions parses a PDF with custom options.
 func OpenWithOptions(data []byte, opts ParseOptions) (*PDF, error) {
 	if len(data) < 8 {
-		return nil, fmt.Errorf("PDF too short: %d bytes", len(data))
+		return nil, types.NewPDFErrorf(types.ErrCodeInvalidPDF, "PDF too short: %d bytes", len(data)).WithContext("bytes", len(data))
 	}
 
 	pdf := &PDF{
@@ -98,17 +96,17 @@ func OpenWithOptions(data []byte, opts ParseOptions) (*PDF, error) {
 
 	// Handle encryption first
 	if err := pdf.handleEncryption(); err != nil {
-		return nil, fmt.Errorf("encryption error: %w", err)
+		return nil, types.WrapError(types.ErrCodeDecryptionFailed, "encryption error", err)
 	}
 
 	// Parse based on mode
 	if opts.BytePerfect {
 		if err := pdf.parseBytePerfect(); err != nil {
-			return nil, fmt.Errorf("byte-perfect parse failed: %w", err)
+			return nil, types.WrapError(types.ErrCodeMalformedPDF, "byte-perfect parse failed", err)
 		}
 	} else {
 		if err := pdf.parseStandard(); err != nil {
-			return nil, fmt.Errorf("parse failed: %w", err)
+			return nil, types.WrapError(types.ErrCodeMalformedPDF, "parse failed", err)
 		}
 	}
 
@@ -128,7 +126,7 @@ func (p *PDF) handleEncryption() error {
 		// PDF is encrypted - validate password
 		_, validatedEnc, err := encrypt.DecryptPDF(p.raw, p.opts.Password, p.opts.Verbose)
 		if err != nil {
-			return fmt.Errorf("decryption failed (wrong password?): %w", err)
+			return types.WrapError(types.ErrCodeWrongPassword, "decryption failed (wrong password?)", err)
 		}
 		p.encryption = validatedEnc
 	}
@@ -183,7 +181,7 @@ func (p *PDF) parseStandard() error {
 		// Fall back to simple trailer parsing
 		trailer, err := ParsePDFTrailer(p.raw)
 		if err != nil {
-			return fmt.Errorf("failed to parse PDF structure: %w", err)
+			return types.WrapError(types.ErrCodeMalformedPDF, "failed to parse PDF structure", err)
 		}
 		p.trailer = &TrailerInfo{
 			RootRef:    trailer.RootRef,
@@ -283,7 +281,7 @@ func (p *PDF) HasObject(objNum int) bool {
 func (p *PDF) GetObject(objNum int) ([]byte, error) {
 	ref, ok := p.xref.Objects[objNum]
 	if !ok {
-		return nil, fmt.Errorf("object %d not found", objNum)
+		return nil, types.NewPDFErrorf(types.ErrCodeObjectNotFound, "object %d not found", objNum).WithContext("object_number", objNum)
 	}
 
 	if ref.InStream {
@@ -299,7 +297,7 @@ func (p *PDF) GetObject(objNum int) ([]byte, error) {
 // Only available when parsed with BytePerfect option.
 func (p *PDF) GetRawObject(objNum int) (*PDFRawObject, error) {
 	if p.doc == nil {
-		return nil, fmt.Errorf("raw objects only available with BytePerfect parsing")
+		return nil, types.NewPDFError(types.ErrCodeInvalidInput, "raw objects only available with BytePerfect parsing")
 	}
 
 	// Search all revisions (newest first for most recent version)
@@ -309,7 +307,7 @@ func (p *PDF) GetRawObject(objNum int) (*PDFRawObject, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("object %d not found", objNum)
+	return nil, types.NewPDFErrorf(types.ErrCodeObjectNotFound, "object %d not found", objNum).WithContext("object_number", objNum)
 }
 
 // Trailer returns the trailer information

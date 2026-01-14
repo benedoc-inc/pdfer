@@ -3,8 +3,6 @@
 package forms
 
 import (
-	"fmt"
-
 	"github.com/benedoc-inc/pdfer/forms/acroform"
 	"github.com/benedoc-inc/pdfer/forms/xfa"
 	"github.com/benedoc-inc/pdfer/types"
@@ -122,7 +120,7 @@ func Detect(pdfBytes []byte, password []byte, verbose bool) (FormType, error) {
 		return FormTypeXFA, nil
 	}
 
-	return FormTypeUnknown, fmt.Errorf("no forms detected in PDF")
+	return FormTypeUnknown, types.NewPDFError(types.ErrCodeNoForms, "no forms detected in PDF")
 }
 
 // Extract extracts and returns a unified Form interface
@@ -144,7 +142,7 @@ func Extract(pdfBytes []byte, password []byte, verbose bool) (Form, error) {
 		// Parse XFA form
 		formSchema, err := xfa.ParseXFAForm(string(streams.Template.Data), verbose)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse XFA form: %w", err)
+			return nil, types.WrapError(types.ErrCodeInvalidForm, "failed to parse XFA form", err)
 		}
 
 		var datasets *types.XFADatasets
@@ -160,7 +158,7 @@ func Extract(pdfBytes []byte, password []byte, verbose bool) (Form, error) {
 		}, nil
 	}
 
-	return nil, fmt.Errorf("no forms found in PDF")
+	return nil, types.NewPDFError(types.ErrCodeNoForms, "no forms found in PDF")
 }
 
 // ExtractAcroForm extracts an AcroForm (type-specific)
