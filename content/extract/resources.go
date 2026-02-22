@@ -481,7 +481,7 @@ func extractFontDecoder(fontObjNum int, fontName string, pdf *parse.PDF, verbose
 			if cmapData != "" {
 				decoder.ParseToUnicodeCMap(cmapData)
 				if verbose {
-					fmt.Printf("Parsed ToUnicode CMap for font %s with %d mappings\n", fontName, len(decoder.toUnicode))
+					fmt.Printf("Parsed ToUnicode CMap for font %s with %d mappings (%d multi-rune)\n", fontName, len(decoder.toUnicode)+len(decoder.toUnicodeMulti), len(decoder.toUnicodeMulti))
 				}
 			}
 		}
