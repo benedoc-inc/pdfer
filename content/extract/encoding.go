@@ -11,6 +11,9 @@ type FontDecoder struct {
 	// ToUnicode mapping from character codes to Unicode (highest priority)
 	toUnicode map[int]rune
 
+	// ToUnicode mapping for multi-rune sequences (ligatures like fi, fl, ffi, etc.)
+	toUnicodeMulti map[int]string
+
 	// Base encoding (WinAnsiEncoding, MacRomanEncoding, etc.)
 	baseEncoding map[int]rune
 
@@ -24,10 +27,11 @@ type FontDecoder struct {
 // NewFontDecoder creates a new font decoder
 func NewFontDecoder(fontName string) *FontDecoder {
 	return &FontDecoder{
-		toUnicode:    make(map[int]rune),
-		baseEncoding: make(map[int]rune),
-		differences:  make(map[int]rune),
-		fontName:     fontName,
+		toUnicode:      make(map[int]rune),
+		toUnicodeMulti: make(map[int]string),
+		baseEncoding:   make(map[int]rune),
+		differences:    make(map[int]rune),
+		fontName:       fontName,
 	}
 }
 
@@ -67,9 +71,14 @@ func (fd *FontDecoder) Decode(data []byte) string {
 
 	for _, b := range data {
 		code := int(b)
-		var char rune
 
-		// Priority: ToUnicode > Differences > BaseEncoding > Identity
+		// Priority: ToUnicodeMulti > ToUnicode > Differences > BaseEncoding > Identity
+		if str, ok := fd.toUnicodeMulti[code]; ok {
+			result.WriteString(str)
+			continue
+		}
+
+		var char rune
 		if unicode, ok := fd.toUnicode[code]; ok {
 			char = unicode
 		} else if unicode, ok := fd.differences[code]; ok {
@@ -113,19 +122,19 @@ func (fd *FontDecoder) DecodeHex(hexStr string) string {
 			if i+4 > len(hexStr) {
 				// Remaining single byte
 				if val, err := strconv.ParseInt(hexStr[i:], 16, 32); err == nil {
-					result.WriteRune(fd.lookupCode(int(val)))
+					result.WriteString(fd.lookupCodeStr(int(val)))
 				}
 				break
 			}
 			if val, err := strconv.ParseInt(hexStr[i:i+4], 16, 32); err == nil {
-				result.WriteRune(fd.lookupCode(int(val)))
+				result.WriteString(fd.lookupCodeStr(int(val)))
 			}
 		}
 	} else {
 		// 1-byte character codes
 		for i := 0; i < len(hexStr); i += 2 {
 			if val, err := strconv.ParseInt(hexStr[i:i+2], 16, 32); err == nil {
-				result.WriteRune(fd.lookupCode(int(val)))
+				result.WriteString(fd.lookupCodeStr(int(val)))
 			}
 		}
 	}
@@ -136,6 +145,11 @@ func (fd *FontDecoder) DecodeHex(hexStr string) string {
 // has2ByteMapping checks if the font has 2-byte ToUnicode mappings
 func (fd *FontDecoder) has2ByteMapping() bool {
 	for code := range fd.toUnicode {
+		if code > 255 {
+			return true
+		}
+	}
+	for code := range fd.toUnicodeMulti {
 		if code > 255 {
 			return true
 		}
@@ -161,6 +175,16 @@ func (fd *FontDecoder) lookupCode(code int) rune {
 		return rune(code)
 	}
 	return '?'
+}
+
+// lookupCodeStr looks up a character code and returns a string.
+// This handles multi-rune mappings (ligatures) that lookupCode cannot.
+func (fd *FontDecoder) lookupCodeStr(code int) string {
+	// Check multi-rune mappings first (ligatures like fi, fl, ffi)
+	if str, ok := fd.toUnicodeMulti[code]; ok {
+		return str
+	}
+	return string(fd.lookupCode(code))
 }
 
 // ParseToUnicodeCMap parses a ToUnicode CMap stream and populates the decoder
@@ -198,9 +222,8 @@ func (fd *FontDecoder) parseBfcharBlock(block string) {
 		if len(unicodeRunes) == 1 {
 			fd.toUnicode[int(srcCode)] = unicodeRunes[0]
 		} else if len(unicodeRunes) > 1 {
-			// For ligatures/sequences, store the first rune
-			// TODO: Handle multi-rune mappings properly
-			fd.toUnicode[int(srcCode)] = unicodeRunes[0]
+			// Store multi-rune mappings (ligatures like fi, fl, ffi, etc.)
+			fd.toUnicodeMulti[int(srcCode)] = string(unicodeRunes)
 		}
 	}
 }
@@ -241,8 +264,10 @@ func (fd *FontDecoder) parseBfrangeBlock(block string) {
 				break
 			}
 			unicodeRunes := hexToUnicodeRunes(elem[1])
-			if len(unicodeRunes) > 0 {
+			if len(unicodeRunes) == 1 {
 				fd.toUnicode[code] = unicodeRunes[0]
+			} else if len(unicodeRunes) > 1 {
+				fd.toUnicodeMulti[code] = string(unicodeRunes)
 			}
 		}
 	}
