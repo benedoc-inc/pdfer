@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/benedoc-inc/pdfer/forms"
 	"github.com/benedoc-inc/pdfer/types"
 )
 
@@ -226,6 +227,13 @@ func ExtractToDirectory(pdfBytes []byte, password []byte, outputDir string, verb
 	// Determine if this is a scanned PDF (images but no text)
 	isScannedPDF := hasImages && !hasText && len(doc.Pages) > 0
 
+	// Detect forms (AcroForm or XFA)
+	hasForms := false
+	formType, err := forms.Detect(pdfBytes, password, verbose)
+	if err == nil && formType != forms.FormTypeUnknown {
+		hasForms = true
+	}
+
 	// Build summary
 	extractedContent.Summary = ContentSummary{
 		PageCount:     len(doc.Pages),
@@ -233,7 +241,7 @@ func ExtractToDirectory(pdfBytes []byte, password []byte, outputDir string, verb
 		ImageCount:    len(allImages),
 		HasText:       hasText,
 		HasImages:     hasImages,
-		HasForms:      false, // TODO: Detect forms
+		HasForms:      hasForms,
 		HasBookmarks:  len(doc.Bookmarks) > 0,
 		IsScannedPDF:  isScannedPDF,
 	}
@@ -256,7 +264,7 @@ func ExtractToDirectory(pdfBytes []byte, password []byte, outputDir string, verb
 		ImageFiles:    imageFiles,
 		HasText:       hasText,
 		HasImages:     hasImages,
-		HasForms:      false,
+		HasForms:      hasForms,
 		IsScannedPDF:  isScannedPDF,
 		PageCount:     len(doc.Pages),
 		TextCharCount: totalTextChars,
