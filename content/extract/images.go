@@ -209,7 +209,9 @@ func ExtractAllImages(pdfBytes []byte, password []byte, verbose bool) ([]types.I
 		// Extract Resources
 		resourcesRef := extractDictValue(pageStr, "/Resources")
 		var resourcesStr string
-		if resourcesRef != "" {
+		if strings.HasPrefix(resourcesRef, "<<") {
+			resourcesStr = resourcesRef
+		} else if resourcesRef != "" {
 			resourcesObjNum, err := parseObjectRef(resourcesRef)
 			if err == nil {
 				resourcesObj, err := pdf.GetObject(resourcesObjNum)
@@ -217,8 +219,8 @@ func ExtractAllImages(pdfBytes []byte, password []byte, verbose bool) ([]types.I
 					resourcesStr = string(resourcesObj)
 				}
 			}
-		} else {
-			// Inline Resources
+		}
+		if resourcesStr == "" {
 			resourcesStr = extractInlineDict(pageStr, "/Resources")
 		}
 

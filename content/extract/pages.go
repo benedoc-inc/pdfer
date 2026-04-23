@@ -194,7 +194,11 @@ func extractPage(pdfBytes []byte, pdf *parse.PDF, pageObjNum int, pageStr string
 	// Extract resources FIRST (needed for font decoders for text extraction)
 	var resourcesStr string
 	resourcesRef := extractDictValue(pageStr, "/Resources")
-	if resourcesRef != "" {
+	if strings.HasPrefix(resourcesRef, "<<") {
+		// Inline resources dictionary
+		resourcesStr = resourcesRef
+		page.Resources = extractResources(resourcesStr, pdf, verbose)
+	} else if resourcesRef != "" {
 		// Resources is a reference to another object
 		resourcesObjNum, err := parseObjectRef(resourcesRef)
 		if err == nil {
@@ -204,8 +208,9 @@ func extractPage(pdfBytes []byte, pdf *parse.PDF, pageObjNum int, pageStr string
 				page.Resources = extractResources(resourcesStr, pdf, verbose)
 			}
 		}
-	} else {
-		// Resources might be inline - extract the Resources dictionary from page string
+	}
+	if resourcesStr == "" {
+		// Fallback: try extractInlineDict
 		resourcesDictStr := extractInlineDict(pageStr, "/Resources")
 		if resourcesDictStr != "" {
 			resourcesStr = resourcesDictStr
@@ -248,50 +253,37 @@ func extractPage(pdfBytes []byte, pdf *parse.PDF, pageObjNum int, pageStr string
 				continue
 			}
 
-			// Parse content stream
-			// Content streams are usually stored as stream objects with FlateDecode
-			// We need to get the actual stream data, not the object wrapper
 			contentStr := string(contentObj)
+			body := extractObjectBody(contentStr)
 
-			// Check if this is a stream object and extract/decompress the stream data
-			if strings.Contains(contentStr, "stream") {
-				streamIdx := strings.Index(contentStr, "stream")
-				if streamIdx != -1 {
-					// Check for FlateDecode filter
-					isCompressed := strings.Contains(contentStr, "/FlateDecode")
-
-					// Extract stream data
-					dataStart := streamIdx + 6 // Skip "stream"
-					// Skip EOL after "stream"
-					if dataStart < len(contentStr) && (contentStr[dataStart] == '\r' || contentStr[dataStart] == '\n') {
-						dataStart++
-					}
-					if dataStart < len(contentStr) && contentStr[dataStart] == '\n' {
-						dataStart++
-					}
-
-					endstreamIdx := strings.Index(contentStr[dataStart:], "endstream")
-					if endstreamIdx != -1 {
-						streamData := []byte(contentStr[dataStart : dataStart+endstreamIdx])
-
-						// Decompress if needed using parse package
-						if isCompressed {
-							// Use parse.DecodeFlateDecode which handles both zlib and raw deflate
-							decompressed, err := parse.DecodeFlateDecode(streamData)
-							if err == nil {
-								contentStr = string(decompressed)
-							} else {
-								// Fallback to raw if decompression fails
-								contentStr = string(streamData)
-							}
-						} else {
-							contentStr = string(streamData)
+			// Check if the resolved object is an indirect array of stream refs
+			// (e.g., /Contents 3 0 R where obj 3 = [4 0 R 5 0 R ... 12 0 R])
+			if strings.HasPrefix(strings.TrimSpace(body), "[") {
+				innerRefs := parseObjectRefArray(body)
+				for _, innerRef := range innerRefs {
+					innerObjNum, err := parseObjectRef(innerRef)
+					if err != nil {
+						if verbose {
+							fmt.Printf("Warning: failed to parse inner content ref %s: %v\n", innerRef, err)
 						}
+						continue
 					}
+					innerObj, err := pdf.GetObject(innerObjNum)
+					if err != nil {
+						if verbose {
+							fmt.Printf("Warning: failed to get inner content object %d: %v\n", innerObjNum, err)
+						}
+						continue
+					}
+					textElements, graphics, images := extractAndParseContentStream(string(innerObj), fontDecoders, pageObjNum, verbose)
+					page.Text = append(page.Text, textElements...)
+					page.Graphics = append(page.Graphics, graphics...)
+					page.Images = append(page.Images, images...)
 				}
+				continue
 			}
 
-			textElements, graphics, images := parseContentStreamWithDecoders(contentStr, pdf, pageObjNum, fontDecoders, verbose)
+			textElements, graphics, images := extractAndParseContentStream(contentStr, fontDecoders, pageObjNum, verbose)
 			page.Text = append(page.Text, textElements...)
 			page.Graphics = append(page.Graphics, graphics...)
 			page.Images = append(page.Images, images...)
@@ -312,29 +304,77 @@ func extractPage(pdfBytes []byte, pdf *parse.PDF, pageObjNum int, pageStr string
 // Helper functions for parsing PDF dictionaries and arrays
 
 func extractDictValue(dictStr, key string) string {
-	// Try to match simple value with space (e.g., "/Pages 2 0 R")
-	pattern := regexp.MustCompile(regexp.QuoteMeta(key) + `\s+([^\s<>]+)`)
-	match := pattern.FindStringSubmatch(dictStr)
-	if len(match) > 1 {
-		return match[1]
+	// Find the key first
+	keyIdx := strings.Index(dictStr, key)
+	if keyIdx == -1 {
+		return ""
+	}
+	afterKey := dictStr[keyIdx+len(key):]
+
+	// Skip whitespace after key
+	i := 0
+	for i < len(afterKey) && (afterKey[i] == ' ' || afterKey[i] == '\t' || afterKey[i] == '\n' || afterKey[i] == '\r') {
+		i++
+	}
+	if i >= len(afterKey) {
+		return ""
 	}
 
-	// Try to match value without space (e.g., "/Subtype/Type1")
-	// This handles PDF dictionaries where values immediately follow keys
-	noSpacePattern := regexp.MustCompile(regexp.QuoteMeta(key) + `/([^/\s<>]+)`)
-	noSpaceMatch := noSpacePattern.FindStringSubmatch(dictStr)
-	if len(noSpaceMatch) > 1 {
-		return "/" + noSpaceMatch[1]
+	// Array value (e.g., "[166 0 R 167 0 R]")
+	if afterKey[i] == '[' {
+		depth := 1
+		end := i + 1
+		for end < len(afterKey) && depth > 0 {
+			if afterKey[end] == '[' {
+				depth++
+			} else if afterKey[end] == ']' {
+				depth--
+			}
+			end++
+		}
+		if depth == 0 {
+			return afterKey[i:end]
+		}
+		return ""
 	}
 
-	// Try to match array value (e.g., "/Kids[4 0 R ]")
-	arrayPattern := regexp.MustCompile(regexp.QuoteMeta(key) + `\s*\[([^\]]+)\]`)
-	arrayMatch := arrayPattern.FindStringSubmatch(dictStr)
-	if len(arrayMatch) > 1 {
-		return "[" + arrayMatch[1] + "]"
+	// Dictionary value (e.g., "<< ... >>")
+	if afterKey[i] == '<' && i+1 < len(afterKey) && afterKey[i+1] == '<' {
+		depth := 1
+		end := i + 2
+		for end+1 < len(afterKey) && depth > 0 {
+			if afterKey[end] == '<' && afterKey[end+1] == '<' {
+				depth++
+				end += 2
+			} else if afterKey[end] == '>' && afterKey[end+1] == '>' {
+				depth--
+				end += 2
+			} else {
+				end++
+			}
+		}
+		if depth == 0 {
+			return afterKey[i:end]
+		}
+		return ""
 	}
 
-	return ""
+	// Name value immediately following (e.g., "/Subtype/Type1")
+	if afterKey[i] == '/' {
+		end := i + 1
+		for end < len(afterKey) && afterKey[end] != '/' && afterKey[end] != ' ' && afterKey[end] != '\n' && afterKey[end] != '\r' && afterKey[end] != '<' && afterKey[end] != '>' && afterKey[end] != '[' && afterKey[end] != ']' {
+			end++
+		}
+		return afterKey[i:end]
+	}
+
+	// Simple value (e.g., "2 0 R" or "12" or "(string)")
+	// Match to next delimiter
+	end := i
+	for end < len(afterKey) && afterKey[end] != '/' && afterKey[end] != '<' && afterKey[end] != '>' && afterKey[end] != '[' && afterKey[end] != ']' {
+		end++
+	}
+	return strings.TrimSpace(afterKey[i:end])
 }
 
 func extractArrayValue(dictStr, key string) []float64 {
@@ -374,6 +414,66 @@ func parseObjectRefArray(arrStr string) []string {
 	}
 
 	return refs
+}
+
+// extractObjectBody strips the "N G obj\n...\nendobj" wrapper from a PDF object string,
+// returning just the inner body content.
+func extractObjectBody(objStr string) string {
+	body := objStr
+	// Strip "N G obj" prefix
+	if idx := strings.Index(body, "obj"); idx != -1 {
+		body = body[idx+3:]
+	}
+	// Strip "endobj" suffix
+	if idx := strings.LastIndex(body, "endobj"); idx != -1 {
+		body = body[:idx]
+	}
+	return strings.TrimSpace(body)
+}
+
+// extractAndParseContentStream extracts stream data from a PDF object string,
+// decompresses it if needed, and parses the content stream.
+func extractAndParseContentStream(objStr string, fontDecoders map[string]*FontDecoder, pageNum int, verbose bool) ([]types.TextElement, []types.Graphic, []types.ImageRef) {
+	contentStr := objStr
+
+	// Check if this is a stream object and extract/decompress the stream data
+	if strings.Contains(contentStr, "stream") {
+		streamIdx := strings.Index(contentStr, "stream")
+		if streamIdx != -1 {
+			// Check for FlateDecode filter
+			isCompressed := strings.Contains(contentStr[:streamIdx], "/FlateDecode")
+
+			// Extract stream data
+			dataStart := streamIdx + 6 // Skip "stream"
+			// Skip EOL after "stream"
+			if dataStart < len(contentStr) && (contentStr[dataStart] == '\r' || contentStr[dataStart] == '\n') {
+				dataStart++
+			}
+			if dataStart < len(contentStr) && contentStr[dataStart] == '\n' {
+				dataStart++
+			}
+
+			endstreamIdx := strings.Index(contentStr[dataStart:], "endstream")
+			if endstreamIdx != -1 {
+				streamData := []byte(contentStr[dataStart : dataStart+endstreamIdx])
+
+				// Decompress if needed using parse package
+				if isCompressed {
+					decompressed, err := parse.DecodeFlateDecode(streamData)
+					if err == nil {
+						contentStr = string(decompressed)
+					} else {
+						// Fallback to raw if decompression fails
+						contentStr = string(streamData)
+					}
+				} else {
+					contentStr = string(streamData)
+				}
+			}
+		}
+	}
+
+	return parseContentStreamWithDecoders(contentStr, nil, pageNum, fontDecoders, verbose)
 }
 
 // parseContentStream is implemented in content_stream.go

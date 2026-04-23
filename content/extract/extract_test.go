@@ -48,7 +48,7 @@ func TestExtractFromGeneratedPDF(t *testing.T) {
 	}
 
 	// Save to tests/resources
-	resourceDir := filepath.Join("tests", "resources")
+	resourceDir := filepath.Join("..", "..", "tests", "resources")
 	if err := os.MkdirAll(resourceDir, 0755); err != nil {
 		t.Fatalf("Failed to create resources directory: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestExtractComplexText(t *testing.T) {
 	}
 
 	// Save to tests/resources
-	resourceDir := filepath.Join("tests", "resources")
+	resourceDir := filepath.Join("..", "..", "tests", "resources")
 	if err := os.MkdirAll(resourceDir, 0755); err != nil {
 		t.Fatalf("Failed to create resources directory: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestExtractGraphics(t *testing.T) {
 	}
 
 	// Save to tests/resources
-	resourceDir := filepath.Join("tests", "resources")
+	resourceDir := filepath.Join("..", "..", "tests", "resources")
 	if err := os.MkdirAll(resourceDir, 0755); err != nil {
 		t.Fatalf("Failed to create resources directory: %v", err)
 	}

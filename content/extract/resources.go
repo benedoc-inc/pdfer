@@ -385,6 +385,31 @@ func extractFontDecoders(resourcesStr string, pdf *parse.PDF, verbose bool) map[
 		}
 	}
 
+	// If no inline dict found, check if /Font is a reference to another object
+	if fontMatch == nil {
+		fontRef := extractDictValue(resourcesStr, "/Font")
+		if fontRef != "" && !strings.HasPrefix(fontRef, "<<") {
+			fontObjNum, err := parseObjectRef(fontRef)
+			if err == nil {
+				fontObj, err := pdf.GetObject(fontObjNum)
+				if err == nil {
+					// Extract the dict content from the resolved object
+					fontObjStr := string(fontObj)
+					body := extractObjectBody(fontObjStr)
+					// Strip << >> wrapper if present
+					body = strings.TrimSpace(body)
+					if strings.HasPrefix(body, "<<") && strings.HasSuffix(body, ">>") {
+						body = body[2 : len(body)-2]
+					}
+					fontMatch = []string{"", body}
+					if verbose {
+						fmt.Printf("Resolved /Font reference %s to object %d: %s\n", fontRef, fontObjNum, body[:min(200, len(body))])
+					}
+				}
+			}
+		}
+	}
+
 	if fontMatch == nil {
 		if verbose {
 			fmt.Printf("No /Font dictionary found in Resources for decoder extraction\n")
@@ -481,28 +506,48 @@ func extractFontDecoder(fontObjNum int, fontName string, pdf *parse.PDF, verbose
 			if cmapData != "" {
 				decoder.ParseToUnicodeCMap(cmapData)
 				if verbose {
-					fmt.Printf("Parsed ToUnicode CMap for font %s with %d mappings (%d multi-rune)\n", fontName, len(decoder.toUnicode)+len(decoder.toUnicodeMulti), len(decoder.toUnicodeMulti))
+					fmt.Printf("Parsed ToUnicode CMap for font %s with %d mappings\n", fontName, len(decoder.toUnicode))
 				}
 			}
 		}
 	}
 
-	// For Type0 (CID) fonts, extract the descendant font's encoding
+	// For Type0 (CID) fonts, extract the descendant font's width data
 	subtype := extractDictValue(fontStr, "/Subtype")
 	if subtype == "/Type0" {
 		descendantFontsRef := extractDictValue(fontStr, "/DescendantFonts")
 		if descendantFontsRef != "" {
-			// Parse array of references
 			refs := parseObjectRefArray(descendantFontsRef)
 			if len(refs) > 0 {
 				descFontObjNum, err := parseObjectRef(refs[0])
 				if err == nil {
 					descFontObj, err := pdf.GetObject(descFontObjNum)
 					if err == nil {
-						// Check for CIDToGIDMap, which might give us Unicode mappings
 						descFontStr := string(descFontObj)
 						if verbose {
 							fmt.Printf("Type0 descendant font: %s\n", descFontStr[:min(200, len(descFontStr))])
+						}
+
+						// Extract /DW (default width)
+						defaultW := 1000
+						dwStr := extractDictValue(descFontStr, "/DW")
+						if dwStr != "" {
+							if dw, err := strconv.Atoi(strings.TrimSpace(dwStr)); err == nil {
+								defaultW = dw
+							}
+						}
+
+						// Extract /W array (per-CID widths)
+						wStr := extractWArray(descFontStr)
+						if wStr != "" {
+							cidWidths := parseCIDWidthArray(wStr)
+							decoder.SetCIDWidths(defaultW, cidWidths)
+							if verbose {
+								fmt.Printf("CID font %s: DW=%d, %d width entries\n", fontName, defaultW, len(cidWidths))
+							}
+						} else {
+							// No /W array — set default width only
+							decoder.SetCIDWidths(defaultW, nil)
 						}
 					}
 				}
@@ -544,6 +589,50 @@ func extractDifferencesArray(str string) string {
 		return str[bracketStart:bracketEnd]
 	}
 	return ""
+}
+
+// extractWArray extracts the /W array from a CID font dictionary.
+// Similar to extractDifferencesArray but for /W key with nested brackets.
+func extractWArray(str string) string {
+	// Find /W followed by [ — but not /Width or /W2
+	// Look for /W followed by whitespace or [
+	idx := 0
+	for {
+		wIdx := strings.Index(str[idx:], "/W")
+		if wIdx == -1 {
+			return ""
+		}
+		wIdx += idx
+		afterW := wIdx + 2
+		if afterW < len(str) {
+			ch := str[afterW]
+			// Must be followed by whitespace or '[', not a letter (e.g., /Width, /W2)
+			if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '[' {
+				// Found a valid /W
+				bracketStart := strings.Index(str[afterW:], "[")
+				if bracketStart == -1 {
+					return ""
+				}
+				bracketStart += afterW
+
+				depth := 1
+				bracketEnd := bracketStart + 1
+				for bracketEnd < len(str) && depth > 0 {
+					if str[bracketEnd] == '[' {
+						depth++
+					} else if str[bracketEnd] == ']' {
+						depth--
+					}
+					bracketEnd++
+				}
+				if depth == 0 {
+					return str[bracketStart:bracketEnd]
+				}
+				return ""
+			}
+		}
+		idx = afterW
+	}
 }
 
 // extractStreamData extracts and decompresses stream data from a stream object

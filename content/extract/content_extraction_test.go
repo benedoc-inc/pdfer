@@ -388,7 +388,7 @@ func TestExtractMultipleContentTypes(t *testing.T) {
 	pdfBytes, _ := builder.Bytes()
 
 	// Save for inspection
-	resourceDir := filepath.Join("tests", "resources")
+	resourceDir := filepath.Join("..", "..", "tests", "resources")
 	if err := os.MkdirAll(resourceDir, 0755); err != nil {
 		t.Fatalf("Failed to create resource directory: %v", err)
 	}

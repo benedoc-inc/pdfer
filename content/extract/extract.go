@@ -101,6 +101,12 @@ func ExtractContent(pdfBytes []byte, password []byte, verbose bool) (*types.Cont
 		doc.Fonts = append(doc.Fonts, font)
 	}
 
+	// Semantic analysis pipeline
+	analyzeLayout(doc)        // Reading order + line grouping
+	analyzeSemantics(doc)     // Paragraphs, headings, labels, WordCells
+	detectTables(doc)         // Table detection from graphic grid lines
+	detectHeadersFooters(doc) // Header/footer patterns across pages
+
 	return doc, nil
 }
 

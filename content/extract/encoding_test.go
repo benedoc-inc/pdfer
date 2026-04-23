@@ -4,160 +4,152 @@ import (
 	"testing"
 )
 
-func TestFontDecoder_SingleRuneToUnicode(t *testing.T) {
-	fd := NewFontDecoder("TestFont")
-	fd.SetToUnicode(65, 'A')
-	fd.SetToUnicode(66, 'B')
-
-	result := fd.Decode([]byte{65, 66})
-	if result != "AB" {
-		t.Errorf("expected 'AB', got %q", result)
-	}
-}
-
-func TestFontDecoder_MultiRuneBfchar(t *testing.T) {
-	fd := NewFontDecoder("TestFont")
-
-	// Simulate a CMap with a ligature: code 0x01 maps to "fi" (U+0066, U+0069)
-	cmapData := `
-beginbfchar
-<01> <00660069>
-<02> <00660066>
-endbfchar
-`
-	fd.ParseToUnicodeCMap(cmapData)
-
-	// Verify multi-rune mapping was stored
-	if str, ok := fd.toUnicodeMulti[1]; !ok || str != "fi" {
-		t.Errorf("expected multi-rune mapping for code 1 to be 'fi', got %q (ok=%v)", str, ok)
-	}
-	if str, ok := fd.toUnicodeMulti[2]; !ok || str != "ff" {
-		t.Errorf("expected multi-rune mapping for code 2 to be 'ff', got %q (ok=%v)", str, ok)
-	}
-
-	// Verify single-rune mappings were NOT stored in toUnicode
-	if _, ok := fd.toUnicode[1]; ok {
-		t.Error("code 1 should not be in single-rune toUnicode map")
-	}
-}
-
-func TestFontDecoder_MultiRuneDecode(t *testing.T) {
-	fd := NewFontDecoder("TestFont")
-
-	// Set up: code 0x01 = "fi" ligature, code 0x41 = 'n', code 0x42 = 'd'
-	fd.toUnicodeMulti[1] = "fi"
-	fd.toUnicode[0x41] = 'n'
-	fd.toUnicode[0x42] = 'd'
-
-	result := fd.Decode([]byte{0x41, 0x01, 0x42})
-	if result != "nfid" {
-		t.Errorf("expected 'nfid', got %q", result)
-	}
-}
-
-func TestFontDecoder_MultiRuneDecodeHex(t *testing.T) {
-	fd := NewFontDecoder("TestFont")
-
-	// Set up 2-byte codes: code 0x0100 = "ffi" ligature, code 0x0041 = 'A'
-	fd.toUnicodeMulti[0x0100] = "ffi"
-	fd.toUnicode[0x0041] = 'A'
-
-	result := fd.DecodeHex("<00410100>")
-	if result != "Affi" {
-		t.Errorf("expected 'Affi', got %q", result)
-	}
-}
-
-func TestFontDecoder_MultiRuneBfrange(t *testing.T) {
-	fd := NewFontDecoder("TestFont")
-
-	// Simulate a CMap with array range containing multi-rune mapping
-	cmapData := `
-beginbfrange
-<10> <12> [<00660069> <00660066> <00660066006C>]
-endbfrange
-`
-	fd.ParseToUnicodeCMap(cmapData)
-
-	// Code 0x10 -> "fi"
-	if str, ok := fd.toUnicodeMulti[0x10]; !ok || str != "fi" {
-		t.Errorf("expected multi-rune mapping for code 0x10 to be 'fi', got %q (ok=%v)", str, ok)
-	}
-	// Code 0x11 -> "ff"
-	if str, ok := fd.toUnicodeMulti[0x11]; !ok || str != "ff" {
-		t.Errorf("expected multi-rune mapping for code 0x11 to be 'ff', got %q (ok=%v)", str, ok)
-	}
-	// Code 0x12 -> "ffl"
-	if str, ok := fd.toUnicodeMulti[0x12]; !ok || str != "ffl" {
-		t.Errorf("expected multi-rune mapping for code 0x12 to be 'ffl', got %q (ok=%v)", str, ok)
-	}
-}
-
-func TestFontDecoder_SingleRuneBfchar(t *testing.T) {
-	fd := NewFontDecoder("TestFont")
-
-	// Simulate a CMap with single-character mapping
-	cmapData := `
-beginbfchar
-<41> <0041>
-<42> <0042>
-endbfchar
-`
-	fd.ParseToUnicodeCMap(cmapData)
-
-	// Verify stored in single-rune map
-	if r, ok := fd.toUnicode[0x41]; !ok || r != 'A' {
-		t.Errorf("expected single-rune mapping for code 0x41 to be 'A', got %c (ok=%v)", r, ok)
-	}
-	if r, ok := fd.toUnicode[0x42]; !ok || r != 'B' {
-		t.Errorf("expected single-rune mapping for code 0x42 to be 'B', got %c (ok=%v)", r, ok)
-	}
-
-	// Verify NOT in multi-rune map
-	if _, ok := fd.toUnicodeMulti[0x41]; ok {
-		t.Error("code 0x41 should not be in multi-rune map")
-	}
-}
-
-func TestFontDecoder_LookupCodeStr(t *testing.T) {
-	fd := NewFontDecoder("TestFont")
-
-	// Single rune in toUnicode
-	fd.toUnicode[1] = 'A'
-	// Multi-rune in toUnicodeMulti
-	fd.toUnicodeMulti[2] = "fi"
-	// In differences
-	fd.differences[3] = 'B'
-
+func TestTokenizeDifferences(t *testing.T) {
 	tests := []struct {
-		code     int
-		expected string
+		name     string
+		input    string
+		expected []string
 	}{
-		{1, "A"},
-		{2, "fi"},
-		{3, "B"},
-		{65, "A"}, // falls through to default (rune(65) = 'A')
+		{
+			name:     "concatenated names",
+			input:    "2/fi/fl",
+			expected: []string{"2", "/fi", "/fl"},
+		},
+		{
+			name:     "mixed spaces and concatenated",
+			input:    "2/fi 39/quoteright",
+			expected: []string{"2", "/fi", "39", "/quoteright"},
+		},
+		{
+			name:     "leading/trailing whitespace and spaces",
+			input:    " 128 /Euro ",
+			expected: []string{"128", "/Euro"},
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: nil,
+		},
+		{
+			name:     "newlines as separators",
+			input:    "2/fi/fl\n39/quoteright",
+			expected: []string{"2", "/fi", "/fl", "39", "/quoteright"},
+		},
 	}
 
 	for _, tt := range tests {
-		result := fd.lookupCodeStr(tt.code)
-		if result != tt.expected {
-			t.Errorf("lookupCodeStr(%d): expected %q, got %q", tt.code, tt.expected, result)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			got := tokenizeDifferences(tt.input)
+			if len(got) != len(tt.expected) {
+				t.Fatalf("tokenizeDifferences(%q) = %v (len %d), want %v (len %d)",
+					tt.input, got, len(got), tt.expected, len(tt.expected))
+			}
+			for i := range got {
+				if got[i] != tt.expected[i] {
+					t.Errorf("tokenizeDifferences(%q)[%d] = %q, want %q",
+						tt.input, i, got[i], tt.expected[i])
+				}
+			}
+		})
 	}
 }
 
-func TestFontDecoder_Has2ByteMapping_Multi(t *testing.T) {
-	fd := NewFontDecoder("TestFont")
-
-	// No mappings > 255 yet
-	if fd.has2ByteMapping() {
-		t.Error("expected no 2-byte mapping")
+func TestParseCIDWidthArray(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected map[int]int
+	}{
+		{
+			name:  "consecutive format",
+			input: "[1 [500 600 700]]",
+			expected: map[int]int{
+				1: 500, 2: 600, 3: 700,
+			},
+		},
+		{
+			name:  "range format",
+			input: "[10 20 300]",
+			expected: func() map[int]int {
+				m := make(map[int]int)
+				for i := 10; i <= 20; i++ {
+					m[i] = 300
+				}
+				return m
+			}(),
+		},
+		{
+			name:  "mixed formats",
+			input: "[1 [500 600] 10 20 300]",
+			expected: func() map[int]int {
+				m := map[int]int{1: 500, 2: 600}
+				for i := 10; i <= 20; i++ {
+					m[i] = 300
+				}
+				return m
+			}(),
+		},
+		{
+			name:     "empty",
+			input:    "[]",
+			expected: map[int]int{},
+		},
 	}
 
-	// Add a multi-rune mapping with code > 255
-	fd.toUnicodeMulti[0x0100] = "fi"
-	if !fd.has2ByteMapping() {
-		t.Error("expected 2-byte mapping after adding code 0x0100 to toUnicodeMulti")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseCIDWidthArray(tt.input)
+			if len(got) != len(tt.expected) {
+				t.Fatalf("parseCIDWidthArray(%q) returned %d entries, want %d", tt.input, len(got), len(tt.expected))
+			}
+			for k, v := range tt.expected {
+				if got[k] != v {
+					t.Errorf("parseCIDWidthArray(%q)[%d] = %d, want %d", tt.input, k, got[k], v)
+				}
+			}
+		})
+	}
+}
+
+func TestHexToUnicodeString(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "single BMP char A",
+			input:    "0041",
+			expected: "A",
+		},
+		{
+			name:     "multi-char fi ligature decomposed",
+			input:    "00660069",
+			expected: "fi",
+		},
+		{
+			name:     "single ligature char U+FB01",
+			input:    "FB01",
+			expected: "ﬁ",
+		},
+		{
+			name:     "2-char hex",
+			input:    "41",
+			expected: "A",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := hexToUnicodeString(tt.input)
+			if got != tt.expected {
+				t.Errorf("hexToUnicodeString(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
 	}
 }

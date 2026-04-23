@@ -8,17 +8,20 @@ import (
 
 // FontDecoder decodes character codes to Unicode for a specific font
 type FontDecoder struct {
-	// ToUnicode mapping from character codes to Unicode (highest priority)
-	toUnicode map[int]rune
-
-	// ToUnicode mapping for multi-rune sequences (ligatures like fi, fl, ffi, etc.)
-	toUnicodeMulti map[int]string
+	// ToUnicode mapping from character codes to Unicode strings (highest priority)
+	// Strings rather than runes to support multi-char mappings like ligatures ("fi", "fl")
+	toUnicode map[int]string
 
 	// Base encoding (WinAnsiEncoding, MacRomanEncoding, etc.)
 	baseEncoding map[int]rune
 
 	// Differences array overlays the base encoding
 	differences map[int]rune
+
+	// CID font width data (Type0/Identity-H fonts)
+	cidWidths   map[int]int // CID -> width in thousandths of text space
+	cidDefaultW int         // default width (/DW), typically 1000
+	isCIDFont   bool
 
 	// Font name for debugging
 	fontName string
@@ -27,11 +30,10 @@ type FontDecoder struct {
 // NewFontDecoder creates a new font decoder
 func NewFontDecoder(fontName string) *FontDecoder {
 	return &FontDecoder{
-		toUnicode:      make(map[int]rune),
-		toUnicodeMulti: make(map[int]string),
-		baseEncoding:   make(map[int]rune),
-		differences:    make(map[int]rune),
-		fontName:       fontName,
+		toUnicode:    make(map[int]string),
+		baseEncoding: make(map[int]rune),
+		differences:  make(map[int]rune),
+		fontName:     fontName,
 	}
 }
 
@@ -61,7 +63,7 @@ func (fd *FontDecoder) SetDifferences(code int, glyphName string) {
 }
 
 // SetToUnicode adds a ToUnicode mapping
-func (fd *FontDecoder) SetToUnicode(code int, unicode rune) {
+func (fd *FontDecoder) SetToUnicode(code int, unicode string) {
 	fd.toUnicode[code] = unicode
 }
 
@@ -72,25 +74,17 @@ func (fd *FontDecoder) Decode(data []byte) string {
 	for _, b := range data {
 		code := int(b)
 
-		// Priority: ToUnicodeMulti > ToUnicode > Differences > BaseEncoding > Identity
-		if str, ok := fd.toUnicodeMulti[code]; ok {
-			result.WriteString(str)
-			continue
-		}
-
-		var char rune
-		if unicode, ok := fd.toUnicode[code]; ok {
-			char = unicode
+		// Priority: ToUnicode > Differences > BaseEncoding > Identity
+		if s, ok := fd.toUnicode[code]; ok {
+			result.WriteString(s)
 		} else if unicode, ok := fd.differences[code]; ok {
-			char = unicode
+			result.WriteRune(unicode)
 		} else if unicode, ok := fd.baseEncoding[code]; ok {
-			char = unicode
+			result.WriteRune(unicode)
 		} else {
 			// Default: treat as Latin-1 (ISO-8859-1)
-			char = rune(code)
+			result.WriteRune(rune(code))
 		}
-
-		result.WriteRune(char)
 	}
 
 	return result.String()
@@ -122,19 +116,19 @@ func (fd *FontDecoder) DecodeHex(hexStr string) string {
 			if i+4 > len(hexStr) {
 				// Remaining single byte
 				if val, err := strconv.ParseInt(hexStr[i:], 16, 32); err == nil {
-					result.WriteString(fd.lookupCodeStr(int(val)))
+					result.WriteString(fd.lookupCode(int(val)))
 				}
 				break
 			}
 			if val, err := strconv.ParseInt(hexStr[i:i+4], 16, 32); err == nil {
-				result.WriteString(fd.lookupCodeStr(int(val)))
+				result.WriteString(fd.lookupCode(int(val)))
 			}
 		}
 	} else {
 		// 1-byte character codes
 		for i := 0; i < len(hexStr); i += 2 {
 			if val, err := strconv.ParseInt(hexStr[i:i+2], 16, 32); err == nil {
-				result.WriteString(fd.lookupCodeStr(int(val)))
+				result.WriteString(fd.lookupCode(int(val)))
 			}
 		}
 	}
@@ -149,42 +143,27 @@ func (fd *FontDecoder) has2ByteMapping() bool {
 			return true
 		}
 	}
-	for code := range fd.toUnicodeMulti {
-		if code > 255 {
-			return true
-		}
-	}
 	return false
 }
 
 // lookupCode looks up a character code in all encoding tables
-func (fd *FontDecoder) lookupCode(code int) rune {
-	if unicode, ok := fd.toUnicode[code]; ok {
-		return unicode
+func (fd *FontDecoder) lookupCode(code int) string {
+	if s, ok := fd.toUnicode[code]; ok {
+		return s
 	}
 	if unicode, ok := fd.differences[code]; ok {
-		return unicode
+		return string(unicode)
 	}
 	if code < 256 {
 		if unicode, ok := fd.baseEncoding[code]; ok {
-			return unicode
+			return string(unicode)
 		}
 	}
 	// Default: treat as Unicode code point (for Identity-H)
 	if code < 0x10000 {
-		return rune(code)
+		return string(rune(code))
 	}
-	return '?'
-}
-
-// lookupCodeStr looks up a character code and returns a string.
-// This handles multi-rune mappings (ligatures) that lookupCode cannot.
-func (fd *FontDecoder) lookupCodeStr(code int) string {
-	// Check multi-rune mappings first (ligatures like fi, fl, ffi)
-	if str, ok := fd.toUnicodeMulti[code]; ok {
-		return str
-	}
-	return string(fd.lookupCode(code))
+	return "?"
 }
 
 // ParseToUnicodeCMap parses a ToUnicode CMap stream and populates the decoder
@@ -216,14 +195,11 @@ func (fd *FontDecoder) parseBfcharBlock(block string) {
 		if err != nil {
 			continue
 		}
-		// Destination can be multi-byte Unicode
+		// Destination can be multi-byte Unicode (ligatures like "fi", "fl", "ffi")
 		dstHex := match[2]
-		unicodeRunes := hexToUnicodeRunes(dstHex)
-		if len(unicodeRunes) == 1 {
-			fd.toUnicode[int(srcCode)] = unicodeRunes[0]
-		} else if len(unicodeRunes) > 1 {
-			// Store multi-rune mappings (ligatures like fi, fl, ffi, etc.)
-			fd.toUnicodeMulti[int(srcCode)] = string(unicodeRunes)
+		s := hexToUnicodeString(dstHex)
+		if s != "" {
+			fd.toUnicode[int(srcCode)] = s
 		}
 	}
 }
@@ -242,7 +218,7 @@ func (fd *FontDecoder) parseBfrangeBlock(block string) {
 			continue
 		}
 		for i := srcLo; i <= srcHi; i++ {
-			fd.toUnicode[int(i)] = rune(dstStart + (i - srcLo))
+			fd.toUnicode[int(i)] = string(rune(dstStart + (i - srcLo)))
 		}
 	}
 
@@ -263,31 +239,30 @@ func (fd *FontDecoder) parseBfrangeBlock(block string) {
 			if code > int(srcHi) {
 				break
 			}
-			unicodeRunes := hexToUnicodeRunes(elem[1])
-			if len(unicodeRunes) == 1 {
-				fd.toUnicode[code] = unicodeRunes[0]
-			} else if len(unicodeRunes) > 1 {
-				fd.toUnicodeMulti[code] = string(unicodeRunes)
+			s := hexToUnicodeString(elem[1])
+			if s != "" {
+				fd.toUnicode[code] = s
 			}
 		}
 	}
 }
 
-// hexToUnicodeRunes converts a hex string to Unicode runes
-// Each pair of hex digits represents a byte in UTF-16BE
-func hexToUnicodeRunes(hex string) []rune {
-	var runes []rune
+// hexToUnicodeString converts a hex string to a Unicode string.
+// Each group of 4 hex digits represents a UTF-16BE code unit.
+// Supports multi-character mappings (e.g., "fi" ligature = 00660069).
+func hexToUnicodeString(hex string) string {
+	var b strings.Builder
 
 	// Handle UTF-16BE encoding (most common in PDFs)
 	if len(hex) == 4 {
 		// Single BMP character
 		if val, err := strconv.ParseInt(hex, 16, 32); err == nil {
-			runes = append(runes, rune(val))
+			b.WriteRune(rune(val))
 		}
 	} else if len(hex) == 2 {
 		// Single byte - treat as code point
 		if val, err := strconv.ParseInt(hex, 16, 32); err == nil {
-			runes = append(runes, rune(val))
+			b.WriteRune(rune(val))
 		}
 	} else if len(hex) > 4 {
 		// Multi-character or surrogate pair
@@ -297,24 +272,26 @@ func hexToUnicodeRunes(hex string) []rune {
 				end = len(hex)
 			}
 			if val, err := strconv.ParseInt(hex[i:end], 16, 32); err == nil {
-				runes = append(runes, rune(val))
+				b.WriteRune(rune(val))
 			}
 		}
 	}
 
-	return runes
+	return b.String()
 }
 
 // ParseDifferencesArray parses a PDF Differences array
 // Format: [ code1 /name1 /name2 code2 /name3 ... ]
+// Handles tokens that may be concatenated without whitespace (e.g., "2/fi")
 func (fd *FontDecoder) ParseDifferencesArray(diffStr string) {
 	// Remove brackets
 	diffStr = strings.TrimSpace(diffStr)
 	diffStr = strings.TrimPrefix(diffStr, "[")
 	diffStr = strings.TrimSuffix(diffStr, "]")
 
-	// Parse tokens
-	tokens := strings.Fields(diffStr)
+	// Tokenize: split on whitespace AND on '/' boundaries
+	// "2/fi/fl 10/A" -> ["2", "/fi", "/fl", "10", "/A"]
+	tokens := tokenizeDifferences(diffStr)
 	currentCode := 0
 
 	for _, token := range tokens {
@@ -332,6 +309,155 @@ func (fd *FontDecoder) ParseDifferencesArray(diffStr string) {
 			}
 		}
 	}
+}
+
+// SetCIDWidths sets CID font width data from /DW and /W array values
+func (fd *FontDecoder) SetCIDWidths(defaultW int, widths map[int]int) {
+	fd.isCIDFont = true
+	fd.cidDefaultW = defaultW
+	fd.cidWidths = widths
+}
+
+// CIDCharWidth returns the width for a CID character code in thousandths of text space.
+// Returns the default width if no specific width is set.
+func (fd *FontDecoder) CIDCharWidth(cid int) int {
+	if fd.cidWidths != nil {
+		if w, ok := fd.cidWidths[cid]; ok {
+			return w
+		}
+	}
+	if fd.cidDefaultW > 0 {
+		return fd.cidDefaultW
+	}
+	return 1000
+}
+
+// parseCIDWidthArray parses a PDF /W array per spec 9.7.4.3.
+// Two formats:
+//   - [cid [w1 w2 ...]]  — consecutive CIDs starting at cid
+//   - [cidStart cidEnd w] — range of CIDs with same width
+func parseCIDWidthArray(wStr string) map[int]int {
+	widths := make(map[int]int)
+	wStr = strings.TrimSpace(wStr)
+	if len(wStr) >= 2 && wStr[0] == '[' && wStr[len(wStr)-1] == ']' {
+		wStr = wStr[1 : len(wStr)-1]
+	}
+
+	i := 0
+	n := len(wStr)
+
+	skipWS := func() {
+		for i < n && (wStr[i] == ' ' || wStr[i] == '\t' || wStr[i] == '\n' || wStr[i] == '\r') {
+			i++
+		}
+	}
+
+	readInt := func() (int, bool) {
+		skipWS()
+		if i >= n {
+			return 0, false
+		}
+		start := i
+		if wStr[i] == '-' {
+			i++
+		}
+		for i < n && wStr[i] >= '0' && wStr[i] <= '9' {
+			i++
+		}
+		if start == i {
+			return 0, false
+		}
+		v, err := strconv.Atoi(wStr[start:i])
+		return v, err == nil
+	}
+
+	for i < n {
+		skipWS()
+		if i >= n {
+			break
+		}
+
+		// Read first CID number
+		cid, ok := readInt()
+		if !ok {
+			i++
+			continue
+		}
+
+		skipWS()
+		if i >= n {
+			break
+		}
+
+		if wStr[i] == '[' {
+			// Format 1: cid [w1 w2 w3 ...]
+			i++ // skip '['
+			c := cid
+			for i < n && wStr[i] != ']' {
+				w, ok := readInt()
+				if !ok {
+					i++
+					continue
+				}
+				widths[c] = w
+				c++
+			}
+			if i < n {
+				i++ // skip ']'
+			}
+		} else {
+			// Format 2: cidStart cidEnd w
+			cidEnd, ok := readInt()
+			if !ok {
+				continue
+			}
+			w, ok := readInt()
+			if !ok {
+				continue
+			}
+			for c := cid; c <= cidEnd; c++ {
+				widths[c] = w
+			}
+		}
+	}
+
+	return widths
+}
+
+// tokenizeDifferences splits a Differences array body into tokens,
+// handling cases where numbers and names are concatenated (e.g., "2/fi").
+func tokenizeDifferences(s string) []string {
+	var tokens []string
+	i := 0
+	for i < len(s) {
+		// Skip whitespace
+		for i < len(s) && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r') {
+			i++
+		}
+		if i >= len(s) {
+			break
+		}
+		if s[i] == '/' {
+			// Name token: /glyphname — read until next '/', whitespace, or ']'
+			start := i
+			i++
+			for i < len(s) && s[i] != '/' && s[i] != ' ' && s[i] != '\t' && s[i] != '\n' && s[i] != '\r' && s[i] != ']' {
+				i++
+			}
+			tokens = append(tokens, s[start:i])
+		} else if (s[i] >= '0' && s[i] <= '9') || s[i] == '-' {
+			// Number token
+			start := i
+			i++
+			for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+				i++
+			}
+			tokens = append(tokens, s[start:i])
+		} else {
+			i++
+		}
+	}
+	return tokens
 }
 
 // glyphNameToUnicode converts a PostScript glyph name to Unicode

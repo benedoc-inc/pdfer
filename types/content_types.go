@@ -9,6 +9,10 @@ type ContentDocument struct {
 	Annotations []Annotation      `json:"annotations,omitempty"`
 	Images      []Image           `json:"images,omitempty"`
 	Fonts       []FontInfo        `json:"fonts,omitempty"`
+	TextItems   []TextItem        `json:"text_items,omitempty"`
+	Tables      []TableItem       `json:"tables,omitempty"`
+	Pictures    []PictureItem     `json:"pictures,omitempty"`
+	Formulas    []FormulaItem     `json:"formulas,omitempty"`
 }
 
 // DocumentMetadata contains document-level metadata
