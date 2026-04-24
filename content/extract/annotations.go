@@ -90,7 +90,7 @@ func extractAnnotation(annotObjNum int, pdf *parse.PDF, pageNum int, verbose boo
 		annotation.Type = types.AnnotationTypeLine
 	case "/Polygon":
 		annotation.Type = types.AnnotationTypePolygon
-	case "/Polyline":
+	case "/PolyLine":
 		annotation.Type = types.AnnotationTypePolyline
 	case "/Ink":
 		annotation.Type = types.AnnotationTypeInk
@@ -209,14 +209,40 @@ func extractAnnotation(annotObjNum int, pdf *parse.PDF, pageNum int, verbose boo
 		annotation.Type == types.AnnotationTypeSquiggly {
 		quadPoints := extractArrayValue(annotStr, "/QuadPoints")
 		if len(quadPoints) >= 8 {
-			// QuadPoints is array of [x1 y1 x2 y2 x3 y3 x4 y4] for each quad
-			// For simplicity, extract first quad
 			annotation.QuadPoints = []types.Point{
 				{X: quadPoints[0], Y: quadPoints[1]},
 				{X: quadPoints[2], Y: quadPoints[3]},
 				{X: quadPoints[4], Y: quadPoints[5]},
 				{X: quadPoints[6], Y: quadPoints[7]},
 			}
+		}
+	}
+
+	// Line: extract /L endpoint array
+	if annotation.Type == types.AnnotationTypeLine {
+		l := extractArrayValue(annotStr, "/L")
+		if len(l) >= 4 {
+			annotation.LineEndpoints = []types.Point{
+				{X: l[0], Y: l[1]},
+				{X: l[2], Y: l[3]},
+			}
+		}
+	}
+
+	// Polygon/Polyline: extract /Vertices array
+	if annotation.Type == types.AnnotationTypePolygon ||
+		annotation.Type == types.AnnotationTypePolyline {
+		verts := extractArrayValue(annotStr, "/Vertices")
+		for i := 0; i+1 < len(verts); i += 2 {
+			annotation.Vertices = append(annotation.Vertices, types.Point{X: verts[i], Y: verts[i+1]})
+		}
+	}
+
+	// Stamp: /Name holds the stamp type string
+	if annotation.Type == types.AnnotationTypeStamp {
+		name := extractDictValue(annotStr, "/Name")
+		if name != "" {
+			annotation.Icon = strings.TrimPrefix(name, "/")
 		}
 	}
 

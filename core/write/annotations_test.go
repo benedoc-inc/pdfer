@@ -240,6 +240,137 @@ func TestAnnotation_Multiple(t *testing.T) {
 	}
 }
 
+func TestAnnotation_Squiggly(t *testing.T) {
+	qp := write.RectToQuadPoints(72, 710, 300, 722)
+	pdf := buildAnnotationPDF(t,
+		write.NewSquigglyAnnotation(72, 710, 300, 722, qp),
+	)
+
+	doc, err := extract.ExtractContent(pdf, nil, false)
+	if err != nil {
+		t.Fatalf("extract failed: %v", err)
+	}
+	if len(doc.Pages[0].Annotations) != 1 {
+		t.Fatalf("expected 1 annotation, got %d", len(doc.Pages[0].Annotations))
+	}
+	a := doc.Pages[0].Annotations[0]
+	if a.Type != "squiggly" {
+		t.Errorf("expected type squiggly, got %s", a.Type)
+	}
+	if len(a.QuadPoints) == 0 {
+		t.Error("expected QuadPoints to be populated")
+	}
+}
+
+func TestAnnotation_Line(t *testing.T) {
+	pdf := buildAnnotationPDF(t,
+		write.NewLineAnnotation(72, 700, 300, 720).
+			WithColor(1, 0, 0).
+			WithBorderWidth(2).
+			WithLineEndings("OpenArrow", "None"),
+	)
+
+	doc, err := extract.ExtractContent(pdf, nil, false)
+	if err != nil {
+		t.Fatalf("extract failed: %v", err)
+	}
+	if len(doc.Pages[0].Annotations) != 1 {
+		t.Fatalf("expected 1 annotation, got %d", len(doc.Pages[0].Annotations))
+	}
+	a := doc.Pages[0].Annotations[0]
+	if a.Type != "line" {
+		t.Errorf("expected type line, got %s", a.Type)
+	}
+	if len(a.LineEndpoints) != 2 {
+		t.Errorf("expected 2 line endpoints, got %d", len(a.LineEndpoints))
+	}
+}
+
+func TestAnnotation_Polygon(t *testing.T) {
+	verts := []float64{100, 100, 200, 200, 150, 300}
+	pdf := buildAnnotationPDF(t,
+		write.NewPolygonAnnotation(100, 100, 200, 300, verts).
+			WithColor(0, 1, 0).
+			WithBorderWidth(1.5),
+	)
+
+	doc, err := extract.ExtractContent(pdf, nil, false)
+	if err != nil {
+		t.Fatalf("extract failed: %v", err)
+	}
+	if len(doc.Pages[0].Annotations) != 1 {
+		t.Fatalf("expected 1 annotation, got %d", len(doc.Pages[0].Annotations))
+	}
+	a := doc.Pages[0].Annotations[0]
+	if a.Type != "polygon" {
+		t.Errorf("expected type polygon, got %s", a.Type)
+	}
+	if len(a.Vertices) != 3 {
+		t.Errorf("expected 3 vertices, got %d", len(a.Vertices))
+	}
+}
+
+func TestAnnotation_Polyline(t *testing.T) {
+	verts := []float64{72, 700, 150, 720, 300, 700}
+	pdf := buildAnnotationPDF(t,
+		write.NewPolylineAnnotation(72, 700, 300, 720, verts).
+			WithBorderWidth(1),
+	)
+
+	doc, err := extract.ExtractContent(pdf, nil, false)
+	if err != nil {
+		t.Fatalf("extract failed: %v", err)
+	}
+	if len(doc.Pages[0].Annotations) != 1 {
+		t.Fatalf("expected 1 annotation, got %d", len(doc.Pages[0].Annotations))
+	}
+	a := doc.Pages[0].Annotations[0]
+	if a.Type != "polyline" {
+		t.Errorf("expected type polyline, got %s", a.Type)
+	}
+	if len(a.Vertices) != 3 {
+		t.Errorf("expected 3 vertices, got %d", len(a.Vertices))
+	}
+}
+
+func TestAnnotation_Stamp(t *testing.T) {
+	pdf := buildAnnotationPDF(t,
+		write.NewStampAnnotation(72, 650, 250, 700, "Draft"),
+	)
+
+	doc, err := extract.ExtractContent(pdf, nil, false)
+	if err != nil {
+		t.Fatalf("extract failed: %v", err)
+	}
+	if len(doc.Pages[0].Annotations) != 1 {
+		t.Fatalf("expected 1 annotation, got %d", len(doc.Pages[0].Annotations))
+	}
+	a := doc.Pages[0].Annotations[0]
+	if a.Type != "stamp" {
+		t.Errorf("expected type stamp, got %s", a.Type)
+	}
+	if a.Icon != "Draft" {
+		t.Errorf("expected stamp name 'Draft', got %q", a.Icon)
+	}
+}
+
+func TestAnnotation_Caret(t *testing.T) {
+	pdf := buildAnnotationPDF(t,
+		write.NewCaretAnnotation(100, 700, 110, 715),
+	)
+
+	doc, err := extract.ExtractContent(pdf, nil, false)
+	if err != nil {
+		t.Fatalf("extract failed: %v", err)
+	}
+	if len(doc.Pages[0].Annotations) != 1 {
+		t.Fatalf("expected 1 annotation, got %d", len(doc.Pages[0].Annotations))
+	}
+	if doc.Pages[0].Annotations[0].Type != "caret" {
+		t.Errorf("expected type caret, got %s", doc.Pages[0].Annotations[0].Type)
+	}
+}
+
 func TestAnnotation_RectToQuadPoints(t *testing.T) {
 	qp := write.RectToQuadPoints(10, 20, 100, 50)
 	// Expect: upper-left, upper-right, lower-left, lower-right

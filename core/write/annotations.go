@@ -9,21 +9,25 @@ import (
 // Use a subtype constructor (e.g. NewLinkAnnotation), apply options via
 // the With* methods, then attach to a page with PageBuilder.AddAnnotation.
 type AnnotationBuilder struct {
-	subtype    string
-	rect       [4]float64 // x1, y1, x2, y2 in user space
-	contents   string
-	title      string     // author / creator shown in viewer UI
-	color      [3]float64 // RGB 0–1
-	hasColor   bool
-	opacity    float64     // 0 means unset (viewer default = fully opaque)
-	borderW    float64     // ≥0: border width; <0: invisible border
-	open       bool        // Text: initial popup state
-	icon       string      // Text: icon name (/Note, /Comment, /Help, …)
-	quadPoints []float64   // Markup: 8 coords per quad [ul_x ul_y ur_x ur_y ll_x ll_y lr_x lr_y …]
-	inkLists   [][]float64 // Ink: list of strokes, each a flat [x y …] slice
-	da         string      // FreeText: default appearance string (/FontName sz Tf r g b rg)
-	uri        string      // Link: target URI
-	dest       string      // Link: named destination (alternative to uri)
+	subtype        string
+	rect           [4]float64 // x1, y1, x2, y2 in user space
+	contents       string
+	title          string     // author / creator shown in viewer UI
+	color          [3]float64 // RGB 0–1
+	hasColor       bool
+	opacity        float64     // 0 means unset (viewer default = fully opaque)
+	borderW        float64     // ≥0: border width; <0: invisible border
+	open           bool        // Text: initial popup state
+	icon           string      // Text/Stamp: icon or stamp name; Caret: /Sy symbol
+	quadPoints     []float64   // Markup: 8 coords per quad [ul_x ul_y ur_x ur_y ll_x ll_y lr_x lr_y …]
+	inkLists       [][]float64 // Ink: list of strokes, each a flat [x y …] slice
+	da             string      // FreeText: default appearance string (/FontName sz Tf r g b rg)
+	uri            string      // Link: target URI
+	dest           string      // Link: named destination (alternative to uri)
+	lineCoords     [4]float64  // Line: /L [x1 y1 x2 y2] endpoint coords
+	vertices       []float64   // Polygon/PolyLine: /Vertices flat [x y …] slice
+	lineEndings    [2]string   // Line/Polygon/PolyLine: /LE [start end] style names
+	hasLineEndings bool
 }
 
 // --- Constructors ---
@@ -125,6 +129,80 @@ func NewInkAnnotation(x1, y1, x2, y2 float64, inkLists [][]float64) *AnnotationB
 	}
 }
 
+// NewSquigglyAnnotation creates a squiggly-underline markup annotation.
+func NewSquigglyAnnotation(x1, y1, x2, y2 float64, quadPoints []float64) *AnnotationBuilder {
+	return &AnnotationBuilder{
+		subtype:    "Squiggly",
+		rect:       [4]float64{x1, y1, x2, y2},
+		quadPoints: quadPoints,
+		borderW:    -1,
+	}
+}
+
+// NewLineAnnotation creates a straight-line annotation.
+// x1,y1 and x2,y2 are the line endpoints; the bounding rect is derived from them.
+// Use WithLineEndings to set decorative end caps (e.g. "OpenArrow", "None").
+func NewLineAnnotation(x1, y1, x2, y2 float64) *AnnotationBuilder {
+	minX, maxX := x1, x2
+	if x1 > x2 {
+		minX, maxX = x2, x1
+	}
+	minY, maxY := y1, y2
+	if y1 > y2 {
+		minY, maxY = y2, y1
+	}
+	return &AnnotationBuilder{
+		subtype:    "Line",
+		rect:       [4]float64{minX, minY, maxX, maxY},
+		lineCoords: [4]float64{x1, y1, x2, y2},
+		borderW:    1,
+	}
+}
+
+// NewPolygonAnnotation creates a closed polygon annotation.
+// vertices is a flat [x y x y …] slice of vertex coordinates.
+func NewPolygonAnnotation(x1, y1, x2, y2 float64, vertices []float64) *AnnotationBuilder {
+	return &AnnotationBuilder{
+		subtype:  "Polygon",
+		rect:     [4]float64{x1, y1, x2, y2},
+		vertices: vertices,
+		borderW:  1,
+	}
+}
+
+// NewPolylineAnnotation creates an open polyline annotation.
+// vertices is a flat [x y x y …] slice of vertex coordinates.
+func NewPolylineAnnotation(x1, y1, x2, y2 float64, vertices []float64) *AnnotationBuilder {
+	return &AnnotationBuilder{
+		subtype:  "PolyLine",
+		rect:     [4]float64{x1, y1, x2, y2},
+		vertices: vertices,
+		borderW:  1,
+	}
+}
+
+// NewStampAnnotation creates a rubber-stamp annotation.
+// stampName is the standard PDF stamp name: Draft, NotApproved, Approved,
+// AsIs, Confidential, Departmental, Experimental, Expired, Final,
+// ForComment, ForPublicRelease, NotForPublicRelease, Sold, TopSecret.
+func NewStampAnnotation(x1, y1, x2, y2 float64, stampName string) *AnnotationBuilder {
+	return &AnnotationBuilder{
+		subtype: "Stamp",
+		rect:    [4]float64{x1, y1, x2, y2},
+		icon:    stampName,
+		borderW: -1,
+	}
+}
+
+// NewCaretAnnotation creates a caret (text-insertion-point) annotation.
+func NewCaretAnnotation(x1, y1, x2, y2 float64) *AnnotationBuilder {
+	return &AnnotationBuilder{
+		subtype: "Caret",
+		rect:    [4]float64{x1, y1, x2, y2},
+		borderW: -1,
+	}
+}
+
 // RectToQuadPoints converts a bounding rectangle to a QuadPoints array in the
 // PDF order expected by markup annotations: upper-left, upper-right, lower-left, lower-right.
 func RectToQuadPoints(x1, y1, x2, y2 float64) []float64 {
@@ -180,6 +258,15 @@ func (a *AnnotationBuilder) WithOpen(open bool) *AnnotationBuilder {
 // Standard values: Note (default), Comment, Key, Help, NewParagraph, Paragraph, Insert.
 func (a *AnnotationBuilder) WithIcon(icon string) *AnnotationBuilder {
 	a.icon = icon
+	return a
+}
+
+// WithLineEndings sets decorative end caps for Line, Polygon, and PolyLine annotations.
+// Standard style names: None, Square, Circle, Diamond, OpenArrow, ClosedArrow,
+// Butt, ROpenArrow, RClosedArrow, Slash.
+func (a *AnnotationBuilder) WithLineEndings(start, end string) *AnnotationBuilder {
+	a.lineEndings = [2]string{start, end}
+	a.hasLineEndings = true
 	return a
 }
 
@@ -268,11 +355,46 @@ func (a *AnnotationBuilder) build(w *PDFWriter) int {
 					if i > 0 {
 						b.WriteByte(' ')
 					}
-					b.WriteString(fmt.Sprintf("%.4f", v))
+					fmt.Fprintf(&b, "%.4f", v)
 				}
 				b.WriteByte(']')
 			}
 			b.WriteByte(']')
+		}
+
+	case "Line":
+		fmt.Fprintf(&b, "/L[%.4f %.4f %.4f %.4f]",
+			a.lineCoords[0], a.lineCoords[1], a.lineCoords[2], a.lineCoords[3])
+		if a.hasLineEndings {
+			fmt.Fprintf(&b, "/LE[/%s /%s]", a.lineEndings[0], a.lineEndings[1])
+		}
+
+	case "Polygon", "PolyLine":
+		if len(a.vertices) > 0 {
+			b.WriteString("/Vertices[")
+			for i, v := range a.vertices {
+				if i > 0 {
+					b.WriteByte(' ')
+				}
+				fmt.Fprintf(&b, "%.4f", v)
+			}
+			b.WriteByte(']')
+		}
+		if a.hasLineEndings {
+			fmt.Fprintf(&b, "/LE[/%s /%s]", a.lineEndings[0], a.lineEndings[1])
+		}
+
+	case "Stamp":
+		if a.icon != "" {
+			b.WriteString("/Name/")
+			b.WriteString(a.icon)
+		}
+
+	case "Caret":
+		if a.icon != "" {
+			// /Sy: P = paragraph symbol, None = plain caret
+			b.WriteString("/Sy/")
+			b.WriteString(a.icon)
 		}
 	}
 

@@ -218,6 +218,12 @@ type Annotation struct {
 
 	// Highlight/markup-specific
 	QuadPoints []Point `json:"quad_points,omitempty"`
+
+	// Line-specific: start and end points from /L array
+	LineEndpoints []Point `json:"line_endpoints,omitempty"`
+
+	// Polygon/Polyline-specific: vertices from /Vertices array
+	Vertices []Point `json:"vertices,omitempty"`
 }
 
 // AnnotationType represents the type of annotation

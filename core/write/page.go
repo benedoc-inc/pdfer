@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/benedoc-inc/pdfer/core/encrypt"
 	"github.com/benedoc-inc/pdfer/resources/font"
 	"github.com/benedoc-inc/pdfer/types"
 )
@@ -194,6 +195,7 @@ type SimplePDFBuilder struct {
 	pages         []int
 	pagesObjNum   int
 	catalogObjNum int
+	encryptOpts   *encrypt.EncryptOptions
 }
 
 // NewSimplePDFBuilder creates a new simple PDF builder
@@ -207,6 +209,17 @@ func NewSimplePDFBuilder() *SimplePDFBuilder {
 // Writer returns the underlying PDF writer for advanced operations
 func (b *SimplePDFBuilder) Writer() *PDFWriter {
 	return b.writer
+}
+
+// SetPassword enables AES-128 encryption (V=4, R=4) on the output PDF.
+// userPassword is required to open the file; ownerPassword grants full control.
+// Either may be nil for no password on that role.
+// Call this before Bytes().
+func (b *SimplePDFBuilder) SetPassword(userPassword, ownerPassword []byte) {
+	b.encryptOpts = &encrypt.EncryptOptions{
+		UserPassword:  userPassword,
+		OwnerPassword: ownerPassword,
+	}
 }
 
 // AddPage adds a new page and returns a page builder
@@ -242,6 +255,17 @@ func (b *SimplePDFBuilder) Bytes() ([]byte, error) {
 	// Create Catalog
 	b.catalogObjNum = b.writer.AddObject([]byte(fmt.Sprintf("<</Type/Catalog/Pages %d 0 R>>", b.pagesObjNum)))
 	b.writer.SetRoot(b.catalogObjNum)
+
+	// Apply encryption if configured.
+	if b.encryptOpts != nil {
+		encInfo, fileID, err := encrypt.PrepareEncryption(*b.encryptOpts)
+		if err != nil {
+			return nil, fmt.Errorf("preparing encryption: %w", err)
+		}
+		encObjNum := b.writer.AddObject(encrypt.EncryptDictString(encInfo))
+		b.writer.SetEncryption(encInfo, fileID)
+		b.writer.SetEncryptRef(encObjNum)
+	}
 
 	return b.writer.Bytes()
 }
