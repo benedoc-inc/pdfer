@@ -4,6 +4,7 @@ package write
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/benedoc-inc/pdfer/core/encrypt"
 	"github.com/benedoc-inc/pdfer/resources/font"
@@ -197,6 +198,7 @@ type SimplePDFBuilder struct {
 	catalogObjNum  int
 	encryptOpts    *encrypt.EncryptOptions
 	acroFormObjNum int // set by RegisterAcroForm
+	pdfa           *PDFAOptions
 }
 
 // NewSimplePDFBuilder creates a new simple PDF builder
@@ -227,6 +229,13 @@ func (b *SimplePDFBuilder) SetPassword(userPassword, ownerPassword []byte) {
 		UserPassword:  userPassword,
 		OwnerPassword: ownerPassword,
 	}
+}
+
+// SetPDFAMode enables PDF/A compliance for the document. Call before Bytes().
+// PDF/A requires all fonts to be embedded; using AddStandardFont (Type1
+// without embedding) will produce a document that fails strict validators.
+func (b *SimplePDFBuilder) SetPDFAMode(opts PDFAOptions) {
+	b.pdfa = &opts
 }
 
 // AddPage adds a new page and returns a page builder
@@ -263,6 +272,16 @@ func (b *SimplePDFBuilder) Bytes() ([]byte, error) {
 	catalogDict := fmt.Sprintf("<</Type/Catalog/Pages %d 0 R", b.pagesObjNum)
 	if b.acroFormObjNum != 0 {
 		catalogDict += fmt.Sprintf("/AcroForm %d 0 R", b.acroFormObjNum)
+	}
+	if b.pdfa != nil {
+		now := time.Now()
+		metaObjNum, outputIntentObjNum, err := b.writer.preparePDFA(*b.pdfa, now)
+		if err != nil {
+			return nil, fmt.Errorf("pdf/a: %w", err)
+		}
+		catalogDict += fmt.Sprintf("/Metadata %d 0 R", metaObjNum)
+		catalogDict += fmt.Sprintf("/OutputIntents[%d 0 R]", outputIntentObjNum)
+		catalogDict += "/MarkInfo<</Marked false>>"
 	}
 	catalogDict += ">>"
 	b.catalogObjNum = b.writer.AddObject([]byte(catalogDict))
