@@ -111,10 +111,25 @@ func TestCreateForm_FillRoundTrip(t *testing.T) {
 	if len(filled) == 0 {
 		t.Fatal("FillFormFields returned empty bytes")
 	}
-	// The filled value should appear in the raw bytes as a PDF string literal.
+	// Raw bytes must contain the filled string literal.
 	if !strings.Contains(string(filled), "Jane Smith") {
 		t.Error("filled PDF does not contain 'Jane Smith'")
 	}
+	// Re-parse to verify the xref is valid (this would fail with the old
+	// splice-based approach because byte offsets were invalidated).
+	form, err := acroform.ExtractAcroForm(filled, nil, false)
+	if err != nil {
+		t.Fatalf("re-parsing filled PDF failed: %v", err)
+	}
+	for _, f := range form.Fields {
+		if f.T == "fullname" {
+			if !strings.Contains(fmt.Sprint(f.V), "Jane Smith") {
+				t.Errorf("fullname field value after fill: got %q, want 'Jane Smith'", f.V)
+			}
+			return
+		}
+	}
+	t.Error("fullname field not found in re-parsed form")
 }
 
 func TestCreateForm_CatalogHasAcroForm(t *testing.T) {

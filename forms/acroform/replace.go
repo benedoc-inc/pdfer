@@ -138,9 +138,8 @@ func escapeFieldValue(s string) string {
 	return result.String()
 }
 
-// FillFormFields fills multiple fields in a PDF
-// This function attempts to handle both direct objects and object streams
+// FillFormFields fills multiple fields in a PDF using an incremental update so
+// that existing xref offsets are never invalidated.
 func FillFormFields(pdfBytes []byte, formData types.FormData, password []byte, verbose bool) ([]byte, error) {
-	// Use the stream-aware version which handles both direct objects and object streams
-	return FillFormFieldsWithStreams(pdfBytes, formData, password, verbose)
+	return fillIncremental(pdfBytes, formData, password, verbose)
 }
