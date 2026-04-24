@@ -176,76 +176,26 @@ func (w *PDFWriter) updateCatalogWithOutlines() {
 		return
 	}
 
-	// Parse root object number from rootRef (format: "N 0 R")
 	rootObjNum := 0
 	fmt.Sscanf(w.rootRef, "%d 0 R", &rootObjNum)
 	if rootObjNum == 0 {
 		return
 	}
 
-	// Get catalog object
 	catalogObj, ok := w.objects[rootObjNum]
 	if !ok || catalogObj == nil {
 		return
 	}
 
-	// Parse catalog dictionary if it's a Dictionary, otherwise parse as string
-	var catalogDict Dictionary
-	if catalogObj.Dict != nil {
-		catalogDict = catalogObj.Dict
-	} else {
-		// Try to parse from Content
-		catalogStr := string(catalogObj.Content)
-		// Simple parsing - find dictionary entries
-		// For now, rebuild the dictionary properly
-		// Extract existing entries and rebuild
-		if strings.Contains(catalogStr, "/Type") && strings.Contains(catalogStr, "/Pages") {
-			// Rebuild with /Outlines
-			catalogDict = Dictionary{
-				"/Type":  "/Catalog",
-				"/Pages": extractDictValueFromString(catalogStr, "/Pages"),
-			}
-			if pagesRef := extractDictValueFromString(catalogStr, "/Pages"); pagesRef != "" {
-				catalogDict["/Pages"] = pagesRef
-			}
-		} else {
-			// Fallback: just add /Outlines to string
-			catalogStr := string(catalogObj.Content)
-			if !strings.Contains(catalogStr, "/Outlines") {
-				lastIdx := strings.LastIndex(catalogStr, ">>")
-				if lastIdx > 0 {
-					catalogStr = catalogStr[:lastIdx] + fmt.Sprintf("/Outlines %s ", w.outlinesRef) + catalogStr[lastIdx:]
-					catalogObj.Content = []byte(catalogStr)
-				}
-			}
-			return
-		}
+	catalogStr := string(catalogObj.Content)
+	if strings.Contains(catalogStr, "/Outlines") {
+		return
 	}
-
-	// Add /Outlines to dictionary
-	catalogDict["/Outlines"] = w.outlinesRef
-
-	// Update catalog object
-	catalogObj.Content = w.formatDictionary(catalogDict)
-	catalogObj.Dict = catalogDict
-}
-
-// extractDictValueFromString extracts a dictionary value from a string representation
-func extractDictValueFromString(dictStr, key string) string {
-	// Simple regex-like extraction
-	keyPattern := key + " "
-	idx := strings.Index(dictStr, keyPattern)
-	if idx == -1 {
-		return ""
+	lastIdx := strings.LastIndex(catalogStr, ">>")
+	if lastIdx > 0 {
+		catalogStr = catalogStr[:lastIdx] + fmt.Sprintf("/Outlines %s ", w.outlinesRef) + catalogStr[lastIdx:]
+		catalogObj.Content = []byte(catalogStr)
 	}
-	start := idx + len(keyPattern)
-	// Find the value (could be a reference, array, etc.)
-	// For simplicity, extract until space or >
-	end := start
-	for end < len(dictStr) && dictStr[end] != ' ' && dictStr[end] != '>' && dictStr[end] != '\n' {
-		end++
-	}
-	return dictStr[start:end]
 }
 
 // SetEncryptRef sets the encrypt dictionary object reference
