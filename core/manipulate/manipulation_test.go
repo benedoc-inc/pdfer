@@ -2,6 +2,7 @@ package manipulate
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/benedoc-inc/pdfer/content/extract"
@@ -42,6 +43,61 @@ func TestExtractPages(t *testing.T) {
 
 	if len(doc.Pages) != 3 {
 		t.Errorf("Expected 3 pages in extracted PDF, got %d", len(doc.Pages))
+	}
+}
+
+// TestExtractPagesPreservesResources verifies that fonts and content streams are
+// fully copied so that extracted pages have readable text — not just the right count.
+func TestExtractPagesPreservesResources(t *testing.T) {
+	builder := write.NewSimplePDFBuilder()
+	for i := 1; i <= 5; i++ {
+		page := builder.AddPage(write.PageSizeLetter)
+		content := page.Content()
+		content.BeginText()
+		font := page.AddStandardFont("Helvetica")
+		content.SetFont(font, 12)
+		content.SetTextPosition(72, 720)
+		content.ShowText(fmt.Sprintf("Unique text for page %d", i))
+		content.EndText()
+		builder.FinalizePage(page)
+	}
+
+	pdfBytes, err := builder.Bytes()
+	if err != nil {
+		t.Fatalf("failed to build PDF: %v", err)
+	}
+
+	// Extract pages 2 and 4 — non-contiguous to test independence.
+	extracted, err := ExtractPages(pdfBytes, []int{2, 4}, nil, false)
+	if err != nil {
+		t.Fatalf("ExtractPages failed: %v", err)
+	}
+
+	doc, err := extract.ExtractContent(extracted, nil, false)
+	if err != nil {
+		t.Fatalf("failed to extract content from result: %v", err)
+	}
+
+	if len(doc.Pages) != 2 {
+		t.Fatalf("expected 2 pages, got %d", len(doc.Pages))
+	}
+
+	wantTexts := []string{"Unique text for page 2", "Unique text for page 4"}
+	for i, wantText := range wantTexts {
+		found := false
+		for _, elem := range doc.Pages[i].Text {
+			if strings.Contains(elem.Text, wantText) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			var got []string
+			for _, elem := range doc.Pages[i].Text {
+				got = append(got, elem.Text)
+			}
+			t.Errorf("page %d: expected %q in text elements, got: %v", i+1, wantText, got)
+		}
 	}
 }
 

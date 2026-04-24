@@ -2,81 +2,149 @@ package manipulate
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
 
 	"github.com/benedoc-inc/pdfer/core/write"
 )
 
-// ExtractPages extracts specific pages from a PDF and returns a new PDF
-// pageNumbers is 1-based (first page is 1)
+// ExtractPages extracts specific pages from a PDF and returns a new PDF containing
+// only those pages, with all their dependencies (fonts, images, content streams, etc.)
+// fully copied and object references remapped. pageNumbers is 1-based.
 func ExtractPages(pdfBytes []byte, pageNumbers []int, password []byte, verbose bool) ([]byte, error) {
 	if len(pageNumbers) == 0 {
 		return nil, fmt.Errorf("no pages specified for extraction")
 	}
 
-	// Create manipulator
 	manipulator, err := NewPDFManipulator(pdfBytes, password, verbose)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create manipulator: %w", err)
 	}
 
-	// Get all page object numbers
 	allPageObjNums, err := manipulator.getAllPageObjectNumbers()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get page objects: %w", err)
 	}
 
-	// Validate page numbers
 	for _, pageNum := range pageNumbers {
 		if pageNum < 1 || pageNum > len(allPageObjNums) {
 			return nil, fmt.Errorf("page number %d out of range (1-%d)", pageNum, len(allPageObjNums))
 		}
 	}
 
-	// Create a new PDF with only the extracted pages
-	writer := write.NewPDFWriter()
-	pagesObjNum := writer.AddObject([]byte("")) // Placeholder, will update later
-	pageObjNums := make([]int, 0, len(pageNumbers))
-
-	// Copy page objects and their dependencies
+	// Build set of selected page object numbers.
+	selectedPageObjNums := make(map[int]bool, len(pageNumbers))
 	for _, pageNum := range pageNumbers {
-		pageObjNum := allPageObjNums[pageNum-1]
-
-		// Get page object
-		pageObj, ok := manipulator.objects[pageObjNum]
-		if !ok {
-			return nil, fmt.Errorf("page object %d not found", pageObjNum)
-		}
-
-		// Copy page object to new PDF
-		writer.SetObject(pageObjNum, pageObj)
-		pageObjNums = append(pageObjNums, pageObjNum)
-
-		// Update page's Parent reference to point to new Pages object
-		pageStr := string(pageObj)
-		updatedPageStr := setDictValue(pageStr, "/Parent", fmt.Sprintf("%d 0 R", pagesObjNum))
-		writer.SetObject(pageObjNum, []byte(updatedPageStr))
-
-		// TODO: Copy page dependencies (content streams, resources, fonts, images, etc.)
-		// For now, we'll copy the page object as-is and hope dependencies are included
+		selectedPageObjNums[allPageObjNums[pageNum-1]] = true
 	}
 
-	// Build Kids array
+	// Collect all objects reachable from the selected pages, excluding the old
+	// page tree (we build a fresh one below).
+	deps := collectPageDependencies(manipulator.objects, selectedPageObjNums)
+
+	// Assign new sequential object numbers to every dependency.
+	objNumMap := make(map[int]int, len(deps))
+	nextObjNum := 1
+	for objNum := range deps {
+		objNumMap[objNum] = nextObjNum
+		nextObjNum++
+	}
+
+	// Reserve numbers for the new Pages node and Catalog.
+	pagesObjNum := nextObjNum
+	nextObjNum++
+	catalogObjNum := nextObjNum
+
+	// Write all dependency objects with remapped references.
+	writer := write.NewPDFWriter()
+	for oldObjNum, newObjNum := range objNumMap {
+		obj := manipulator.objects[oldObjNum]
+
+		// Update /Parent in page objects to point to the new Pages node.
+		if selectedPageObjNums[oldObjNum] {
+			objStr := setDictValue(string(obj), "/Parent", fmt.Sprintf("%d 0 R", pagesObjNum))
+			obj = []byte(objStr)
+		}
+
+		writer.SetObject(newObjNum, updateObjectReferences(obj, objNumMap, false))
+	}
+
+	// Build Kids array in the caller-specified order.
 	kids := "["
-	for i, pageNum := range pageObjNums {
+	for i, pageNum := range pageNumbers {
 		if i > 0 {
 			kids += " "
 		}
-		kids += fmt.Sprintf("%d 0 R ", pageNum)
+		kids += fmt.Sprintf("%d 0 R", objNumMap[allPageObjNums[pageNum-1]])
 	}
 	kids += "]"
 
-	// Create Pages object
-	pagesDict := fmt.Sprintf("<</Type/Pages/Kids%s/Count %d>>", kids, len(pageObjNums))
-	writer.SetObject(pagesObjNum, []byte(pagesDict))
-
-	// Create Catalog
-	catalogObjNum := writer.AddObject([]byte(fmt.Sprintf("<</Type/Catalog/Pages %d 0 R>>", pagesObjNum)))
+	writer.SetObject(pagesObjNum, []byte(fmt.Sprintf(
+		"<</Type/Pages/Kids%s/Count %d>>", kids, len(pageNumbers),
+	)))
+	writer.SetObject(catalogObjNum, []byte(fmt.Sprintf(
+		"<</Type/Catalog/Pages %d 0 R>>", pagesObjNum,
+	)))
 	writer.SetRoot(catalogObjNum)
 
 	return writer.Bytes()
+}
+
+// collectPageDependencies returns the set of object numbers that are transitively
+// reachable from the selected pages via object references, minus the old page tree
+// (Pages nodes and Page objects that are not in the selection).
+func collectPageDependencies(objects map[int][]byte, selectedPageObjNums map[int]bool) map[int]bool {
+	refPattern := regexp.MustCompile(`(\d+)\s+\d+\s+R`)
+
+	collected := make(map[int]bool, len(objects))
+	queue := make([]int, 0, len(selectedPageObjNums))
+	for objNum := range selectedPageObjNums {
+		queue = append(queue, objNum)
+	}
+
+	for len(queue) > 0 {
+		objNum := queue[0]
+		queue = queue[1:]
+
+		if collected[objNum] {
+			continue
+		}
+		collected[objNum] = true
+
+		objBytes, ok := objects[objNum]
+		if !ok {
+			continue
+		}
+
+		for _, m := range refPattern.FindAllStringSubmatch(string(objBytes), -1) {
+			refNum, err := strconv.Atoi(m[1])
+			if err == nil && refNum > 0 && !collected[refNum] {
+				queue = append(queue, refNum)
+			}
+		}
+	}
+
+	// Remove old page-tree objects: /Pages nodes are replaced entirely, and any
+	// /Page objects that are not in the selection are unwanted.
+	toRemove := make([]int, 0)
+	for objNum := range collected {
+		objBytes, ok := objects[objNum]
+		if !ok {
+			toRemove = append(toRemove, objNum)
+			continue
+		}
+		switch extractDictValue(string(objBytes), "/Type") {
+		case "/Pages":
+			toRemove = append(toRemove, objNum)
+		case "/Page":
+			if !selectedPageObjNums[objNum] {
+				toRemove = append(toRemove, objNum)
+			}
+		}
+	}
+	for _, objNum := range toRemove {
+		delete(collected, objNum)
+	}
+
+	return collected
 }
