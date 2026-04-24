@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/benedoc-inc/pdfer/core/parse"
@@ -18,6 +19,9 @@ import (
 // the end of the original bytes. A new xref section and trailer referencing the
 // old xref via /Prev are appended. Original bytes are never altered.
 //
+// For text and choice fields an /AP appearance stream is also generated so the
+// filled value is visible in viewers that do not honour /NeedAppearances true.
+//
 // Encrypted PDFs fall back to the legacy splice path because incremental
 // updates for encrypted files require per-string key derivation that is not
 // yet implemented here.
@@ -30,7 +34,7 @@ func fillIncremental(pdfBytes []byte, formData types.FormData, password []byte, 
 		return nil, fmt.Errorf("failed to parse PDF: %w", err)
 	}
 
-	// Encrypted PDFs: fall back to legacy path (encryption is out of scope here).
+	// Encrypted PDFs: fall back to legacy path.
 	if pdf.Encryption() != nil {
 		return FillFormFieldsWithStreams(pdfBytes, formData, password, verbose)
 	}
@@ -40,13 +44,31 @@ func fillIncremental(pdfBytes []byte, formData types.FormData, password []byte, 
 		return nil, fmt.Errorf("failed to parse AcroForm: %w", err)
 	}
 
-	// Build the list of (objectNum, updatedBytes) pairs.
-	type update struct {
-		objNum int
-		genNum int
-		body   []byte
+	prevXRef := findStartXRef(pdfBytes)
+	if prevXRef < 0 {
+		return nil, fmt.Errorf("could not locate startxref in original PDF")
 	}
-	var updates []update
+	trailer := pdf.Trailer()
+	if trailer == nil {
+		return nil, fmt.Errorf("could not read PDF trailer")
+	}
+
+	// ---- Resolve fields and pre-assign object numbers ----------------------
+	//
+	// We assign fresh object numbers (starting at trailer.Size) for:
+	//   • one shared Helvetica font resource (if any text/choice field is filled)
+	//   • one form XObject per text/choice field (the appearance stream)
+	// These are appended to the PDF and referenced from the updated field dicts.
+
+	type fieldFill struct {
+		field   *Field
+		value   interface{}
+		current []byte // original object bytes
+		xobjNum int    // 0 = no appearance needed (checkbox/radio/push-button)
+	}
+
+	var fills []fieldFill
+	needsFont := false
 
 	for fieldName, value := range formData {
 		field := acroForm.FindFieldByName(fieldName)
@@ -56,7 +78,6 @@ func fillIncremental(pdfBytes []byte, formData types.FormData, password []byte, 
 			}
 			continue
 		}
-
 		current, err := pdf.GetObject(field.ObjectNum)
 		if err != nil {
 			if verbose {
@@ -64,41 +85,79 @@ func fillIncremental(pdfBytes []byte, formData types.FormData, password []byte, 
 			}
 			continue
 		}
-
-		newBody := applyFieldValue(current, field, value)
-		updates = append(updates, update{field.ObjectNum, field.Generation, newBody})
+		ff := fieldFill{field: field, value: value, current: current}
+		if field.FT == "Tx" || field.FT == "Ch" {
+			needsFont = true
+		}
+		fills = append(fills, ff)
 	}
 
-	if len(updates) == 0 {
+	if len(fills) == 0 {
 		return pdfBytes, nil
 	}
 
-	// prevXRef is the byte offset stored after "startxref" in the original file;
-	// it becomes /Prev in the new trailer.
-	prevXRef := findStartXRef(pdfBytes)
-	if prevXRef < 0 {
-		return nil, fmt.Errorf("could not locate startxref in original PDF")
+	nextObjNum := trailer.Size
+
+	// Shared Helvetica font for appearance streams.
+	var helveticaObjNum int
+	if needsFont {
+		helveticaObjNum = nextObjNum
+		nextObjNum++
 	}
 
-	trailer := pdf.Trailer()
-	if trailer == nil {
-		return nil, fmt.Errorf("could not read PDF trailer")
+	// Assign XObject numbers for text/choice fields.
+	for i := range fills {
+		if fills[i].field.FT == "Tx" || fills[i].field.FT == "Ch" {
+			fills[i].xobjNum = nextObjNum
+			nextObjNum++
+		}
 	}
 
-	// --- Build incremental update section ---
+	// ---- Build incremental update section ----------------------------------
+
 	var buf bytes.Buffer
 	buf.Write(pdfBytes)
 	buf.WriteByte('\n')
 
-	offsets := make(map[int]int64, len(updates))
-	for _, upd := range updates {
-		offsets[upd.objNum] = int64(buf.Len())
-		fmt.Fprintf(&buf, "%d %d obj\n", upd.objNum, upd.genNum)
-		buf.Write(upd.body)
+	offsets := make(map[int]int64)
+
+	// Shared Helvetica font object.
+	if needsFont {
+		offsets[helveticaObjNum] = int64(buf.Len())
+		fmt.Fprintf(&buf, "%d 0 obj\n", helveticaObjNum)
+		buf.WriteString("<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding>>")
 		buf.WriteString("\nendobj\n")
 	}
 
-	// xref table: group consecutive object numbers into subsections.
+	// Per-field appearance XObjects, then updated field dicts.
+	for _, ff := range fills {
+		// Appearance XObject (text and choice fields only).
+		if ff.xobjNum > 0 {
+			fontAlias, fontSize := parseDA(ff.field.DA)
+			dictBytes, streamBytes := buildTextAppearance(
+				ff.field, fmt.Sprint(ff.value),
+				fontAlias, fontSize, helveticaObjNum,
+			)
+			offsets[ff.xobjNum] = int64(buf.Len())
+			fmt.Fprintf(&buf, "%d 0 obj\n", ff.xobjNum)
+			buf.Write(dictBytes)
+			buf.WriteString("\nstream\n")
+			buf.Write(streamBytes)
+			buf.WriteString("endstream\nendobj\n")
+		}
+
+		// Updated field dict.
+		newBody := applyFieldValue(ff.current, ff.field, ff.value)
+		if ff.xobjNum > 0 {
+			newBody = withAppearanceRef(newBody, ff.xobjNum)
+		}
+		offsets[ff.field.ObjectNum] = int64(buf.Len())
+		fmt.Fprintf(&buf, "%d %d obj\n", ff.field.ObjectNum, ff.field.Generation)
+		buf.Write(newBody)
+		buf.WriteString("\nendobj\n")
+	}
+
+	// xref table: consecutive runs become single subsections.
 	xrefStart := int64(buf.Len())
 	buf.WriteString("xref\n")
 	objNums := make([]int, 0, len(offsets))
@@ -108,9 +167,9 @@ func fillIncremental(pdfBytes []byte, formData types.FormData, password []byte, 
 	sort.Ints(objNums)
 	writeXRefSubsections(&buf, offsets, objNums)
 
-	// New trailer: preserve all original refs, add /Prev.
+	// New trailer: preserve Root/Info/Encrypt, add Prev, update Size.
 	buf.WriteString("trailer\n<<")
-	fmt.Fprintf(&buf, "/Size %d", trailer.Size)
+	fmt.Fprintf(&buf, "/Size %d", nextObjNum)
 	fmt.Fprintf(&buf, "/Root %s", trailer.RootRef)
 	if trailer.InfoRef != "" {
 		fmt.Fprintf(&buf, "/Info %s", trailer.InfoRef)
@@ -123,6 +182,78 @@ func fillIncremental(pdfBytes []byte, formData types.FormData, password []byte, 
 	fmt.Fprintf(&buf, "startxref\n%d\n%%%%EOF\n", xrefStart)
 
 	return buf.Bytes(), nil
+}
+
+// buildTextAppearance returns the dict bytes and stream bytes for a text-field
+// form XObject that renders value inside the field's bounding box.
+func buildTextAppearance(field *Field, value, fontAlias string, fontSize float64, fontObjNum int) (dictBytes, streamBytes []byte) {
+	var w, h float64
+	if len(field.Rect) >= 4 {
+		w = field.Rect[2] - field.Rect[0]
+		h = field.Rect[3] - field.Rect[1]
+	}
+	if w <= 0 {
+		w = 100
+	}
+	if h <= 0 {
+		h = 20
+	}
+	if fontSize <= 0 {
+		fontSize = 12
+	}
+
+	// Vertical centering: place baseline so cap-height is centred.
+	// Approximate cap-height as 0.7 × fontSize; descenders ≈ 0.2 × fontSize.
+	td := (h - fontSize*0.7) / 2
+
+	stream := fmt.Sprintf("/Tx BMC\nq\nBT\n/%s %.4g Tf\n0 g\n2 %.4g Td\n(%s) Tj\nET\nQ\nEMC\n",
+		fontAlias, fontSize, td,
+		escapeFieldValue(value),
+	)
+
+	dict := fmt.Sprintf(
+		"<</Type/XObject/Subtype/Form/BBox[0 0 %.4g %.4g]/Resources<</Font<</%s %d 0 R>>>>/Length %d>>",
+		w, h, fontAlias, fontObjNum, len(stream),
+	)
+	return []byte(dict), []byte(stream)
+}
+
+// parseDA extracts the font name alias and size from a /DA default-appearance
+// string like "/Helv 12 Tf 0 g".  Returns safe defaults if parsing fails.
+func parseDA(da string) (fontAlias string, fontSize float64) {
+	fontAlias = "Helv"
+	fontSize = 12
+
+	parts := strings.Fields(da)
+	for i, p := range parts {
+		if strings.HasPrefix(p, "/") && i+2 < len(parts) && parts[i+2] == "Tf" {
+			fontAlias = p[1:]
+			if sz, err := strconv.ParseFloat(parts[i+1], 64); err == nil && sz > 0 {
+				fontSize = sz
+			}
+			break
+		}
+	}
+	return
+}
+
+// withAppearanceRef adds "/AP<</N xobjNum 0 R>>" to a field dict, replacing
+// any pre-existing /AP entry.
+func withAppearanceRef(fieldBody []byte, xobjNum int) []byte {
+	fieldStr := string(fieldBody)
+	newAP := fmt.Sprintf("/AP<</N %d 0 R>>", xobjNum)
+
+	// Remove any existing /AP entry (handles simple one-level /AP dicts).
+	apPat := regexp.MustCompile(`/AP\s*<<[^<>]*(?:<<[^<>]*>>[^<>]*)*>>`)
+	if apPat.MatchString(fieldStr) {
+		fieldStr = apPat.ReplaceAllString(fieldStr, "")
+	}
+
+	end := strings.LastIndex(fieldStr, ">>")
+	if end == -1 {
+		return fieldBody
+	}
+	return []byte(fieldStr[:end] + newAP + fieldStr[end:])
 }
 
 // writeXRefSubsections writes xref entries grouped into contiguous subsections.
@@ -142,21 +273,19 @@ func writeXRefSubsections(buf *bytes.Buffer, offsets map[int]int64, objNums []in
 }
 
 // applyFieldValue returns a copy of fieldData with the /V entry set to value.
-// For button fields (checkboxes/radio) the value is written as a PDF name (/Yes,
-// /Off, etc.); for all other field types it is written as a PDF string literal.
+// Button fields (checkboxes/radio) use PDF name syntax (/Yes, /Off); all others
+// use string literal syntax ((value)).
 func applyFieldValue(fieldData []byte, field *Field, value interface{}) []byte {
 	fieldStr := string(fieldData)
 	valueStr := formatFieldValue(value, field.FT)
 
 	var newV string
 	if field.FT == "Btn" {
-		// Checkbox / radio: value is a name, not a string.
 		newV = fmt.Sprintf("/V/%s", valueStr)
 	} else {
 		newV = fmt.Sprintf("/V (%s)", escapeFieldValue(valueStr))
 	}
 
-	// Replace existing /V entry or insert before closing >>.
 	vPat := regexp.MustCompile(`/V\s*(?:\([^)]*\)|/[^\s/>\[]+|\[[^\]]*\])`)
 	var result string
 	if vPat.MatchString(fieldStr) {

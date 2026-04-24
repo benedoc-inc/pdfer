@@ -132,6 +132,28 @@ func TestCreateForm_FillRoundTrip(t *testing.T) {
 	t.Error("fullname field not found in re-parsed form")
 }
 
+func TestCreateForm_FillGeneratesAppearance(t *testing.T) {
+	pdf := buildTestForm(t)
+
+	filled, err := acroform.FillFormFields(pdf, types.FormData{"fullname": "Jane Smith"}, nil, false)
+	if err != nil {
+		t.Fatalf("FillFormFields failed: %v", err)
+	}
+	raw := string(filled)
+	// Filled PDF must contain an /AP entry wiring the appearance XObject.
+	if !strings.Contains(raw, "/AP") {
+		t.Error("filled PDF does not contain /AP appearance dict")
+	}
+	// Must contain a Form XObject marking the content as a text field appearance.
+	if !strings.Contains(raw, "/Tx BMC") {
+		t.Error("filled PDF does not contain /Tx BMC appearance content stream")
+	}
+	// The text value must appear inside the appearance stream.
+	if !strings.Contains(raw, "Jane Smith") {
+		t.Error("appearance stream does not contain 'Jane Smith'")
+	}
+}
+
 func TestCreateForm_CatalogHasAcroForm(t *testing.T) {
 	pdf := buildTestForm(t)
 	if !strings.Contains(string(pdf), "/AcroForm") {
