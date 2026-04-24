@@ -147,14 +147,15 @@ func fillIncremental(pdfBytes []byte, formData types.FormData, password []byte, 
 		}
 
 		// Updated field dict.
+		// pdf.GetObject returns the full object bytes including "N G obj\n" header
+		// and "endobj" footer — write them directly without re-wrapping.
 		newBody := applyFieldValue(ff.current, ff.field, ff.value)
 		if ff.xobjNum > 0 {
 			newBody = withAppearanceRef(newBody, ff.xobjNum)
 		}
 		offsets[ff.field.ObjectNum] = int64(buf.Len())
-		fmt.Fprintf(&buf, "%d %d obj\n", ff.field.ObjectNum, ff.field.Generation)
 		buf.Write(newBody)
-		buf.WriteString("\nendobj\n")
+		buf.WriteByte('\n')
 	}
 
 	// xref table: consecutive runs become single subsections.
