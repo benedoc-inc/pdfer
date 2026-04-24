@@ -78,7 +78,7 @@ func fillIncremental(pdfBytes []byte, formData types.FormData, password []byte, 
 			}
 			continue
 		}
-		current, err := pdf.GetObject(field.ObjectNum)
+		current, err := pdf.GetObjectContent(field.ObjectNum)
 		if err != nil {
 			if verbose {
 				fmt.Printf("Warning: cannot read object %d for field %q: %v\n", field.ObjectNum, fieldName, err)
@@ -146,16 +146,15 @@ func fillIncremental(pdfBytes []byte, formData types.FormData, password []byte, 
 			buf.WriteString("endstream\nendobj\n")
 		}
 
-		// Updated field dict.
-		// pdf.GetObject returns the full object bytes including "N G obj\n" header
-		// and "endobj" footer — write them directly without re-wrapping.
+		// Updated field dict — current is body-only (from GetObjectContent).
 		newBody := applyFieldValue(ff.current, ff.field, ff.value)
 		if ff.xobjNum > 0 {
 			newBody = withAppearanceRef(newBody, ff.xobjNum)
 		}
 		offsets[ff.field.ObjectNum] = int64(buf.Len())
+		fmt.Fprintf(&buf, "%d %d obj\n", ff.field.ObjectNum, ff.field.Generation)
 		buf.Write(newBody)
-		buf.WriteByte('\n')
+		buf.WriteString("\nendobj\n")
 	}
 
 	// xref table: consecutive runs become single subsections.

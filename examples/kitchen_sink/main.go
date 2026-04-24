@@ -125,18 +125,21 @@ func build(encrypt bool) ([]byte, error) {
 
 	// ── AcroForm ──────────────────────────────────────────────────────────────
 	fb := acroform.NewFormBuilder(b)
-	fb.AddTextField("fullname", []float64{72, 680, 350, 700}, 2).
+	// Field rects: [x1, y1(bottom), x2, y2(top)].
+	// Each text/dropdown field top is 6pt below its label baseline.
+	// Checkbox widgets sit inline; their labels are printed to the right at x=100.
+	fb.AddTextField("fullname", []float64{72, 664, 350, 682}, 2).
 		SetDefault("Enter full name").
 		SetMaxLength(80)
-	fb.AddTextField("email", []float64{72, 640, 350, 660}, 2).
+	fb.AddTextField("email", []float64{72, 626, 350, 644}, 2).
 		SetDefault("email@example.com")
-	fb.AddCheckbox("subscribe", []float64{72, 605, 90, 623}, 2)
-	fb.AddCheckbox("agree_terms", []float64{72, 575, 90, 593}, 2)
-	fb.AddChoiceField("country", []float64{72, 535, 250, 555}, 2,
+	fb.AddCheckbox("subscribe", []float64{72, 602, 90, 620}, 2)
+	fb.AddCheckbox("agree_terms", []float64{72, 572, 90, 590}, 2)
+	fb.AddChoiceField("country", []float64{72, 534, 250, 552}, 2,
 		[]string{"USA", "Canada", "Mexico", "United Kingdom", "Australia"}).
 		SetValue("USA")
-	fb.AddRadioButton("plan", []float64{72, 495, 90, 513}, 2)
-	fb.AddButton("submit", []float64{200, 460, 340, 485}, 2)
+	fb.AddRadioButton("plan", []float64{72, 488, 90, 506}, 2)
+	fb.AddButton("submit", []float64{195, 440, 345, 458}, 2)
 	if _, err := fb.BuildForm(); err != nil {
 		return nil, fmt.Errorf("BuildForm: %w", err)
 	}
@@ -205,7 +208,7 @@ func buildPage1(p *write.PageBuilder, w *write.PDFWriter) {
 		"  • Document metadata",
 		"  • AES-128 write encryption",
 	}
-	cs.BeginText().SetFont(font, 11).SetTextLeading(16).SetTextPosition(72, 678)
+	cs.BeginText().SetFont(font, 11).SetTextLeading(13).SetTextPosition(72, 678)
 	for _, l := range lines {
 		cs.ShowTextNextLine(l)
 	}
@@ -213,7 +216,7 @@ func buildPage1(p *write.PageBuilder, w *write.PDFWriter) {
 
 	// ── Coloured rectangles palette ───────────────────────────────────────────
 	cs.BeginText().SetFont(bold, 10).SetFillColorRGB(0, 0, 0).
-		SetTextPosition(72, 530).ShowText("Colour palette").EndText()
+		SetTextPosition(72, 465).ShowText("Colour palette").EndText()
 
 	colors := [][3]float64{
 		{0.9, 0.2, 0.2},
@@ -225,29 +228,29 @@ func buildPage1(p *write.PageBuilder, w *write.PDFWriter) {
 	}
 	for i, c := range colors {
 		x := 72 + float64(i)*78
-		cs.SetFillColorRGB(c[0], c[1], c[2]).Rectangle(x, 505, 68, 22).Fill()
+		cs.SetFillColorRGB(c[0], c[1], c[2]).Rectangle(x, 440, 68, 22).Fill()
 	}
 
 	// ── Vector graphics ───────────────────────────────────────────────────────
 	cs.BeginText().SetFont(bold, 10).SetFillColorRGB(0, 0, 0).
-		SetTextPosition(72, 490).ShowText("Vector paths").EndText()
+		SetTextPosition(72, 425).ShowText("Vector paths").EndText()
 
 	// Triangle (filled)
 	cs.SetFillColorRGB(0.9, 0.3, 0.1).
-		MoveTo(110, 470).LineTo(150, 410).LineTo(70, 410).ClosePath().Fill()
+		MoveTo(110, 405).LineTo(150, 345).LineTo(70, 345).ClosePath().Fill()
 
-	// Dashed stroked rectangle
+	// Stroked rectangle
 	cs.SetStrokeColorRGB(0.1, 0.5, 0.8).SetLineWidth(2).
-		Rectangle(170, 410, 80, 60).Stroke()
+		Rectangle(170, 345, 80, 60).Stroke()
 
 	// Bezier curve
 	cs.SetStrokeColorRGB(0.3, 0.7, 0.2).SetLineWidth(2).
-		MoveTo(270, 410).
-		CurveTo(280, 470, 340, 470, 350, 410).
+		MoveTo(270, 345).
+		CurveTo(280, 405, 340, 405, 350, 345).
 		Stroke()
 
 	// Circle approximation (4 bezier curves)
-	cx, cy, r := 430.0, 440.0, 30.0
+	cx, cy, r := 430.0, 375.0, 30.0
 	k := 0.5523
 	cs.SetFillColorRGB(0.8, 0.8, 0.1).SetStrokeColorRGB(0.4, 0.4, 0).SetLineWidth(1).
 		MoveTo(cx, cy+r).
@@ -263,25 +266,25 @@ func buildPage1(p *write.PageBuilder, w *write.PDFWriter) {
 	if err == nil {
 		resName := p.AddImage(imgInfo)
 		cs.BeginText().SetFont(bold, 10).SetFillColorRGB(0, 0, 0).
-			SetTextPosition(72, 395).ShowText("Embedded PNG image").EndText()
-		cs.DrawImageAt(resName[1:], 72, 310, 180, 75)
+			SetTextPosition(72, 330).ShowText("Embedded PNG image").EndText()
+		cs.DrawImageAt(resName[1:], 72, 245, 180, 75)
 	}
 
 	// ── Text styling ──────────────────────────────────────────────────────────
 	cs.BeginText().SetFont(bold, 10).SetFillColorRGB(0, 0, 0).
-		SetTextPosition(72, 300).ShowText("Text styling").EndText()
+		SetTextPosition(72, 235).ShowText("Text styling").EndText()
 
 	// Character spacing
 	cs.BeginText().SetFont(font, 10).SetCharSpacing(3).
-		SetTextPosition(72, 280).ShowText("Wide character spacing").EndText()
+		SetTextPosition(72, 215).ShowText("Wide character spacing").EndText()
 
 	// Word spacing
 	cs.BeginText().SetFont(font, 10).SetCharSpacing(0).SetWordSpacing(8).
-		SetTextPosition(72, 262).ShowText("Extra word spacing here").EndText()
+		SetTextPosition(72, 197).ShowText("Extra word spacing here").EndText()
 
 	// Text rise (superscript)
 	cs.BeginText().SetFont(font, 10).SetWordSpacing(0).
-		SetTextPosition(72, 244).
+		SetTextPosition(72, 179).
 		ShowText("Normal ").
 		SetTextRise(4).SetFont(font, 7).ShowText("superscript").
 		SetTextRise(0).SetFont(font, 10).ShowText(" back to baseline").
@@ -443,36 +446,41 @@ func buildPage3(p *write.PageBuilder) {
 		ShowTextNextLine("with text fields, checkboxes, a dropdown, a radio button, and a push button.").
 		EndText()
 
-	// Labels for each field (the fields themselves are wired in by BuildForm)
-	fields := []struct {
+	// Labels above text/dropdown fields (label baseline sits 6pt above the field top).
+	for _, lbl := range []struct {
 		y    float64
 		text string
 	}{
-		{700, "Full name:"},
-		{660, "Email address:"},
-		{620, "Subscribe to newsletter"},
-		{590, "I agree to the terms and conditions"},
-		{550, "Country:"},
-		{510, "Plan: (radio button)"},
-		{475, ""},
-	}
-	for _, f := range fields {
-		if f.text == "" {
-			continue
-		}
+		{688, "Full name:"},
+		{650, "Email address:"},
+		{558, "Country:"},
+		{512, "Plan: (select one)"},
+	} {
 		cs.BeginText().SetFont(bold, 10).SetFillColorRGB(0, 0, 0).
-			SetTextPosition(72, f.y).ShowText(f.text).EndText()
+			SetTextPosition(72, lbl.y).ShowText(lbl.text).EndText()
 	}
 
-	// Submit label
+	// Checkbox labels sit to the right of the checkbox widget (x=100).
+	for _, lbl := range []struct {
+		y    float64
+		text string
+	}{
+		{610, "Subscribe to newsletter"},
+		{580, "I agree to the terms and conditions"},
+	} {
+		cs.BeginText().SetFont(font, 10).SetFillColorRGB(0, 0, 0).
+			SetTextPosition(100, lbl.y).ShowText(lbl.text).EndText()
+	}
+
+	// Submit button label (above the button).
 	cs.BeginText().SetFont(bold, 10).SetFillColorRGB(0, 0, 0).
-		SetTextPosition(200, 467).ShowText("Submit").EndText()
+		SetTextPosition(72, 462).ShowText("Submit your form:").EndText()
 
 	// Divider
-	cs.SetFillColorRGB(0.8, 0.8, 0.8).Rectangle(72, 440, 468, 1).Fill()
+	cs.SetFillColorRGB(0.8, 0.8, 0.8).Rectangle(72, 415, 468, 1).Fill()
 
 	cs.BeginText().SetFont(font, 8).SetFillColorRGB(0.5, 0.5, 0.5).
-		SetTextPosition(72, 425).
+		SetTextPosition(72, 400).
 		ShowText("Generated by pdfer — a pure-Go zero-dependency PDF library.").
 		EndText()
 }

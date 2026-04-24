@@ -3,6 +3,7 @@ package sign
 
 import (
 	"crypto"
+	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
@@ -13,13 +14,14 @@ import (
 
 // OIDs required for CMS/PKCS#7 detached signatures.
 var (
-	oidData          = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 1}
-	oidSignedData    = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 2}
-	oidSHA256        = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 1}
-	oidRSAEncryption = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 1}
-	oidContentType   = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 3}
-	oidMessageDigest = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 4}
-	oidSigningTime   = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 5}
+	oidData            = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 1}
+	oidSignedData      = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 2}
+	oidSHA256          = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 1}
+	oidRSAEncryption   = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 1}
+	oidECDSAWithSHA256 = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 2}
+	oidContentType     = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 3}
+	oidMessageDigest   = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 4}
+	oidSigningTime     = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 5}
 )
 
 // derLen encodes a DER length field.
@@ -71,8 +73,15 @@ func marshalOID(oid asn1.ObjectIdentifier) []byte {
 }
 
 // algID encodes AlgorithmIdentifier { oid, NULL }.
+// RSA algorithm identifiers conventionally include a NULL parameters field.
 func algID(oid asn1.ObjectIdentifier) []byte {
 	return derSequence(marshalOID(oid), []byte{0x05, 0x00})
+}
+
+// algIDNoParams encodes AlgorithmIdentifier { oid } with no parameters field.
+// ECDSA algorithm identifiers (ecdsa-with-SHA256 etc.) MUST omit parameters.
+func algIDNoParams(oid asn1.ObjectIdentifier) []byte {
+	return derSequence(marshalOID(oid))
 }
 
 // attr encodes a PKCS#9 attribute: SEQUENCE { OID, SET { value... } }.
@@ -117,6 +126,17 @@ func buildDetachedPKCS7(cert *x509.Certificate, key crypto.Signer, digest []byte
 	signedAttrsImplicit := derContextImplicit(0, attrsContent)
 
 	// ---- SignerInfo ----
+	// Choose signature AlgorithmIdentifier based on key type.
+	// ECDSA: ecdsa-with-SHA256 with no parameters (RFC 5754 §3.2).
+	// RSA:   rsaEncryption with NULL parameters (PKCS#1).
+	var sigAlgDER []byte
+	switch key.Public().(type) {
+	case *ecdsa.PublicKey:
+		sigAlgDER = algIDNoParams(oidECDSAWithSHA256)
+	default:
+		sigAlgDER = algID(oidRSAEncryption)
+	}
+
 	version1, _ := asn1.Marshal(1)
 	serialDER, _ := asn1.Marshal(cert.SerialNumber)
 	issuerAndSerial := derSequence(cert.RawIssuer, serialDER)
@@ -127,7 +147,7 @@ func buildDetachedPKCS7(cert *x509.Certificate, key crypto.Signer, digest []byte
 		issuerAndSerial,
 		algID(oidSHA256),
 		signedAttrsImplicit,
-		algID(oidRSAEncryption),
+		sigAlgDER,
 		sigOctet,
 	)
 

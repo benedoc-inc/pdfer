@@ -278,8 +278,15 @@ func (p *PDF) HasObject(objNum int) bool {
 	return ok
 }
 
-// GetObject returns the content of a PDF object by number.
-// Returns the raw bytes between "N G obj" and "endobj".
+// GetObject returns the complete bytes of a PDF object by number, including the
+// "N G obj\n" header and "endobj" footer. This is the form most parsers and
+// extractors want: they can regex-match or walk the content while retaining the
+// object identity. For objects in object streams the equivalent full-object
+// bytes are reconstructed.
+//
+// Code that needs to modify an object and re-write it in an incremental update
+// should use GetObjectContent instead, which returns only the dict/stream body
+// so the caller can supply its own header with the correct generation number.
 func (p *PDF) GetObject(objNum int) ([]byte, error) {
 	ref, ok := p.xref.Objects[objNum]
 	if !ok {
@@ -293,6 +300,25 @@ func (p *PDF) GetObject(objNum int) ([]byte, error) {
 
 	// Direct object - get from byte offset
 	return GetDirectObject(p.raw, objNum, ref.Offset, p.encryption, p.opts.Verbose)
+}
+
+// GetObjectContent returns only the dict/stream body of an object, without the
+// "N G obj\n" header or "endobj" footer. This is consistent with how objects
+// stored in object streams are returned (they have no per-object header bytes).
+//
+// Use this in incremental-update write paths: read the body, modify it, then
+// write your own "N G obj\n" + body + "\nendobj\n" with the correct generation
+// number for the new xref entry.
+func (p *PDF) GetObjectContent(objNum int) ([]byte, error) {
+	ref, ok := p.xref.Objects[objNum]
+	if !ok {
+		return nil, types.NewPDFErrorf(types.ErrCodeObjectNotFound, "object %d not found", objNum).WithContext("object_number", objNum)
+	}
+	if ref.InStream {
+		return GetObjectFromStream(p.raw, objNum, ref.StreamObjNum, ref.StreamIndex, p.encryption, p.opts.Verbose)
+	}
+	content, _, err := extractDirectObjectContent(p.raw, objNum, ref.Offset, p.encryption, p.opts.Verbose)
+	return content, err
 }
 
 // GetRawObject returns a PDFRawObject with full byte preservation.

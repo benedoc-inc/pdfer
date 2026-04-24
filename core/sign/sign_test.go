@@ -226,3 +226,55 @@ func TestSignPDF_ReasonAndLocation(t *testing.T) {
 		t.Error("signed PDF missing /Location")
 	}
 }
+
+func TestSignPDF_ECDSA(t *testing.T) {
+	pdf := buildSimplePDF(t)
+	key, cert, err := sign.GenerateTestCredentialsECDSA()
+	if err != nil {
+		t.Fatalf("generate ECDSA credentials: %v", err)
+	}
+
+	signed, err := sign.SignPDF(pdf, sign.SignOptions{
+		Certificate: cert,
+		PrivateKey:  key,
+		Reason:      "ECDSA test",
+		FieldName:   "ECDSASig",
+	})
+	if err != nil {
+		t.Fatalf("SignPDF (ECDSA): %v", err)
+	}
+
+	// Must start with original bytes (incremental update).
+	if !bytes.HasPrefix(signed, pdf) {
+		t.Error("ECDSA-signed PDF does not preserve original bytes")
+	}
+
+	// /Contents must begin with PKCS#7 SEQUENCE tag (0x30).
+	pat := regexp.MustCompile(`/Contents <([0-9A-Fa-f]+)>`)
+	m := pat.FindSubmatch(signed)
+	if m == nil {
+		t.Fatal("ECDSA signed PDF: /Contents hex not found")
+	}
+	if !strings.HasPrefix(strings.ToUpper(string(m[1])), "30") {
+		t.Errorf("ECDSA PKCS#7 should start with 0x30, got %q", string(m[1])[:4])
+	}
+
+	// ByteRange coverage must be consistent.
+	brPat := regexp.MustCompile(`/ByteRange\s*\[(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\]`)
+	bm := brPat.FindSubmatch(signed)
+	if bm == nil {
+		t.Fatal("ECDSA signed PDF: /ByteRange not found")
+	}
+	parse := func(b []byte) int64 {
+		var n int64
+		for _, c := range b {
+			n = n*10 + int64(c-'0')
+		}
+		return n
+	}
+	off2 := parse(bm[3])
+	len2 := parse(bm[4])
+	if off2+len2 != int64(len(signed)) {
+		t.Errorf("ECDSA ByteRange off2+len2=%d, file length=%d", off2+len2, len(signed))
+	}
+}

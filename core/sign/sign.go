@@ -3,6 +3,8 @@ package sign
 import (
 	"bytes"
 	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -74,7 +76,7 @@ func SignPDF(pdfBytes []byte, opts SignOptions) ([]byte, error) {
 	}
 
 	// ---- Discover existing structures ----
-	catalogObjNum, catalogData, err := getCatalog(pdfBytes, pdf)
+	catalogObjNum, catalogData, err := getCatalog(pdf)
 	if err != nil {
 		return nil, fmt.Errorf("read catalog: %w", err)
 	}
@@ -151,29 +153,31 @@ func SignPDF(pdfBytes []byte, opts SignOptions) ([]byte, error) {
 	buf.WriteString("\nendobj\n")
 
 	// --- Updated page dict (widget added to /Annots) ---
-	// pdf.GetObject returns full object bytes including "N G obj\n" and "endobj" —
-	// write them directly without re-wrapping.
+	// pageData is body-only (from GetObjectContent); write with explicit header.
 	offsets[pageObjNum] = int64(buf.Len())
+	fmt.Fprintf(&buf, "%d 0 obj\n", pageObjNum)
 	buf.Write(addToAnnots(pageData, widgetObjNum))
-	buf.WriteByte('\n')
+	buf.WriteString("\nendobj\n")
 
 	// --- AcroForm ---
 	if acroFormExists {
 		offsets[existingAcroFormObjNum] = int64(buf.Len())
+		fmt.Fprintf(&buf, "%d 0 obj\n", existingAcroFormObjNum)
 		buf.Write(addSigFieldToAcroForm(existingAcroFormData, widgetObjNum))
-		buf.WriteByte('\n')
+		buf.WriteString("\nendobj\n")
 	} else {
-		// New AcroForm — created from scratch, so write header+content+endobj.
+		// New AcroForm — created from scratch.
 		newAcroForm := fmt.Sprintf("<</Fields[%d 0 R]/SigFlags 3>>", widgetObjNum)
 		offsets[newAcroFormObjNum] = int64(buf.Len())
 		fmt.Fprintf(&buf, "%d 0 obj\n", newAcroFormObjNum)
 		buf.WriteString(newAcroForm)
 		buf.WriteString("\nendobj\n")
 
-		// Updated catalog — also from GetObject, write directly.
+		// Updated catalog — body-only from GetObjectContent.
 		offsets[catalogObjNum] = int64(buf.Len())
+		fmt.Fprintf(&buf, "%d 0 obj\n", catalogObjNum)
 		buf.Write(setCatalogAcroForm(catalogData, newAcroFormObjNum))
-		buf.WriteByte('\n')
+		buf.WriteString("\nendobj\n")
 	}
 
 	// --- xref + trailer ---
@@ -262,6 +266,36 @@ func GenerateTestCredentials() (*rsa.PrivateKey, *x509.Certificate, error) {
 	return key, cert, nil
 }
 
+// GenerateTestCredentialsECDSA creates a self-signed ECDSA P-256 certificate
+// and key suitable for unit tests. Not for production use.
+func GenerateTestCredentialsECDSA() (*ecdsa.PrivateKey, *x509.Certificate, error) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, nil, fmt.Errorf("generate key: %w", err)
+	}
+	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	template := &x509.Certificate{
+		SerialNumber: serial,
+		Subject: pkix.Name{
+			CommonName:   "pdfer test signer (ECDSA)",
+			Organization: []string{"pdfer"},
+		},
+		NotBefore:             time.Now().Add(-time.Minute),
+		NotAfter:              time.Now().Add(10 * 365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create cert: %w", err)
+	}
+	cert, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse cert: %w", err)
+	}
+	return key, cert, nil
+}
+
 // ---- internal helpers ----
 
 func findLastStartXRef(pdfBytes []byte) int64 {
@@ -280,8 +314,7 @@ func findLastStartXRef(pdfBytes []byte) int64 {
 	return -1
 }
 
-func getCatalog(pdfBytes []byte, pdf *parse.PDF) (int, []byte, error) {
-	_ = pdfBytes
+func getCatalog(pdf *parse.PDF) (int, []byte, error) {
 	trailer := pdf.Trailer()
 	if trailer == nil {
 		return 0, nil, fmt.Errorf("no trailer")
@@ -290,7 +323,7 @@ func getCatalog(pdfBytes []byte, pdf *parse.PDF) (int, []byte, error) {
 	if _, err := fmt.Sscanf(trailer.RootRef, "%d %d R", &objNum, &gen); err != nil {
 		return 0, nil, fmt.Errorf("parse Root ref %q: %w", trailer.RootRef, err)
 	}
-	data, err := pdf.GetObject(objNum)
+	data, err := pdf.GetObjectContent(objNum)
 	if err != nil {
 		return 0, nil, fmt.Errorf("get catalog %d: %w", objNum, err)
 	}
@@ -302,7 +335,7 @@ func getPage(pdf *parse.PDF, catalogData []byte, pageIdx int) (int, []byte, erro
 	if err != nil {
 		return 0, nil, fmt.Errorf("catalog /Pages: %w", err)
 	}
-	pagesData, err := pdf.GetObject(pagesObjNum)
+	pagesData, err := pdf.GetObjectContent(pagesObjNum)
 	if err != nil {
 		return 0, nil, fmt.Errorf("get pages tree %d: %w", pagesObjNum, err)
 	}
@@ -311,7 +344,7 @@ func getPage(pdf *parse.PDF, catalogData []byte, pageIdx int) (int, []byte, erro
 		return 0, nil, fmt.Errorf("page %d out of range (%d in /Kids)", pageIdx, len(kids))
 	}
 	pageObjNum := kids[pageIdx]
-	pageData, err := pdf.GetObject(pageObjNum)
+	pageData, err := pdf.GetObjectContent(pageObjNum)
 	if err != nil {
 		return 0, nil, fmt.Errorf("get page %d: %w", pageObjNum, err)
 	}
@@ -324,7 +357,7 @@ func findAcroForm(catalogData []byte, pdf *parse.PDF) (int, []byte, bool) {
 	if err != nil || objNum == 0 {
 		return 0, nil, false
 	}
-	data, err := pdf.GetObject(objNum)
+	data, err := pdf.GetObjectContent(objNum)
 	if err != nil {
 		return 0, nil, false
 	}

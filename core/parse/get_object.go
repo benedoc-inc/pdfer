@@ -131,10 +131,53 @@ func GetObject(pdfBytes []byte, objNum int, encryptInfo *types.PDFEncryption, ve
 	return GetDirectObject(pdfBytes, objNum, loc.ByteOffset, encryptInfo, verbose)
 }
 
-// GetDirectObject reads a PDF object at a specific byte offset
+// GetObjectContent returns the dict/stream body of an object, without the
+// "N G obj" header or "endobj" footer. This is consistent with objects stored
+// in object streams, which also have no per-object header bytes.
+//
+// Use this when you need to inspect or modify an object's content and then
+// re-write it — typically in incremental-update paths where the caller supplies
+// its own "N G obj\n" / "\nendobj\n" wrapper.
+func GetObjectContent(pdfBytes []byte, objNum int, encryptInfo *types.PDFEncryption, verbose bool) ([]byte, error) {
+	loc, err := FindObjectLocation(pdfBytes, objNum, verbose)
+	if err != nil {
+		return nil, fmt.Errorf("object %d not found: %v", objNum, err)
+	}
+	if !loc.IsDirect {
+		return GetObjectFromStream(pdfBytes, objNum, loc.StreamObjNum, loc.IndexInStream, encryptInfo, verbose)
+	}
+	content, _, err := extractDirectObjectContent(pdfBytes, objNum, loc.ByteOffset, encryptInfo, verbose)
+	return content, err
+}
+
+// GetDirectObject reads a PDF object at a specific byte offset and returns the
+// complete object bytes including the "N G obj\n" header and "endobj" footer.
+//
+// Most callers (parsers, extractors) should use this form. Code that needs to
+// modify an object and re-write it in an incremental update should use
+// GetObjectContent instead.
 func GetDirectObject(pdfBytes []byte, objNum int, offset int64, encryptInfo *types.PDFEncryption, verbose bool) ([]byte, error) {
+	content, genNum, err := extractDirectObjectContent(pdfBytes, objNum, offset, encryptInfo, verbose)
+	if err != nil {
+		return nil, err
+	}
+	// Reconstruct full "N G obj\n…\nendobj" bytes.
+	var result []byte
+	result = append(result, fmt.Sprintf("%d %d obj\n", objNum, genNum)...)
+	result = append(result, content...)
+	if !bytes.HasSuffix(content, []byte("\n")) {
+		result = append(result, '\n')
+	}
+	result = append(result, "endobj"...)
+	return result, nil
+}
+
+// extractDirectObjectContent is the shared implementation used by both
+// GetDirectObject (returns full bytes) and GetObjectContent (returns body only).
+// It returns the dict/stream body and the generation number.
+func extractDirectObjectContent(pdfBytes []byte, objNum int, offset int64, encryptInfo *types.PDFEncryption, verbose bool) (content []byte, genNum int, err error) {
 	if offset < 0 || offset >= int64(len(pdfBytes)) {
-		return nil, fmt.Errorf("invalid offset %d for object %d", offset, objNum)
+		return nil, 0, fmt.Errorf("invalid offset %d for object %d", offset, objNum)
 	}
 
 	objData := pdfBytes[offset:]
@@ -143,9 +186,8 @@ func GetDirectObject(pdfBytes []byte, objNum int, offset int64, encryptInfo *typ
 	headerPattern := regexp.MustCompile(fmt.Sprintf(`^%d\s+(\d+)\s+obj`, objNum))
 	headerMatch := headerPattern.FindSubmatch(objData[:min(50, len(objData))])
 
-	var genNum int
 	if headerMatch == nil {
-		// Header not exactly at offset - try to find it nearby
+		// Header not exactly at offset - try nearby
 		searchArea := pdfBytes[max(0, int(offset)-100):min(len(pdfBytes), int(offset)+100)]
 		pattern := regexp.MustCompile(fmt.Sprintf(`%d\s+(\d+)\s+obj`, objNum))
 		match := pattern.FindIndex(searchArea)
@@ -153,10 +195,7 @@ func GetDirectObject(pdfBytes []byte, objNum int, offset int64, encryptInfo *typ
 			if verbose {
 				log.Printf("Object %d header not found near offset %d", objNum, offset)
 			}
-			// Continue anyway with content at offset
-			genNum = 0
 		} else {
-			// Adjust offset
 			newOffset := max(0, int(offset)-100) + match[0]
 			offset = int64(newOffset)
 			objData = pdfBytes[offset:]
@@ -172,38 +211,32 @@ func GetDirectObject(pdfBytes []byte, objNum int, offset int64, encryptInfo *typ
 	// Find endobj
 	endobjPos := bytes.Index(objData, []byte("endobj"))
 	if endobjPos == -1 {
-		return nil, fmt.Errorf("endobj not found for object %d", objNum)
+		return nil, 0, fmt.Errorf("endobj not found for object %d", objNum)
 	}
 
-	// Extract content between header and endobj
-	// Skip past "N G obj" to get to the content
+	// Skip past "N G obj" header to the content
 	contentStart := bytes.Index(objData[:endobjPos], []byte("obj"))
 	if contentStart == -1 {
 		contentStart = 0
 	} else {
-		contentStart += 3 // Skip "obj"
-		// Skip whitespace
+		contentStart += 3 // skip "obj"
 		for contentStart < endobjPos && (objData[contentStart] == ' ' || objData[contentStart] == '\n' || objData[contentStart] == '\r' || objData[contentStart] == '\t') {
 			contentStart++
 		}
 	}
 
-	content := objData[contentStart:endobjPos]
+	content = objData[contentStart:endobjPos]
 
-	// Check if this is a stream object
+	// Stream object: trim to endstream and optionally decrypt.
 	streamStart := bytes.Index(content, []byte("stream"))
 	if streamStart != -1 {
-		// This is a stream object
-		// Find "endstream" to get the full stream
 		endstreamPos := bytes.Index(content, []byte("endstream"))
 		if endstreamPos == -1 {
 			endstreamPos = len(content)
 		}
 		content = content[:endstreamPos+len("endstream")]
 
-		// Decrypt stream data if needed
 		if encryptInfo != nil {
-			// Get /Length from dictionary for exact stream data size
 			dictPart := content[:streamStart]
 			lengthPattern := regexp.MustCompile(`/Length\s+(\d+)`)
 			lengthMatch := lengthPattern.FindSubmatch(dictPart)
@@ -213,9 +246,7 @@ func GetDirectObject(pdfBytes []byte, objNum int, offset int64, encryptInfo *typ
 				streamLength, _ = strconv.Atoi(string(lengthMatch[1]))
 			}
 
-			// Find actual stream data (after "stream\r\n" or "stream\n")
 			streamDataStart := streamStart + 6
-			// Skip exactly one EOL per PDF spec
 			if streamDataStart < len(content) && content[streamDataStart] == '\r' {
 				streamDataStart++
 			}
@@ -223,7 +254,6 @@ func GetDirectObject(pdfBytes []byte, objNum int, offset int64, encryptInfo *typ
 				streamDataStart++
 			}
 
-			// Use /Length if available, otherwise find endstream
 			var streamData []byte
 			if streamLength > 0 && streamDataStart+streamLength <= len(content) {
 				streamData = content[streamDataStart : streamDataStart+streamLength]
@@ -238,47 +268,31 @@ func GetDirectObject(pdfBytes []byte, objNum int, offset int64, encryptInfo *typ
 			if verbose {
 				log.Printf("Decrypting stream: %d bytes (from /Length %d), objNum=%d, genNum=%d", len(streamData), streamLength, objNum, genNum)
 			}
-			decryptedStream, err := encrypt.DecryptObject(streamData, objNum, genNum, encryptInfo)
-			if err == nil {
+			decryptedStream, decErr := encrypt.DecryptObject(streamData, objNum, genNum, encryptInfo)
+			if decErr == nil {
 				if verbose {
 					log.Printf("Decryption successful: %d -> %d bytes", len(streamData), len(decryptedStream))
 				}
-				// Update /Length in the dictionary to reflect decrypted size
 				newLength := fmt.Sprintf("/Length %d", len(decryptedStream))
 				dictPart = lengthPattern.ReplaceAll(dictPart, []byte(newLength))
-
-				// Reconstruct content with updated dictionary and decrypted stream
 				newContent := make([]byte, 0, len(dictPart)+len(decryptedStream)+20)
 				newContent = append(newContent, dictPart...)
 				newContent = append(newContent, []byte("stream\n")...)
 				newContent = append(newContent, decryptedStream...)
 				newContent = append(newContent, []byte("\nendstream")...)
 				content = newContent
-
-				if verbose {
-					log.Printf("Reconstructed content: %d bytes, new dict: %s", len(content), string(dictPart[:min(100, len(dictPart))]))
-				}
 			} else if verbose {
-				log.Printf("Decryption failed: %v", err)
+				log.Printf("Decryption failed: %v", decErr)
 			}
 		}
 	} else if encryptInfo != nil {
-		// Not a stream - decrypt string values in dictionary
-		// For now, just decrypt the entire content (simplified approach)
-		// TODO: Parse dictionary properly and decrypt only string values
-		decrypted, err := encrypt.DecryptObject(content, objNum, genNum, encryptInfo)
-		if err == nil {
+		// Dictionary object — decrypt string values.
+		// TODO: Parse dictionary properly and decrypt only string values.
+		decrypted, decErr := encrypt.DecryptObject(content, objNum, genNum, encryptInfo)
+		if decErr == nil {
 			content = decrypted
 		}
 	}
 
-	// Reconstruct full object
-	result := fmt.Sprintf("%d %d obj\n", objNum, genNum)
-	result += string(content)
-	if !bytes.HasSuffix(content, []byte("\n")) {
-		result += "\n"
-	}
-	result += "endobj"
-
-	return []byte(result), nil
+	return content, genNum, nil
 }
