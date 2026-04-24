@@ -2,11 +2,14 @@ package extract
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/benedoc-inc/pdfer/core/parse"
 	"github.com/benedoc-inc/pdfer/types"
 )
+
+var uriInActionPattern = regexp.MustCompile(`/URI\s*\(([^)]*)\)`)
 
 // extractAnnotations extracts annotations from a page's /Annots array
 func extractAnnotations(annotsStr string, pdf *parse.PDF, pageNum int, verbose bool) []types.Annotation {
@@ -118,20 +121,19 @@ func extractAnnotation(annotObjNum int, pdf *parse.PDF, pageNum int, verbose boo
 	// Extract Contents (annotation text/contents)
 	contents := extractDictValue(annotStr, "/Contents")
 	if contents != "" {
-		// Unescape PDF string
-		annotation.Contents = unescapePDFString(contents)
+		annotation.Contents = pdfStringValue(contents)
 	}
 
 	// Extract Title
 	title := extractDictValue(annotStr, "/T")
 	if title != "" {
-		annotation.Title = unescapePDFString(title)
+		annotation.Title = pdfStringValue(title)
 	}
 
 	// Extract Subject
 	subject := extractDictValue(annotStr, "/Subj")
 	if subject != "" {
-		annotation.Subject = unescapePDFString(subject)
+		annotation.Subject = pdfStringValue(subject)
 	}
 
 	// Extract Color
@@ -170,26 +172,11 @@ func extractAnnotation(annotObjNum int, pdf *parse.PDF, pageNum int, verbose boo
 
 	// Link-specific: Extract URI or Destination
 	if annotation.Type == types.AnnotationTypeLink {
-		// Check for URI
-		uriRef := extractDictValue(annotStr, "/URI")
-		if uriRef != "" {
-			// URI might be a string or a reference to a URI object
-			if strings.HasPrefix(uriRef, "(") {
-				// It's a string
-				annotation.URI = unescapePDFString(uriRef[1 : len(uriRef)-1])
-			} else {
-				// It's a reference - get the URI object
-				uriObjNum, err := parseObjectRef(uriRef)
-				if err == nil {
-					uriObj, err := pdf.GetObject(uriObjNum)
-					if err == nil {
-						uriStr := string(uriObj)
-						uriValue := extractDictValue(uriStr, "/URI")
-						if uriValue != "" {
-							annotation.URI = unescapePDFString(uriValue[1 : len(uriValue)-1])
-						}
-					}
-				}
+		// URI lives inside the /A action dictionary: /A<</S/URI/URI(...)>>
+		actionStr := extractDictValue(annotStr, "/A")
+		if actionStr != "" {
+			if m := uriInActionPattern.FindStringSubmatch(actionStr); len(m) > 1 {
+				annotation.URI = unescapePDFString(m[1])
 			}
 		}
 

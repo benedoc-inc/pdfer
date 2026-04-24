@@ -3,6 +3,7 @@ package write
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/benedoc-inc/pdfer/resources/font"
 	"github.com/benedoc-inc/pdfer/types"
@@ -29,6 +30,7 @@ type PageBuilder struct {
 	size        PageSize
 	fonts       map[string]int // font name -> object number
 	images      map[string]int // image name -> object number
+	annotations []int          // annotation object numbers, in addition order
 	content     *ContentStream
 	pageObjNum  int
 	pagesObjNum int
@@ -81,6 +83,15 @@ func (pb *PageBuilder) AddImage(info *ImageInfo) string {
 	}
 	pb.images[resourceName] = info.ObjectNum
 	return "/" + resourceName
+}
+
+// AddAnnotation adds an annotation to the page.
+// The annotation object is written to the PDF immediately; the /Annots array is
+// wired into the page dictionary when Build is called.
+func (pb *PageBuilder) AddAnnotation(a *AnnotationBuilder) *PageBuilder {
+	objNum := a.build(pb.writer)
+	pb.annotations = append(pb.annotations, objNum)
+	return pb
 }
 
 // AddEmbeddedFont adds an embedded TrueType/OpenType font and returns the resource name
@@ -154,9 +165,24 @@ func (pb *PageBuilder) Build(pagesObjNum int) int {
 
 	resources += ">>"
 
+	// Annotations
+	annots := ""
+	if len(pb.annotations) > 0 {
+		var a strings.Builder
+		a.WriteString("/Annots[")
+		for i, objNum := range pb.annotations {
+			if i > 0 {
+				a.WriteByte(' ')
+			}
+			fmt.Fprintf(&a, "%d 0 R", objNum)
+		}
+		a.WriteByte(']')
+		annots = a.String()
+	}
+
 	// Create page object
-	pageDict := fmt.Sprintf(`<</Type/Page/Parent %d 0 R/MediaBox[0 0 %.0f %.0f]/Contents %d 0 R/Resources%s>>`,
-		pagesObjNum, pb.size.Width, pb.size.Height, contentObjNum, resources)
+	pageDict := fmt.Sprintf(`<</Type/Page/Parent %d 0 R/MediaBox[0 0 %.0f %.0f]/Contents %d 0 R/Resources%s%s>>`,
+		pagesObjNum, pb.size.Width, pb.size.Height, contentObjNum, resources, annots)
 	pb.pageObjNum = pb.writer.AddObject([]byte(pageDict))
 
 	return pb.pageObjNum

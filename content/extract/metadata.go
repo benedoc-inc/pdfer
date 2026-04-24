@@ -127,6 +127,16 @@ func extractMetadataFromBytes(pdfBytes []byte, metadata *types.DocumentMetadata,
 }
 
 // unescapePDFString unescapes a PDF string literal
+// pdfStringValue strips outer PDF string parentheses from s and returns the
+// unescaped content. Pass the raw value returned by extractDictValue.
+func pdfStringValue(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 2 && s[0] == '(' && s[len(s)-1] == ')' {
+		s = s[1 : len(s)-1]
+	}
+	return unescapePDFString(s)
+}
+
 func unescapePDFString(s string) string {
 	// Handle basic PDF string escaping
 	s = strings.ReplaceAll(s, "\\n", "\n")

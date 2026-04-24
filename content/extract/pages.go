@@ -303,9 +303,36 @@ func extractPage(pdfBytes []byte, pdf *parse.PDF, pageObjNum int, pageStr string
 
 // Helper functions for parsing PDF dictionaries and arrays
 
+// isNameContinuationChar reports whether c can appear inside a PDF name token.
+// A name is terminated by whitespace or the 10 PDF delimiter characters.
+func isNameContinuationChar(c byte) bool {
+	switch c {
+	case ' ', '\t', '\n', '\r', '\f', '\x00',
+		'(', ')', '<', '>', '[', ']', '{', '}', '/', '%':
+		return false
+	}
+	return true
+}
+
 func extractDictValue(dictStr, key string) string {
-	// Find the key first
-	keyIdx := strings.Index(dictStr, key)
+	// Find the key with whole-name matching: the character immediately after the
+	// matched key must not be a name continuation character, so that "/T" does
+	// not accidentally match inside "/Type".
+	searchFrom := 0
+	keyIdx := -1
+	for searchFrom < len(dictStr) {
+		idx := strings.Index(dictStr[searchFrom:], key)
+		if idx == -1 {
+			break
+		}
+		absIdx := searchFrom + idx
+		afterKeyIdx := absIdx + len(key)
+		if afterKeyIdx >= len(dictStr) || !isNameContinuationChar(dictStr[afterKeyIdx]) {
+			keyIdx = absIdx
+			break
+		}
+		searchFrom = absIdx + 1
+	}
 	if keyIdx == -1 {
 		return ""
 	}
