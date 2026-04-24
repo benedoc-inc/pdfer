@@ -4,24 +4,24 @@ import (
 	"os"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/types"
 	"github.com/benedoc-inc/pdfer/core/write"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 func TestFormBuilderIntegration(t *testing.T) {
 	builder := write.NewSimplePDFBuilder()
 	page := builder.AddPage(write.PageSizeLetter)
 
-	// Create form builder
+	// Create form builder and register fields.
 	formBuilder := NewFormBuilder(builder)
 
-	// Add fields
 	textField := formBuilder.AddTextField("name", []float64{72, 700, 300, 720}, 0)
 	textField.SetDefault("Test").SetRequired(true)
-
 	_ = formBuilder.AddCheckbox("agree", []float64{72, 650, 90, 670}, 0)
 
-	// Build form
+	// Pages must be finalized before BuildForm.
+	builder.FinalizePage(page)
+
 	acroFormNum, err := formBuilder.BuildForm()
 	if err != nil {
 		t.Fatalf("Failed to build form: %v", err)
@@ -30,9 +30,6 @@ func TestFormBuilderIntegration(t *testing.T) {
 	if acroFormNum == 0 {
 		t.Error("AcroForm object number should not be zero")
 	}
-
-	// Finalize page
-	builder.FinalizePage(page)
 
 	// Generate PDF
 	pdfBytes, err := builder.Bytes()

@@ -191,11 +191,12 @@ func (pb *PageBuilder) Build(pagesObjNum int) int {
 
 // SimplePDFBuilder provides a high-level API for creating simple PDFs
 type SimplePDFBuilder struct {
-	writer        *PDFWriter
-	pages         []int
-	pagesObjNum   int
-	catalogObjNum int
-	encryptOpts   *encrypt.EncryptOptions
+	writer         *PDFWriter
+	pages          []int
+	pagesObjNum    int
+	catalogObjNum  int
+	encryptOpts    *encrypt.EncryptOptions
+	acroFormObjNum int // set by RegisterAcroForm
 }
 
 // NewSimplePDFBuilder creates a new simple PDF builder
@@ -209,6 +210,12 @@ func NewSimplePDFBuilder() *SimplePDFBuilder {
 // Writer returns the underlying PDF writer for advanced operations
 func (b *SimplePDFBuilder) Writer() *PDFWriter {
 	return b.writer
+}
+
+// RegisterAcroForm tells Bytes() to include /AcroForm N 0 R in the catalog.
+// Call this after all pages are finalized and the AcroForm object has been written.
+func (b *SimplePDFBuilder) RegisterAcroForm(objNum int) {
+	b.acroFormObjNum = objNum
 }
 
 // SetPassword enables AES-128 encryption (V=4, R=4) on the output PDF.
@@ -253,7 +260,12 @@ func (b *SimplePDFBuilder) Bytes() ([]byte, error) {
 	b.writer.SetObject(b.pagesObjNum, []byte(pagesDict))
 
 	// Create Catalog
-	b.catalogObjNum = b.writer.AddObject([]byte(fmt.Sprintf("<</Type/Catalog/Pages %d 0 R>>", b.pagesObjNum)))
+	catalogDict := fmt.Sprintf("<</Type/Catalog/Pages %d 0 R", b.pagesObjNum)
+	if b.acroFormObjNum != 0 {
+		catalogDict += fmt.Sprintf("/AcroForm %d 0 R", b.acroFormObjNum)
+	}
+	catalogDict += ">>"
+	b.catalogObjNum = b.writer.AddObject([]byte(catalogDict))
 	b.writer.SetRoot(b.catalogObjNum)
 
 	// Apply encryption if configured.
