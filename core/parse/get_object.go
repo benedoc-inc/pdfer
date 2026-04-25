@@ -286,9 +286,8 @@ func extractDirectObjectContent(pdfBytes []byte, objNum int, offset int64, encry
 			}
 		}
 	} else if encryptInfo != nil {
-		// Dictionary object — decrypt string values.
-		// TODO: Parse dictionary properly and decrypt only string values.
-		decrypted, decErr := encrypt.DecryptObject(content, objNum, genNum, encryptInfo)
+		// Dictionary object — decrypt individual string values.
+		decrypted, decErr := encrypt.DecryptStringsInContent(content, objNum, genNum, encryptInfo)
 		if decErr == nil {
 			content = decrypted
 		}

@@ -230,6 +230,12 @@ func (w *PDFWriter) Write(out io.Writer) error {
 	}
 	sort.Ints(objNums)
 
+	// The encryption dictionary must NOT have its string values encrypted (PDF spec §7.6.5).
+	var encryptDictObjNum int
+	if w.encryptRef != "" {
+		fmt.Sscanf(w.encryptRef, "%d 0 R", &encryptDictObjNum)
+	}
+
 	// Write objects and track positions
 	positions := make(map[int]int64)
 
@@ -273,11 +279,12 @@ func (w *PDFWriter) Write(out io.Writer) error {
 			buf.Write(streamData)
 			buf.WriteString("\nendstream")
 		} else if obj.Content != nil {
-			// Encrypt content if needed (for non-stream objects like strings in dicts)
 			content := obj.Content
-			// Note: For non-stream objects, encryption is more complex
-			// (need to encrypt individual strings, not the whole object)
-			// For simplicity, we skip encryption of non-stream content here
+			if w.encryptInfo != nil && objNum != encryptDictObjNum {
+				if encrypted, err := w.encryptStringsInContent(content, objNum, obj.Generation); err == nil {
+					content = encrypted
+				}
+			}
 			buf.Write(content)
 		}
 

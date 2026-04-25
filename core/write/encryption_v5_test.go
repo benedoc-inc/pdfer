@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/benedoc-inc/pdfer/core/encrypt"
+	"github.com/benedoc-inc/pdfer/core/parse"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 func TestSetupAES256Encryption(t *testing.T) {
@@ -238,4 +240,179 @@ func TestWriteAES256EncryptedPDF_SimpleBuilder(t *testing.T) {
 	}
 
 	t.Logf("Successfully created, encrypted, and decrypted PDF: %d bytes", len(decryptedBytes))
+}
+
+// TestEncryptedPDF_DictStringsAreEncrypted verifies that string values in
+// non-stream objects (e.g. the Info dict) are encrypted in the written PDF.
+func TestEncryptedPDF_DictStringsAreEncrypted(t *testing.T) {
+	const title = "Confidential Report Q4"
+	const author = "Jane Smith"
+
+	b := NewSimplePDFBuilder()
+	p := b.AddPage(PageSizeLetter)
+	p.Content().
+		BeginText().
+		SetFont(p.AddStandardFont("Helvetica"), 12).
+		SetTextPosition(72, 720).
+		ShowText("hello").
+		EndText()
+	b.FinalizePage(p)
+
+	b.Writer().SetMetadata(&types.DocumentMetadata{Title: title, Author: author})
+
+	userPw := []byte("pw123")
+	_, err := b.Writer().SetupEncryptionWithPasswords(userPw, []byte("owner"), -3904, true)
+	if err != nil {
+		t.Fatalf("setup encryption: %v", err)
+	}
+
+	pdfBytes, err := b.Bytes()
+	if err != nil {
+		t.Fatalf("Bytes: %v", err)
+	}
+
+	// Plaintext title must NOT appear in the raw PDF bytes.
+	if bytes.Contains(pdfBytes, []byte(title)) {
+		t.Error("plaintext title found in encrypted PDF — strings are not being encrypted")
+	}
+	if bytes.Contains(pdfBytes, []byte(author)) {
+		t.Error("plaintext author found in encrypted PDF — strings are not being encrypted")
+	}
+}
+
+// TestEncryptedPDF_DictStringsRoundtrip verifies that metadata string values
+// survive encrypt → write → parse-with-password intact. It uses the parse API
+// to open the encrypted PDF with the correct password and then reads the Info
+// dict object content, which triggers per-object string decryption.
+func TestEncryptedPDF_DictStringsRoundtrip(t *testing.T) {
+	const title = "Roundtrip Title"
+
+	b := NewSimplePDFBuilder()
+	p := b.AddPage(PageSizeLetter)
+	p.Content().
+		BeginText().
+		SetFont(p.AddStandardFont("Helvetica"), 12).
+		SetTextPosition(72, 720).
+		ShowText("hello").
+		EndText()
+	b.FinalizePage(p)
+
+	b.Writer().SetMetadata(&types.DocumentMetadata{Title: title})
+
+	userPw := []byte("pw123")
+	_, err := b.Writer().SetupEncryptionWithPasswords(userPw, []byte("owner"), -3904, true)
+	if err != nil {
+		t.Fatalf("setup encryption: %v", err)
+	}
+
+	pdfBytes, err := b.Bytes()
+	if err != nil {
+		t.Fatalf("Bytes: %v", err)
+	}
+
+	// Open with the parse API using the password; this triggers per-object
+	// string decryption via DecryptStringsInContent.
+	pdf, err := parse.OpenWithOptions(pdfBytes, parse.ParseOptions{Password: userPw})
+	if err != nil {
+		t.Fatalf("parse.OpenWithOptions: %v", err)
+	}
+	trailer := pdf.Trailer()
+	if trailer == nil || trailer.InfoRef == "" {
+		t.Skip("no Info dictionary in generated PDF")
+	}
+	var infoObjNum int
+	if _, err := fmt.Sscanf(trailer.InfoRef, "%d 0 R", &infoObjNum); err != nil || infoObjNum == 0 {
+		t.Fatalf("could not parse InfoRef %q", trailer.InfoRef)
+	}
+	infoContent, err := pdf.GetObjectContent(infoObjNum)
+	if err != nil {
+		t.Fatalf("GetObjectContent(%d): %v", infoObjNum, err)
+	}
+	if !bytes.Contains(infoContent, []byte(title)) {
+		t.Errorf("Info dict after decryption does not contain %q\ncontent: %s", title, infoContent)
+	}
+}
+
+// TestEncryptStringsInContent_LiteralString verifies that literal strings are
+// encrypted and the ciphertext differs from the original.
+func TestEncryptStringsInContent_LiteralString(t *testing.T) {
+	w := NewPDFWriter()
+	_, err := w.SetupEncryptionWithPasswords([]byte("pw"), []byte("owner"), -3904, true)
+	if err != nil {
+		t.Fatalf("setup encryption: %v", err)
+	}
+
+	content := []byte("<</Title (Hello World)/Type/Catalog>>")
+	encrypted, err := w.encryptStringsInContent(content, 5, 0)
+	if err != nil {
+		t.Fatalf("encryptStringsInContent: %v", err)
+	}
+
+	// The literal (Hello World) must not appear in encrypted output.
+	if bytes.Contains(encrypted, []byte("Hello World")) {
+		t.Error("plaintext string still present after encryption")
+	}
+	// Output must still contain the PDF keys /Title and /Type.
+	if !bytes.Contains(encrypted, []byte("/Title")) {
+		t.Error("/Title key missing from encrypted content")
+	}
+	// The encrypted string should be a hex string <...>.
+	if !bytes.Contains(encrypted, []byte("<")) {
+		t.Error("encrypted output should contain a hex string")
+	}
+}
+
+// TestParsePDFLiteralString exercises the literal-string parser.
+func TestParsePDFLiteralString(t *testing.T) {
+	cases := []struct {
+		input   string
+		want    string
+		wantEnd int
+	}{
+		{"(hello)", "hello", 7},
+		{"(hi) extra", "hi", 4},
+		{"(a\\nb)", "a\nb", 6},
+		{"(a\\(b\\)c)", "a(b)c", 9},
+		{"(nest(ed))", "nest(ed)", 10},
+		{"(\\101)", "A", 6}, // octal \101 = 65 = 'A'
+	}
+	for _, tc := range cases {
+		end, got, err := pdfParseLiteralString([]byte(tc.input), 0)
+		if err != nil {
+			t.Errorf("input %q: unexpected error %v", tc.input, err)
+			continue
+		}
+		if string(got) != tc.want {
+			t.Errorf("input %q: got %q, want %q", tc.input, got, tc.want)
+		}
+		if end != tc.wantEnd {
+			t.Errorf("input %q: end=%d, want %d", tc.input, end, tc.wantEnd)
+		}
+	}
+}
+
+// TestParsePDFHexString exercises the hex-string parser.
+func TestParsePDFHexString(t *testing.T) {
+	cases := []struct {
+		input   string
+		want    []byte
+		wantEnd int
+	}{
+		{"<48656C6C6F>", []byte("Hello"), 12},
+		{"<4142>", []byte{0x41, 0x42}, 6},
+		{"<41 42\n43>", []byte{0x41, 0x42, 0x43}, 10},
+	}
+	for _, tc := range cases {
+		end, got, err := pdfParseHexString([]byte(tc.input), 0)
+		if err != nil {
+			t.Errorf("input %q: unexpected error %v", tc.input, err)
+			continue
+		}
+		if string(got) != string(tc.want) {
+			t.Errorf("input %q: got %v, want %v", tc.input, got, tc.want)
+		}
+		if end != tc.wantEnd {
+			t.Errorf("input %q: end=%d, want %d", tc.input, end, tc.wantEnd)
+		}
+	}
 }
