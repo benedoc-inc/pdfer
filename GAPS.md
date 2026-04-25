@@ -1,545 +1,110 @@
-# Implementation Gaps
+# Known Gaps
 
-This document details the current implementation gaps in pdfer and provides guidance for contributors.
-
-## Summary
-
-| Category | Implemented | Partial | Not Implemented |
-|----------|-------------|---------|-----------------|
-| Encryption | 4 | 0 | 1 |
-| PDF Parsing | 13 | 2 | 20+ |
-| PDF Writing | 8 | 2 | 25+ |
-| XFA | 6 | 2 | 4 |
-| Document Manipulation | 8 | 0 | 1 |
-| Content Extraction | 10 | 0 | 1 |
-| Advanced Features | 0 | 0 | 10+ |
-| Form Handling | 5 | 0 | 1 |
-| Font Features | 1 | 0 | 5 |
-| Image Features | 6 | 0 | 2 |
-| Error Handling | 2 | 0 | 3 |
+Concrete, verified gaps with file pointers. Update this file when a gap is
+closed. "Workaround" describes what currently happens instead of the correct
+behaviour.
 
 ---
 
-## Encryption (`core/encrypt/`)
+## P1 — High impact
 
-### ✅ Fully Implemented
+### `DecryptPDF` returns encrypted bytes unchanged
+**File:** `core/encrypt/decrypt.go:185` — `DecryptPDFObjects`  
+The function verifies the password and derives the key but returns the original
+encrypted bytes unchanged. Callers expecting a decrypted file are silently
+misled. Decryption works *inside* `parse.OpenWithOptions` (objects are
+decrypted on demand during parsing), but there is no standalone "decrypt to
+plaintext PDF" operation.  
+**To fix:** Walk the xref, derive a per-object key, decrypt each stream and
+string in place, strip `/Encrypt` from the catalog, emit clean bytes — the
+inverse of `EncryptPDF`.
 
-| Feature | File | Notes |
-|---------|------|-------|
-| RC4 40-bit (V1, R2) | `decrypt.go` | Standard handler |
-| RC4 128-bit (V2, R3) | `decrypt.go` | Standard handler |
-| AES-128 CBC (V4, R4) | `decrypt.go` | With IV prefix handling |
-| AES-256 CBC (V5, R5/R6) | `decrypt.go`, `key_derivation.go` | SHA-256 key derivation, /UE/OE unwrapping |
-| Password verification | `key_derivation.go` | User and owner passwords (V1-V5) |
-| Key derivation | `key_derivation.go` | Algorithm 2 (V1-V4), 7.6.4.3.3 (V5+) |
-
-### ✅ Newly Implemented
-
-| Feature | File | Notes |
-|---------|------|-------|
-| **AES-256 (V5, R5/R6)** | `key_derivation.go` | SHA-256 based key derivation per ISO 32000-2 |
-| **Key unwrapping (/UE, /OE)** | `key_derivation.go` | AES-128 ECB mode for unwrapping encrypted keys |
-
-### ❌ Not Implemented
-
-| Feature | Priority | Complexity | Notes |
-|---------|----------|------------|-------|
-| Public key encryption | Low | High | Certificate-based, rarely used |
-| Crypt filters per stream | Medium | Medium | Different encryption per stream type |
+### Owner-password authentication is broken for R≤4
+**File:** `core/encrypt/key_derivation.go:268` — `DeriveUserKeyFromOwner`  
+The function returns the owner key unchanged instead of implementing Algorithm 3
+inverse (ISO 32000-1 §7.6.3.4): RC4-decrypt `/O` with the owner-derived key to
+recover the padded user password, then derive the file encryption key from
+that. Opening an encrypted PDF with the *owner* password (rather than the user
+password) fails or accepts wrong passwords for R=3/4 documents.
 
 ---
 
-## PDF Parsing (`parser/`)
+## P2 — Medium impact
 
-### ✅ Fully Implemented
+### PDF comparison text diff is not wired up
+**File:** `core/compare/compare.go:521`  
+`compareText` is declared as a placeholder; the actual implementation is in
+`text_diff.go` but `compareSinglePage` never calls it. `PageDifference.TextDiff`
+is always nil, making `ComparePDFs` / `ComparePDFsWithOptions` blind to text
+changes between pages.  
+**To fix:** Call the text diff logic from `text_diff.go` inside
+`compareSinglePage`.
 
-| Feature | File | Notes |
-|---------|------|-------|
-| Cross-reference tables | `core/parse/parser.go` | Traditional xref format |
-| Cross-reference streams | `core/parse/xref_stream.go` | PDF 1.5+ compressed xref |
-| Object streams (ObjStm) | `core/parse/object_stream.go` | Compressed object storage |
-| PNG predictor filters | `core/parse/object_stream.go` | Predictors 10-15 |
-| FlateDecode | Multiple | zlib/deflate decompression |
-| Object retrieval | `core/parse/get_object.go` | Unified direct + ObjStm access |
+### `FlattenForm` silently skips pages with indirect `/Resources`
+**File:** `forms/acroform/flatten.go:24`  
+Pages whose `/Resources` is an indirect object reference (rather than an inline
+dict) are passed through without flattening. Widget annotations on those pages
+are silently dropped from the output.  
+**To fix:** Dereference the indirect resource object, inject XObject entries,
+write back the modified object.
 
-### ⚠️ Partial Implementation
+### PDF merge leaves dangling references for cross-document refs
+**File:** `core/manipulate/merging.go:188`  
+Object numbers are remapped when merging PDFs to avoid collisions, but
+references to objects not in the remap table are passed through unchanged.
+Complex PDFs with object streams or shared resources may have dangling
+references in the merged output.
 
-| Feature | Status | What's Missing |
-|---------|--------|----------------|
-| **Trailer parsing** | Works for most | Hybrid-reference files (xref table + stream) not fully supported |
-| **Indirect object references** | Basic | Doesn't resolve nested references automatically |
+### Inline AcroForm dict not supported
+**File:** `forms/acroform/parser.go:78`  
+PDFs where `/AcroForm` is an inline dict in the catalog (rather than an
+indirect object reference) return `ErrCodeUnsupportedPDF`. Rare in practice but
+produced by some older generators.
 
-### ✅ Newly Implemented
-
-| Feature | File | Notes |
-|---------|------|-------|
-| **ASCIIHexDecode** | `core/parse/filters.go` | Encode and decode hex text |
-| **ASCII85Decode** | `core/parse/filters.go` | Encode and decode base-85 |
-| **RunLengthDecode** | `core/parse/filters.go` | Simple RLE compression |
-| **DCTDecode** | `core/parse/filters.go` | JPEG image pass-through filter |
-| **Incremental updates** | `core/parse/incremental.go` | Parse PDFs with multiple revisions, /Prev chain |
-| **Byte-perfect parsing** | `core/parse/document.go`, `core/parse/document_parser.go` | Full PDF structure with raw bytes preserved |
-| **Unified API** | `core/parse/api.go` | Clean `Open()`/`OpenWithOptions()` entry point with `PDF` type |
-
-### ❌ Not Implemented
-
-| Feature | Priority | Complexity | Notes |
-|---------|----------|------------|-------|
-| **Linearized PDFs** | Medium | High | First-page optimization, hint tables |
-| **LZWDecode filter** | Low | Medium | Legacy compression, rarely used now |
-| **CCITTFaxDecode** | Low | High | Fax image compression |
-| **JBIG2Decode** | Low | High | Bi-level image compression |
-| **JPXDecode** | Low | High | JPEG 2000 |
-| **Text extraction** | High | Medium | Extract text from content streams with positioning |
-| **Metadata extraction** | Medium | Low | Document info, XMP metadata parsing |
-| **Page extraction** | High | Medium | Extract individual pages as new PDFs |
-| **PDF merging** | High | Medium | Combine multiple PDFs into one |
-| **PDF splitting** | High | Medium | Split PDF into multiple files by pages |
-| **Page rotation** | Medium | Low | Rotate pages 90/180/270 degrees |
-| **Page deletion** | Medium | Medium | Remove pages from PDF |
-| **Page insertion** | Medium | Medium | Insert pages at specific positions |
-| **Bookmark/outline extraction** | Medium | Medium | Extract document navigation structure |
-| **Annotation extraction** | Medium | High | Links, comments, highlights, form fields |
-| **Form field extraction (AcroForm)** | High | High | ✅ Implemented - Extract AcroForm fields |
-| **Image extraction** | Medium | Medium | Extract embedded images from PDF |
-| **PDF/A compliance** | Low | Very High | PDF/A-1, PDF/A-2, PDF/A-3 validation |
-| **PDF/X support** | Low | Very High | PDF/X-1a, PDF/X-3, PDF/X-4 |
-| **Error recovery** | Medium | High | Graceful handling of corrupted PDFs |
-| **Streaming parser** | Low | High | Parse large PDFs without loading entire file |
+### Page deletion does not update ancestor `/Count`
+**File:** `core/manipulate/deletion.go:233`  
+Deleting a page updates the `/Count` of its immediate parent `/Pages` node only.
+Ancestor nodes in multi-level page trees retain stale counts, which confuses
+some PDF readers on large documents.
 
 ---
 
-## PDF Writing (`core/write/`)
-
-### ✅ Fully Implemented
-
-| Feature | File | Notes |
-|---------|------|-------|
-| Basic PDF structure | `core/write/writer.go` | Header, objects, xref, trailer |
-| Stream objects | `core/write/writer.go` | With FlateDecode compression |
-| XFA PDF building | `core/write/xfa_builder.go` | From XFA streams |
-| PDF rebuilding | `core/write/xfa_builder.go` | Modify existing PDFs |
-| Object encryption | `core/write/writer.go` | AES-128 for streams |
-| **Image embedding** | `core/write/image.go` | JPEG (DCTDecode), PNG to RGB XObjects |
-| **Page content streams** | `core/write/content.go` | Text, graphics, and image operators |
-| **Page building** | `core/write/page.go` | SimplePDFBuilder for easy page creation |
-
-### ⚠️ Partial Implementation
-
-| Feature | Status | What's Missing |
-|---------|--------|----------------|
-| **Dictionary writing** | Basic | Complex nested structures may not format correctly |
-| **String encryption** | Partial | Only stream data encrypted, not string objects in dictionaries |
-| **XMP metadata** | Not implemented | Only Info dictionary metadata supported, XMP not yet implemented |
-
-### ✅ Newly Implemented
-
-| Feature | File | Notes |
-|---------|------|-------|
-| **Font embedding** | `resources/font/font.go`, `resources/font/pdf.go` | TrueType/OpenType font embedding with subsetting support |
-| **Metadata writing** | `core/write/metadata.go` | Set document Info dictionary metadata (title, author, dates, custom fields) |
-| **Cross-reference streams** | `core/write/xref_stream.go` | Write modern compressed xref streams (PDF 1.5+) instead of traditional tables |
-| **Bookmarks/outlines (write)** | `core/write/bookmarks.go` | Create document navigation structure with hierarchical bookmarks |
-| **Encryption on write** | `core/write/encryption_v5.go`, `core/write/encryption_helper.go` | Generate new encrypted PDFs with AES-256 (V5/R5) encryption |
-| **Object streams** | `core/write/object_stream.go` | Compress objects into object streams (ObjStm) for smaller file sizes |
-| **Watermarks** | `core/write/watermark.go` | Add text and image watermarks to pages with rotation and opacity |
-
-### ❌ Not Implemented
-
-| Feature | Priority | Complexity | Notes |
-|---------|----------|------------|-------|
-| **Digital signatures** | Low | Very High | PKCS#7, CMS signing |
-| **Incremental save** | Medium | Medium | Append without rewriting |
-| **Advanced graphics** | Medium | High | Curves (bezier), arcs, gradients, patterns |
-| **Transparency/alpha** | Medium | High | Alpha channels, blend modes, soft masks |
-| **Annotations (write)** | High | High | Links, comments, highlights, form fields |
-| **Page manipulation** | High | Medium | Rotate, delete, reorder, insert pages |
-| **PDF optimization** | Medium | High | Remove unused objects, compress streams |
-| **WebP support** | Low | Medium | WebP image embedding (requires external decoder) |
-| **Font subsetting (advanced)** | Low | High | Full TTF subsetting with table rebuilding |
-| **Type 1 fonts** | Low | Medium | PostScript Type 1 font support |
-| **CID fonts** | Low | High | CID-keyed fonts for CJK languages |
-| **Color spaces** | Medium | Medium | CMYK, Lab, ICC profiles, spot colors |
-| **Layers/OCGs** | Low | High | Optional content groups, layer visibility |
-| **3D content** | Low | Very High | 3D annotations, U3D, PRC |
-| **Multimedia** | Low | Very High | Video, audio, rich media annotations |
-| **Accessibility (write)** | Medium | High | Tagged PDF, structure tree, alt text |
-| **PDF repair** | Low | Very High | Fix corrupted PDFs, recover content |
-
-**Font embedding implementation:**
-```go
-// Package font/ provides TrueType/OpenType font embedding
-// Usage example:
-fontData, _ := os.ReadFile("font.ttf")
-font, _ := font.NewFont("MyFont", fontData)
-font.AddString("Hello, World!") // Subset to used characters
-
-// Add to page
-fontName, _ := page.AddEmbeddedFont(font)
-content.SetFont(fontName, 12).ShowText("Hello, World!")
-```
-
----
-
-## XFA Processing (`forms/xfa/`)
-
-### ✅ Fully Implemented
-
-| Feature | File | Notes |
-|---------|------|-------|
-| Template extraction | `forms/xfa/xfa.go` | Form structure |
-| Datasets extraction | `forms/xfa/xfa.go` | Form data |
-| Config extraction | `forms/xfa/xfa.go` | Rendering config |
-| LocaleSet extraction | `forms/xfa/xfa.go` | Localization |
-| Form field parsing | `forms/xfa/xfa_form_translator.go` | Text, numeric, choice, date |
-| Validation rules | `forms/xfa/xfa_form_translator.go` | Required, patterns, ranges |
-| Calculation rules | `forms/xfa/xfa_form_translator.go` | Basic field calculations |
-| Field value updates | `forms/xfa/xfa.go` | Modify datasets |
-| PDF rebuild | `forms/xfa/xfa.go` | With updated XFA |
-
-### ⚠️ Partial Implementation
-
-| Feature | Status | What's Missing |
-|---------|--------|----------------|
-| **Subform parsing** | Basic | Nested subforms may not fully resolve |
-| **Rich text** | Not handled | XHTML content in text fields |
-
-### ❌ Not Implemented
-
-| Feature | Priority | Complexity | Notes |
-|---------|----------|------------|-------|
-| **Dynamic XFA rendering** | Low | Very High | Form layout calculation |
-| **Script execution** | Low | Very High | FormCalc, JavaScript |
-| **Subform repetition** | Medium | High | min/max occurs, dynamic rows |
-| **Barcode fields** | Low | Medium | Generate barcode images |
-| **Signature fields** | Low | High | XFA signature handling |
-| **Accessibility** | Low | Medium | Role maps, structure |
-
-**To implement subform repetition:**
-```go
-// In xfa_form_translator.go, add:
-type SubformInstance struct {
-    Template  *Subform
-    Index     int
-    Data      map[string]string
-}
-
-func (s *Subform) CreateInstances(data []map[string]string) []SubformInstance {
-    // 1. Check minOccur/maxOccur
-    // 2. Clone subform template for each data row
-    // 3. Bind data to cloned fields
-}
-```
-
----
-
-## Types (`types/`)
-
-### Current Types
-
-| Type | Purpose | Status |
-|------|---------|--------|
-| `PDFEncryption` | Encryption parameters | ✅ Complete |
-| `FormSchema` | Parsed form structure | ✅ Complete |
-| `Question` | Form field | ✅ Complete |
-| `Rule` | Validation/calculation | ✅ Complete |
-| `XFADatasets` | Parsed datasets | ⚠️ Basic |
-| `XFAConfig` | Parsed config | ⚠️ Basic |
-
-### Missing Types
-
-| Type | Purpose | Priority |
-|------|---------|----------|
-| `Page` | Page object with content | High |
-| `Font` | Font resource | ✅ Complete |
-| `Image` | Image XObject | High |
-| `Annotation` | Form fields, links | Medium |
-| `Outline` | Bookmarks | Low |
-| `Metadata` | Document metadata (Info, XMP) | Medium |
-| `ColorSpace` | Color space definitions | Medium |
-| `Pattern` | Tiling and shading patterns | Low |
-| `Gradient` | Gradient definitions | Low |
-| `FormXObject` | Reusable form XObjects | Medium |
-| `Action` | PDF actions (GoTo, URI, etc.) | Medium |
-| `Destination` | Named destinations for navigation | Low |
-
----
-
-## Testing Gaps
-
-### Current Test Coverage
-
-| Package | Coverage | Notes |
-|---------|----------|-------|
-| `encryption` | ~70% | Missing edge cases |
-| `parser` | ~60% | Missing malformed PDF handling |
-| `writer` | ~50% | Missing complex structures |
-| `xfa` | ~65% | Good roundtrip tests |
-| `types` | ~80% | Mostly complete |
-
-### Needed Tests
-
-1. **Malformed PDF handling** - Graceful failures for corrupted files
-2. **Edge cases** - Empty streams, zero-length objects
-3. **Large files** - Performance with 100MB+ PDFs
-4. **Concurrent access** - Thread safety
-5. **Fuzz testing** - Random input validation
-
----
-
-## Additional PDF Library Features
-
-### Document Manipulation (`core/manipulate/`)
-
-#### ✅ Fully Implemented
-
-| Feature | File | Notes |
-|---------|------|-------|
-| **PDF merging** | `core/manipulate/merge.go` | Combine multiple PDFs, handle conflicts |
-| **PDF splitting** | `core/manipulate/split.go` | Split by pages, bookmarks, or custom logic |
-| **Page extraction** | `core/manipulate/extract.go` | Extract pages as new PDFs |
-| **Page rotation** | `core/manipulate/rotate.go` | Rotate individual or all pages |
-| **Page deletion** | `core/manipulate/delete.go` | Remove pages, update references |
-| **Page insertion** | `core/manipulate/insert.go` | Insert pages at specific positions |
-| **PDF comparison** | `core/compare/` | Best-in-class diffing algorithm with comprehensive features |
-
-#### PDF Comparison (`core/compare/`)
-
-**✅ Fully Implemented Features:**
-
-| Feature | File | Notes |
-|---------|------|-------|
-| **LCS-based diffing** | `core/compare/myers_diff.go` | Longest Common Subsequence algorithm for optimal matching (O(n*m)) |
-| **Multi-phase matching** | `core/compare/myers_diff.go` | Exact matches → Position-based → Content-based matching |
-| **Text comparison** | `core/compare/text_diff.go` | Element, word, and character-level granularity |
-| **Image comparison** | `core/compare/compare.go` | Binary data comparison, position tracking, move detection |
-| **Configurable options** | `core/compare/compare.go` | Granularity, sensitivity, tolerance, normalization options |
-| **Move detection** | `core/compare/text_diff.go` | Detects when text/images move between positions |
-| **Report generation** | `core/compare/report.go` | Human-readable and JSON report formats |
-
-**Algorithm Characteristics:**
-- **Time Complexity**: O(n*m) for LCS computation
-- **Space Complexity**: O(n*m) for LCS table
-- **Optimality**: Finds longest common subsequence for optimal matching
-- **Multi-phase Strategy**: Prevents false matches by prioritizing exact matches over position-based matches
-
-**Configuration Options:**
-- `TextGranularity`: Element, word, or character-level comparison
-- `DiffSensitivity`: Strict, normal, or relaxed change detection
-- `DetectMoves`: Enable/disable move detection
-- `MoveTolerance`: Position tolerance for detecting moves
-- `MinChangeThreshold`: Filter minor changes by percentage
-- `IgnoreWhitespace`: Ignore whitespace differences
-- `IgnoreCase`: Case-insensitive comparison
-- `TextTolerance` / `GraphicTolerance`: Position matching tolerance
-
-#### ❌ Not Implemented
-
-| Feature | Priority | Complexity | Notes |
-|---------|----------|------------|-------|
-| **Page reordering** | Medium | Medium | Reorder pages in document |
-| **Visual diffing** | Medium | High | Visual annotation of differences (requires annotation writing) |
-| **Form comparison** | Medium | Medium | Compare form field values and structure |
-| **Object-level comparison** | Low | Medium | Compare raw PDF objects |
-| **Fuzzy matching** | Low | High | Fuzzy text/image similarity matching |
-| **Change tracking** | Low | High | Track changes across multiple versions |
-
-### Content Extraction (`content/extract/`)
-
-#### ✅ Fully Implemented
-
-| Feature | File | Notes |
-|---------|------|-------|
-| **Metadata extraction** | `content/extract/metadata.go` | Document info (title, author, dates, etc.) |
-| **Page extraction** | `content/extract/pages.go` | Extract page structure, dimensions, rotation |
-| **Bookmark extraction** | `content/extract/bookmarks.go` | Extract outline/bookmark hierarchy |
-| **Form data extraction** | `forms/acroform/extract.go`, `forms/xfa/` | ✅ Implemented - Extract AcroForm and XFA field values |
-
-#### ✅ Fully Implemented (Additional)
-
-| Feature | File | Notes |
-|---------|------|-------|
-| **Text extraction** | `content/extract/content_stream.go` | Extract text with position, font, size, spacing, matrix |
-| **Graphics extraction** | `content/extract/content_stream.go` | Extract rectangles, lines, colors, line width |
-| **Image XObject extraction** | `content/extract/content_stream.go`, `content/extract/resources.go` | Extract image XObject references and metadata |
-| **Font extraction** | `content/extract/resources.go` | Extract font dictionaries, subtypes, embedded status |
-| **Resource extraction** | `content/extract/resources.go` | Extract fonts, XObjects, images from Resources |
-| **Annotation extraction** | `content/extract/annotations.go` | Extract links, text annotations, markup annotations |
-
-#### ✅ Fully Implemented (Additional)
-
-| Feature | File | Notes |
-|---------|------|-------|
-| **Image binary data extraction** | `content/extract/images.go` | Extract actual image binary data (JPEG bytes for DCTDecode, raw pixel data for FlateDecode) |
-
-#### ❌ Not Implemented
-
-| Feature | Priority | Complexity | Notes |
-|---------|----------|------------|-------|
-| **Font binary data extraction** | Low | Medium | Extract embedded font file data |
-
-### Content Creation
-| Feature | Priority | Complexity | Notes |
-|---------|----------|------------|-------|
-| **Advanced graphics** | Medium | High | Bezier curves, arcs, ellipses |
-| **Gradients** | Medium | Medium | Linear and radial gradients |
-| **Patterns** | Low | Medium | Tiling patterns, shading |
-| **Transparency** | Medium | High | Alpha channels, blend modes |
-| **Watermarks** | Medium | Medium | Text/image watermarks |
-| **Annotations (write)** | High | High | Create links, comments, highlights |
-| **Bookmarks (write)** | Medium | Medium | Create navigation structure |
-| **Form fields (AcroForm)** | High | High | ✅ Implemented - Full parsing and creation |
-| **Actions** | Medium | Medium | GoTo, URI, JavaScript actions |
-
-### Advanced Features
-| Feature | Priority | Complexity | Notes |
-|---------|----------|------------|-------|
-| **PDF optimization** | Medium | High | Remove unused objects, compress, linearize |
-| **PDF repair** | Low | Very High | Fix corrupted PDFs, recover content |
-| **Streaming parser** | Low | High | Parse large PDFs without full memory load |
-| **Concurrent parsing** | Low | High | Parallel object parsing for performance |
-| **PDF/A compliance** | Low | Very High | Generate PDF/A-1, PDF/A-2, PDF/A-3 |
-| **PDF/X support** | Low | Very High | Generate PDF/X-1a, PDF/X-3, PDF/X-4 |
-| **Accessibility (tagged PDF)** | Medium | High | Structure tree, alt text, reading order |
-| **Layers/OCGs** | Low | High | Optional content groups, layer control |
-| **Color management** | Medium | Medium | CMYK, Lab, ICC profiles, spot colors |
-| **3D content** | Low | Very High | 3D annotations, U3D, PRC support |
-| **Multimedia** | Low | Very High | Video, audio, rich media annotations |
-
-## Form Handling (`forms/`)
-
-### ✅ Fully Implemented
-
-| Feature | File | Notes |
-|---------|------|-------|
-| **Unified form interface** | `forms/forms.go` | Auto-detect and work with AcroForm or XFA forms |
-| **AcroForm parsing** | `forms/acroform/parser.go` | Extract AcroForm structure and fields recursively |
-| **Form field extraction** | `forms/acroform/extract.go` | Extract field values and convert to FormSchema |
-| **Form field filling** | `forms/acroform/fill_streams.go`, `forms/acroform/replace.go` | Fill AcroForm fields with values, handles direct objects and object streams |
-| **Form field creation** | `forms/acroform/writer.go` | Create AcroForm fields programmatically (text, checkbox, radio, choice, button) |
-| **Form field validation** | `forms/acroform/validation.go` | Validate field values against constraints (required, max length, patterns, ranges) |
-| **Appearance streams** | `forms/acroform/appearance.go` | Generate appearance streams for checkboxes, text fields, buttons |
-| **Field actions** | `forms/acroform/actions.go` | Add actions to fields (URI, JavaScript, GoTo, Submit, Reset) |
-| **Form flattening** | `forms/acroform/flatten.go` | Convert form fields to static content (removes interactivity) |
-| **Object stream support** | `forms/acroform/stream_rebuild.go`, `forms/acroform/stream_finder.go` | Handle form fields within compressed object streams |
-
-### ❌ Not Implemented
-
-| Feature | Priority | Complexity | Notes |
-|---------|----------|------------|-------|
-| **Digital signatures (forms)** | Low | Very High | Sign form fields, signature fields |
-
-### Font Features (`resources/font/`)
-
-#### ✅ Fully Implemented
-
-| Feature | File | Notes |
-|---------|------|-------|
-| **Font embedding** | `resources/font/font.go`, `resources/font/pdf.go` | TrueType/OpenType font embedding with subsetting support |
-
-#### ❌ Not Implemented
-
-| Feature | Priority | Complexity | Notes |
-|---------|----------|------------|-------|
-| **Advanced subsetting** | Low | High | Full TTF subsetting with table rebuilding |
-| **Type 1 fonts** | Low | Medium | PostScript Type 1 font support |
-| **CID fonts** | Low | High | CID-keyed fonts for CJK languages |
-| **Font metrics** | Medium | Low | Get font metrics, character widths |
-| **Font fallback** | Low | Medium | Automatic font substitution |
-
-### Image Features (`core/write/image.go`)
-
-#### ✅ Fully Implemented
-
-| Feature | File | Notes |
-|---------|------|-------|
-| **JPEG embedding** | `core/write/image.go` | JPEG images with DCTDecode filter (direct embedding, no re-encoding) |
-| **PNG embedding** | `core/write/image.go` | PNG images converted to RGB/Gray with FlateDecode compression |
-| **Generic image support** | `core/write/image.go` | Any format supported by Go's image package (PNG, GIF, BMP, etc.) |
-| **Alpha channel support** | `core/write/image.go` | Soft masks for images with transparency |
-| **Color space support** | `core/write/image.go` | RGB, Gray, CMYK (from JPEG) |
-| **Image drawing** | `core/write/content.go` | DrawImage, DrawImageAt operators |
-
-#### ❌ Not Implemented
-
-| Feature | Priority | Complexity | Notes |
-|---------|----------|------------|-------|
-| **WebP support** | Low | Medium | WebP image embedding (requires external decoder) |
-| **Image compression** | Medium | Medium | Recompress images, quality control |
-| **Image scaling** | Medium | Low | Scale images before embedding (currently done via DrawImageAt) |
-
-### Error Handling & Validation
-
-#### ✅ Fully Implemented
-
-| Feature | File | Notes |
-|---------|------|-------|
-| **Structured error types** | `types/errors.go` | PDFError with error codes, context support, errors.Is/Unwrap compatibility |
-| **Error codes** | `types/errors.go` | Categorized error codes (parsing, encryption, forms, content, write, I/O) |
-| **Error wrapping** | `types/errors.go` | WrapError/WrapErrorf for chaining errors with context |
-| **Sentinel errors** | `types/errors.go` | Pre-defined sentinel errors for use with errors.Is() |
-| **Helper functions** | `types/errors.go` | IsPDFError, GetErrorCode, IsNotFound, IsEncryptionError, IsValidationError |
-| **Warning system** | `types/warnings.go` | Warning types, WarningCollector for non-fatal issues, level-based filtering |
-| **Warning integration** | `core/parse/api.go` | Warning collector support in ParseOptions and PDF struct |
-
-#### ❌ Not Implemented
-
-| Feature | Priority | Complexity | Notes |
-|---------|----------|------------|-------|
-| **Error recovery** | Medium | High | Graceful handling of corrupted PDFs |
-| **PDF validation** | Medium | High | Validate PDF structure, compliance |
-| **Diagnostic mode** | Low | Medium | Detailed diagnostic information |
-
-## Contribution Priority
-
-### High Priority (Core Functionality)
-1. Incremental updates parsing ✅
-2. Font embedding ✅
-3. Image embedding ✅
-4. Page content streams ✅
-5. AES-256 full support ✅
-6. **Text extraction** - Extract text from PDFs
-7. **PDF merging/splitting** - Basic document manipulation
-8. **AcroForm support** - ✅ Complete - Parsing, creation, validation, filling, flattening
-9. **Form field filling** - ✅ Implemented - Basic filling with object stream structure
-10. **Page manipulation** - Rotate, delete, reorder pages
-
-### Medium Priority (Usability)
-1. Encryption on write ✅ (AES-256 encryption with user/owner passwords implemented)
-2. Cross-reference stream writing ✅ (Modern xref stream format implemented)
-3. Object streams ✅ (Object compression into ObjStm implemented)
-4. Watermarks ✅ (Text and image watermarks with rotation/opacity implemented)
-3. Subform repetition in XFA
-4. Better error messages ✅ (Structured error types implemented)
-5. Warning system ✅ (Non-fatal warning collection implemented)
-5. **Advanced graphics** - Curves, gradients, patterns
-6. **Annotations** - Create links, comments, highlights
-7. **Bookmarks** - Create navigation structure ✅ (Bookmark/outline writing implemented)
-8. **Metadata handling** - Read/write document metadata ✅ (Info dictionary write implemented)
-9. **PDF optimization** - Remove unused objects, compress
-10. **Accessibility** - Tagged PDF, structure tree
-
-### Low Priority (Nice to Have)
-1. Linearized PDF support
-2. Digital signatures
-3. Script execution
-4. LZW and other legacy filters
-5. **PDF/A compliance** - Generate compliant PDFs
-6. **3D content** - 3D annotations support
-7. **Multimedia** - Video/audio support
-8. **PDF repair** - Fix corrupted PDFs
-9. **Streaming parser** - Handle very large PDFs
-10. **Color management** - Advanced color spaces
-
----
-
-## How to Contribute
-
-1. **Pick a gap** from this document
-2. **Create an issue** describing your approach
-3. **Write tests first** (TDD preferred)
-4. **Implement** with clear comments
-5. **Update GAPS.md** to mark as implemented
-6. **Submit PR** with before/after examples
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for code style guidelines.
+## P3 — Low impact
+
+### Font subsetting embeds the full font
+**File:** `resources/font/font.go:517` — `CreateSubsetFont`  
+The function embeds the full font program rather than a subset containing only
+the glyphs used in the document. File size is larger than necessary, sometimes
+significantly for CJK or large symbol fonts.
+
+### Watermark opacity uses colour blending instead of `ExtGState`
+**File:** `core/write/watermark.go:50`  
+Transparency is approximated by blending the requested colour toward white
+rather than using a proper `/ca` fill-alpha entry in a graphics state
+dictionary. The result is a lighter colour, not true transparency, and does not
+composite correctly over non-white backgrounds.
+
+### XFA form validation always returns nil
+**File:** `forms/forms.go:98`  
+`Form.Validate()` on XFA forms returns nil unconditionally. XFA validation
+rules (mandatory fields, patterns, value ranges) are not evaluated.
+
+### XFA script parsing is approximate
+**File:** `forms/xfa/xfa_form_translator.go:866,916`  
+FormCalc/JavaScript script bodies are extracted with a simplified parser that
+may misread complex expressions. Calculation and validation scripts may produce
+incorrect results.
+
+### xref stream Type-2 entries partially skipped
+**File:** `core/parse/xref_stream.go:185`  
+When the xref is a cross-reference stream (PDF 1.5+), Type-2 entries pointing
+into object streams are skipped during xref construction. Object streams are
+parsed separately so most objects are reachable, but objects that appear
+*exclusively* via a Type-2 entry in a file with no traditional xref table may
+be inaccessible.
+
+### AcroForm field actions use a simplified replace
+**File:** `forms/acroform/actions.go:72`  
+Replacing an existing `/A` or `/AA` entry uses a simple string substitution
+rather than a proper dict parser, which may corrupt the dict if the existing
+action value contains nested structures.
