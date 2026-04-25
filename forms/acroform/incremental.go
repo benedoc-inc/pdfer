@@ -61,10 +61,12 @@ func fillIncremental(pdfBytes []byte, formData types.FormData, password []byte, 
 	// These are appended to the PDF and referenced from the updated field dicts.
 
 	type fieldFill struct {
-		field   *Field
-		value   interface{}
-		current []byte // original object bytes
-		xobjNum int    // 0 = no appearance needed (checkbox/radio/push-button)
+		field     *Field
+		value     interface{}
+		current   []byte // original object bytes
+		xobjNum   int    // >0 = text/choice AP stream object number
+		btnYesObj int    // >0 = generate "checked" checkbox AP XObject
+		btnOffObj int    // >0 = generate "unchecked" checkbox AP XObject
 	}
 
 	var fills []fieldFill
@@ -105,11 +107,20 @@ func fillIncremental(pdfBytes []byte, formData types.FormData, password []byte, 
 		nextObjNum++
 	}
 
-	// Assign XObject numbers for text/choice fields.
+	// Assign XObject numbers for text/choice fields, and AP XObjects for
+	// checkboxes/radio buttons that have no existing /AP.
 	for i := range fills {
-		if fills[i].field.FT == "Tx" || fills[i].field.FT == "Ch" {
+		switch {
+		case fills[i].field.FT == "Tx" || fills[i].field.FT == "Ch":
 			fills[i].xobjNum = nextObjNum
 			nextObjNum++
+		case fills[i].field.FT == "Btn" && !isBtnPushButton(fills[i].field.Ff):
+			if !bytes.Contains(fills[i].current, []byte("/AP")) {
+				fills[i].btnYesObj = nextObjNum
+				nextObjNum++
+				fills[i].btnOffObj = nextObjNum
+				nextObjNum++
+			}
 		}
 	}
 
@@ -131,7 +142,7 @@ func fillIncremental(pdfBytes []byte, formData types.FormData, password []byte, 
 
 	// Per-field appearance XObjects, then updated field dicts.
 	for _, ff := range fills {
-		// Appearance XObject (text and choice fields only).
+		// Text/choice appearance XObject.
 		if ff.xobjNum > 0 {
 			fontAlias, fontSize := parseDA(ff.field.DA)
 			dictBytes, streamBytes := buildTextAppearance(
@@ -146,15 +157,69 @@ func fillIncremental(pdfBytes []byte, formData types.FormData, password []byte, 
 			buf.WriteString("endstream\nendobj\n")
 		}
 
+		// Checkbox AP XObjects (only when field has no pre-existing /AP).
+		if ff.btnYesObj > 0 {
+			var w, h float64
+			if len(ff.field.Rect) >= 4 {
+				w = ff.field.Rect[2] - ff.field.Rect[0]
+				h = ff.field.Rect[3] - ff.field.Rect[1]
+			}
+			yesDict, yesStream := buildCheckboxAPStream(w, h, true)
+			offDict, offStream := buildCheckboxAPStream(w, h, false)
+
+			offsets[ff.btnYesObj] = int64(buf.Len())
+			fmt.Fprintf(&buf, "%d 0 obj\n", ff.btnYesObj)
+			buf.Write(yesDict)
+			buf.WriteString("\nstream\n")
+			buf.Write(yesStream)
+			buf.WriteString("endstream\nendobj\n")
+
+			offsets[ff.btnOffObj] = int64(buf.Len())
+			fmt.Fprintf(&buf, "%d 0 obj\n", ff.btnOffObj)
+			buf.Write(offDict)
+			buf.WriteString("\nstream\n")
+			buf.Write(offStream)
+			buf.WriteString("endstream\nendobj\n")
+		}
+
 		// Updated field dict — current is body-only (from GetObjectContent).
 		newBody := applyFieldValue(ff.current, ff.field, ff.value)
-		if ff.xobjNum > 0 {
+		switch {
+		case ff.xobjNum > 0:
 			newBody = withAppearanceRef(newBody, ff.xobjNum)
+		case ff.field.FT == "Btn" && !isBtnPushButton(ff.field.Ff) && len(ff.field.Kids) == 0:
+			// Simple checkbox (no kids): set /AS to match /V.
+			state := btnCheckboxState(ff.value)
+			newBody = withAS(newBody, state)
+			if ff.btnYesObj > 0 {
+				newBody = withBtnAP(newBody, ff.btnYesObj, ff.btnOffObj)
+			}
 		}
 		offsets[ff.field.ObjectNum] = int64(buf.Len())
 		fmt.Fprintf(&buf, "%d %d obj\n", ff.field.ObjectNum, ff.field.Generation)
 		buf.Write(newBody)
 		buf.WriteString("\nendobj\n")
+
+		// Radio button group: update each kid widget's /AS.
+		if ff.field.FT == "Btn" && isBtnRadio(ff.field.Ff) && len(ff.field.Kids) > 0 {
+			selectedVal := fmt.Sprint(ff.value)
+			for _, kid := range ff.field.Kids {
+				kidBody, err := pdf.GetObjectContent(kid.ObjectNum)
+				if err != nil {
+					continue
+				}
+				exportVal := btnKidExportValue(kidBody)
+				kidAS := "Off"
+				if exportVal != "" && exportVal == selectedVal {
+					kidAS = exportVal
+				}
+				newKidBody := withAS(kidBody, kidAS)
+				offsets[kid.ObjectNum] = int64(buf.Len())
+				fmt.Fprintf(&buf, "%d %d obj\n", kid.ObjectNum, kid.Generation)
+				buf.Write(newKidBody)
+				buf.WriteString("\nendobj\n")
+			}
+		}
 	}
 
 	// xref table: consecutive runs become single subsections.
