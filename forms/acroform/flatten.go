@@ -1,142 +1,367 @@
-// Package acroform provides form flattening functionality
 package acroform
 
 import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/benedoc-inc/pdfer/core/parse"
-	"github.com/benedoc-inc/pdfer/types"
 	"github.com/benedoc-inc/pdfer/core/write"
 )
 
-// FlattenForm converts form fields to static content (removes interactivity)
-// This creates a new PDF with form fields rendered as regular text/graphics
+// FlattenForm converts all filled AcroForm widget annotations to static page
+// content. For each widget that has a normal appearance stream (/AP/N):
+//   - The appearance is placed on the page as a Form XObject reference.
+//   - The page /Resources /XObject dict is updated to include the AP stream.
+//   - Widget annotations are removed from /Annots.
+//
+// After flattening, the PDF has no interactive form fields — /AcroForm is
+// removed from the catalog. Unfilled fields (no AP stream) are silently
+// dropped; they leave no visual trace.
+//
+// Limitation: /Resources given as an indirect reference (rather than an inline
+// dict) is not yet supported; such pages are passed through unmodified.
 func FlattenForm(pdfBytes []byte, password []byte, verbose bool) ([]byte, error) {
-	// Parse PDF
-	pdf, err := parse.OpenWithOptions(pdfBytes, parse.ParseOptions{
-		Password: password,
-		Verbose:  verbose,
-	})
+	pdf, err := parse.OpenWithOptions(pdfBytes, parse.ParseOptions{Password: password})
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse PDF: %w", err)
+		return nil, fmt.Errorf("flatten: parse failed: %w", err)
 	}
 
-	var encryptInfo *types.PDFEncryption
-	if pdf.Encryption() != nil {
-		encryptInfo = pdf.Encryption()
-	}
-
-	// Extract AcroForm
-	acroForm, err := ParseAcroForm(pdfBytes, encryptInfo, verbose)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse AcroForm: %w", err)
-	}
-
-	// Create new PDF writer
-	w := write.NewPDFWriter()
-	w.SetVersion(pdf.Version())
-
-	// For each field, we need to:
-	// 1. Get the field's appearance stream (if it exists)
-	// 2. Add it to the page content
-	// 3. Remove the field from AcroForm
-
-	// This is a simplified version - full flattening would:
-	// - Extract appearance streams (/AP dictionary)
-	// - Convert them to page content
-	// - Remove /AcroForm from catalog
-	// - Remove field annotations from pages
-
-	if verbose {
-		fmt.Printf("Flattening %d form fields\n", len(acroForm.Fields))
-	}
-
-	// For now, return a copy with AcroForm reference removed from catalog
-	// Full implementation would require page-level annotation removal
-	result := make([]byte, len(pdfBytes))
-	copy(result, pdfBytes)
-
-	// Remove AcroForm reference from catalog (simplified)
-	catalogPattern := regexp.MustCompile(`/AcroForm\s+\d+\s+\d+\s+R`)
-	result = catalogPattern.ReplaceAll(result, []byte(""))
-
-	if verbose {
-		fmt.Println("Form flattened (AcroForm reference removed)")
-	}
-
-	return result, nil
-}
-
-// FlattenField converts a single field to static content
-func FlattenField(pdfBytes []byte, field *Field, encryptInfo *types.PDFEncryption, verbose bool) ([]byte, error) {
-	// Get field object
-	fieldData, err := parse.GetObject(pdfBytes, field.ObjectNum, encryptInfo, false)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get field object: %w", err)
-	}
-
-	fieldStr := string(fieldData)
-
-	// Check for appearance stream (/AP)
-	apPattern := regexp.MustCompile(`/AP\s*<<[^>]*>>`)
-	if !apPattern.MatchString(fieldStr) {
-		// No appearance stream - field value should be rendered as text
-		// This would require creating content stream with field value
-		if verbose {
-			fmt.Printf("Field '%s' has no appearance stream, will render value as text\n", field.GetFullName())
+	// Load the content body of every object (dict for plain objects, dict+stream
+	// for stream objects). This is what PDFWriter.SetObject expects.
+	contents := make(map[int][]byte)
+	maxNum := 0
+	for _, n := range pdf.Objects() {
+		body, objErr := pdf.GetObjectContent(n)
+		if objErr != nil {
+			continue
+		}
+		contents[n] = body
+		if n > maxNum {
+			maxNum = n
 		}
 	}
 
-	// For full flattening, we would:
-	// 1. Extract /AP dictionary
-	// 2. Get the appearance stream
-	// 3. Add it to page content at field position
-	// 4. Remove field annotation from page
+	trailer := pdf.Trailer()
+	if trailer == nil || trailer.RootRef == "" {
+		return nil, fmt.Errorf("flatten: no document catalog")
+	}
+	var rootNum int
+	fmt.Sscanf(trailer.RootRef, "%d", &rootNum)
 
-	return pdfBytes, nil
+	// If there is no /AcroForm, the PDF is already flat.
+	catalogStr := string(contents[rootNum])
+	if !strings.Contains(catalogStr, "/AcroForm") {
+		return pdfBytes, nil
+	}
+
+	pageNums, err := flattenGetPageNums(contents, rootNum)
+	if err != nil {
+		return nil, fmt.Errorf("flatten: %w", err)
+	}
+
+	nextObjNum := maxNum + 1
+
+	for _, pageNum := range pageNums {
+		pageDict := string(contents[pageNum])
+		annotNums := flattenGetAnnotNums(pageDict)
+
+		type widgetAP struct {
+			rect     [4]float64
+			apObjNum int
+			bbox     [4]float64
+		}
+		var widgets []widgetAP
+
+		for _, annotNum := range annotNums {
+			annotBody, ok := contents[annotNum]
+			if !ok {
+				continue
+			}
+			annotDict := string(annotBody)
+			if !strings.Contains(annotDict, "/Widget") {
+				continue
+			}
+			rect := flattenParseRect(annotDict)
+			apNum := flattenGetAPNObjNum(annotDict)
+			if apNum <= 0 {
+				continue
+			}
+			apContent, ok := contents[apNum]
+			if !ok {
+				continue
+			}
+			bbox := flattenParseBBox(string(apContent))
+			bw := bbox[2] - bbox[0]
+			bh := bbox[3] - bbox[1]
+			if bw <= 0 || bh <= 0 {
+				continue
+			}
+			widgets = append(widgets, widgetAP{rect, apNum, bbox})
+		}
+
+		pageDict = flattenClearAnnots(pageDict)
+
+		if len(widgets) == 0 {
+			contents[pageNum] = []byte(pageDict)
+			continue
+		}
+
+		// Build an overlay content stream that places each AP XObject at the
+		// widget's position using a cm + Do pair.
+		var overlay strings.Builder
+		xobjs := make(map[string]int)
+
+		for _, w := range widgets {
+			bw := w.bbox[2] - w.bbox[0]
+			bh := w.bbox[3] - w.bbox[1]
+			rw := w.rect[2] - w.rect[0]
+			rh := w.rect[3] - w.rect[1]
+			sx := rw / bw
+			sy := rh / bh
+			tx := w.rect[0] - sx*w.bbox[0]
+			ty := w.rect[1] - sy*w.bbox[1]
+
+			alias := fmt.Sprintf("FO%d", w.apObjNum)
+			xobjs[alias] = w.apObjNum
+			fmt.Fprintf(&overlay, "q\n%s 0 0 %s %s %s cm\n/%s Do\nQ\n",
+				flattenFmtF(sx), flattenFmtF(sy), flattenFmtF(tx), flattenFmtF(ty), alias)
+		}
+
+		if overlay.Len() == 0 {
+			contents[pageNum] = []byte(pageDict)
+			continue
+		}
+
+		// Store the overlay as a new stream object.
+		overlayStr := overlay.String()
+		overlayNum := nextObjNum
+		nextObjNum++
+		contents[overlayNum] = []byte(fmt.Sprintf(
+			"<</Length %d>>\nstream\n%sendstream", len(overlayStr), overlayStr))
+
+		pageDict = flattenAppendContents(pageDict, overlayNum)
+		pageDict = flattenAddXObjects(pageDict, xobjs)
+		contents[pageNum] = []byte(pageDict)
+	}
+
+	// Remove /AcroForm from catalog.
+	catStr := string(contents[rootNum])
+	catStr = regexp.MustCompile(`/AcroForm\s+\d+\s+\d+\s+R`).ReplaceAllString(catStr, "")
+	contents[rootNum] = []byte(catStr)
+
+	w := write.NewPDFWriter()
+	for n, body := range contents {
+		w.SetObject(n, body)
+	}
+	w.SetRoot(rootNum)
+	if trailer.InfoRef != "" {
+		var infoNum int
+		fmt.Sscanf(trailer.InfoRef, "%d", &infoNum)
+		w.SetInfo(infoNum)
+	}
+	return w.Bytes()
 }
 
-// GetFieldAppearance gets the appearance stream for a field
-func GetFieldAppearance(field *Field, pdfBytes []byte, encryptInfo *types.PDFEncryption, verbose bool) ([]byte, error) {
-	// Get field object
-	fieldData, err := parse.GetObject(pdfBytes, field.ObjectNum, encryptInfo, false)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get field object: %w", err)
+// flattenFmtF formats a float64 for content stream use, dropping redundant zeros.
+func flattenFmtF(f float64) string {
+	s := strconv.FormatFloat(f, 'f', 6, 64)
+	if strings.Contains(s, ".") {
+		s = strings.TrimRight(s, "0")
+		s = strings.TrimRight(s, ".")
+	}
+	return s
+}
+
+func flattenGetPageNums(contents map[int][]byte, rootNum int) ([]int, error) {
+	pagesRE := regexp.MustCompile(`/Pages\s+(\d+)\s+\d+\s+R`)
+	m := pagesRE.FindStringSubmatch(string(contents[rootNum]))
+	if m == nil {
+		return nil, fmt.Errorf("no /Pages reference in catalog")
+	}
+	pagesNum, _ := strconv.Atoi(m[1])
+	return flattenWalkTree(contents, pagesNum), nil
+}
+
+func flattenWalkTree(contents map[int][]byte, num int) []int {
+	s := string(contents[num])
+	// Match /Type/Page but NOT /Type/Pages (both have /Type/Page as a prefix).
+	if (strings.Contains(s, "/Type/Page") || strings.Contains(s, "/Type /Page")) &&
+		!strings.Contains(s, "/Type/Pages") && !strings.Contains(s, "/Type /Pages") {
+		return []int{num}
+	}
+	kidsRE := regexp.MustCompile(`/Kids\s*\[([^\]]*)\]`)
+	km := kidsRE.FindStringSubmatch(s)
+	if km == nil {
+		return nil
+	}
+	refRE := regexp.MustCompile(`(\d+)\s+\d+\s+R`)
+	var pages []int
+	for _, r := range refRE.FindAllStringSubmatch(km[1], -1) {
+		n, _ := strconv.Atoi(r[1])
+		pages = append(pages, flattenWalkTree(contents, n)...)
+	}
+	return pages
+}
+
+func flattenGetAnnotNums(pageDict string) []int {
+	annotsRE := regexp.MustCompile(`/Annots\s*\[([^\]]*)\]`)
+	m := annotsRE.FindStringSubmatch(pageDict)
+	if m == nil {
+		return nil
+	}
+	refRE := regexp.MustCompile(`(\d+)\s+\d+\s+R`)
+	nums := make([]int, 0)
+	for _, r := range refRE.FindAllStringSubmatch(m[1], -1) {
+		n, _ := strconv.Atoi(r[1])
+		nums = append(nums, n)
+	}
+	return nums
+}
+
+// flattenGetAPNObjNum returns the object number of the widget's /AP/N appearance
+// stream, or 0 if there is no renderable appearance.
+//
+// Two forms are handled:
+//   - Direct: /AP<</N N G R>> — used by text/choice fields.
+//   - Sub-dict: /AP<</N<</State N G R/Off M G R>>>> with /AS /State — used by
+//     checkboxes and radio buttons. "Off" state returns 0 (nothing to draw).
+func flattenGetAPNObjNum(widgetDict string) int {
+	// Case 1: /AP<</N N G R [/D ...]>>
+	directRE := regexp.MustCompile(`/AP\s*<<[^<>]*/N\s+(\d+)\s+\d+\s+R`)
+	if m := directRE.FindStringSubmatch(widgetDict); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		return n
+	}
+	// Case 2: /AP<</N<</State N G R/Off M G R>>>>
+	asRE := regexp.MustCompile(`/AS\s*/([^/<>\s]+)`)
+	asM := asRE.FindStringSubmatch(widgetDict)
+	if asM == nil {
+		return 0
+	}
+	state := asM[1]
+	if state == "Off" || state == "" {
+		return 0
+	}
+	apNRE := regexp.MustCompile(`/N\s*<<([^<>]*)>>`)
+	apNM := apNRE.FindStringSubmatch(widgetDict)
+	if apNM == nil {
+		return 0
+	}
+	stateRE := regexp.MustCompile(`/` + regexp.QuoteMeta(state) + `\s+(\d+)\s+\d+\s+R`)
+	stateM := stateRE.FindStringSubmatch(apNM[1])
+	if stateM == nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(stateM[1])
+	return n
+}
+
+func flattenParseRect(widgetDict string) [4]float64 {
+	rectRE := regexp.MustCompile(`/Rect\s*\[\s*([^\]]*)\]`)
+	m := rectRE.FindStringSubmatch(widgetDict)
+	if m == nil {
+		return [4]float64{}
+	}
+	nums := strings.Fields(m[1])
+	var rect [4]float64
+	for i, s := range nums {
+		if i >= 4 {
+			break
+		}
+		rect[i], _ = strconv.ParseFloat(s, 64)
+	}
+	return rect
+}
+
+func flattenParseBBox(xobjContent string) [4]float64 {
+	bboxRE := regexp.MustCompile(`/BBox\s*\[\s*([^\]]*)\]`)
+	m := bboxRE.FindStringSubmatch(xobjContent)
+	if m == nil {
+		return [4]float64{0, 0, 1, 1}
+	}
+	nums := strings.Fields(m[1])
+	var bbox [4]float64
+	for i, s := range nums {
+		if i >= 4 {
+			break
+		}
+		bbox[i], _ = strconv.ParseFloat(s, 64)
+	}
+	return bbox
+}
+
+func flattenClearAnnots(pageDict string) string {
+	return regexp.MustCompile(`/Annots\s*\[[^\]]*\]`).ReplaceAllString(pageDict, "")
+}
+
+func flattenAppendContents(pageDict string, newObjNum int) string {
+	contentsRE := regexp.MustCompile(`/Contents\s*(\[[^\]]*\]|\d+\s+\d+\s+R)`)
+	m := contentsRE.FindStringSubmatch(pageDict)
+	if m == nil {
+		return pageDict
+	}
+	existing := strings.TrimSpace(m[1])
+	var newContents string
+	if strings.HasPrefix(existing, "[") {
+		inner := strings.TrimSpace(existing[1 : len(existing)-1])
+		newContents = fmt.Sprintf("[%s %d 0 R]", inner, newObjNum)
+	} else {
+		newContents = fmt.Sprintf("[%s %d 0 R]", existing, newObjNum)
+	}
+	return strings.Replace(pageDict, m[0], "/Contents "+newContents, 1)
+}
+
+// flattenAddXObjects injects XObject resource entries into the page dict's
+// /Resources /XObject sub-dict, creating the sub-dict if it does not exist.
+// Assumes /Resources is an inline dict (indirect resource refs are not handled).
+func flattenAddXObjects(pageDict string, xobjs map[string]int) string {
+	if len(xobjs) == 0 {
+		return pageDict
+	}
+	var entries strings.Builder
+	for alias, num := range xobjs {
+		fmt.Fprintf(&entries, "/%s %d 0 R", alias, num)
+	}
+	newEntries := entries.String()
+
+	// If /XObject already exists, inject into it.
+	xobjRE := regexp.MustCompile(`/XObject\s*<<([^<>]*)>>`)
+	if xobjRE.MatchString(pageDict) {
+		return xobjRE.ReplaceAllStringFunc(pageDict, func(match string) string {
+			idx := strings.LastIndex(match, ">>")
+			if idx == -1 {
+				return match
+			}
+			return match[:idx] + newEntries + ">>"
+		})
 	}
 
-	fieldStr := string(fieldData)
-
-	// Find /AP dictionary
-	apPattern := regexp.MustCompile(`/AP\s*<<([^>]*)>>`)
-	apMatch := apPattern.FindStringSubmatch(fieldStr)
-	if apMatch == nil {
-		return nil, fmt.Errorf("no appearance stream found for field")
+	// No existing /XObject: find the end of the /Resources dict and inject before it.
+	resIdx := strings.Index(pageDict, "/Resources")
+	if resIdx == -1 {
+		return pageDict
 	}
-
-	// Find /N (normal appearance) stream reference
-	nPattern := regexp.MustCompile(`/N\s+(\d+)\s+(\d+)\s+R`)
-	nMatch := nPattern.FindStringSubmatch(apMatch[1])
-	if nMatch == nil {
-		return nil, fmt.Errorf("no normal appearance stream found")
+	ddStart := strings.Index(pageDict[resIdx:], "<<")
+	if ddStart == -1 {
+		return pageDict
 	}
-
-	appearanceObjNum, _ := strconv.Atoi(nMatch[1])
-	_ = nMatch[2] // Generation number (usually 0)
-
-	// Get appearance stream
-	appearanceData, err := parse.GetObject(pdfBytes, appearanceObjNum, encryptInfo, false)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get appearance stream: %w", err)
+	i := resIdx + ddStart + 2
+	depth := 1
+	for i < len(pageDict)-1 && depth > 0 {
+		if pageDict[i] == '<' && pageDict[i+1] == '<' {
+			depth++
+			i += 2
+		} else if pageDict[i] == '>' && pageDict[i+1] == '>' {
+			depth--
+			if depth == 0 {
+				return pageDict[:i] + "/XObject<<" + newEntries + ">>" + pageDict[i:]
+			}
+			i += 2
+		} else {
+			i++
+		}
 	}
-
-	// Extract stream data (if it's a stream object)
-	streamPattern := regexp.MustCompile(`stream\s*\n(.*?)\nendstream`)
-	streamMatch := streamPattern.FindStringSubmatch(string(appearanceData))
-	if streamMatch != nil {
-		return []byte(streamMatch[1]), nil
-	}
-
-	return appearanceData, nil
+	return pageDict
 }
