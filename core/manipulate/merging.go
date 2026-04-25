@@ -40,10 +40,19 @@ func MergePDFs(pdfBytesList [][]byte, passwords [][]byte, verbose bool) ([]byte,
 			return nil, fmt.Errorf("failed to get pages from PDF %d: %w", pdfIdx+1, err)
 		}
 
-		// Copy all objects from this PDF to the merged PDF
-		// Need to remap object numbers to avoid conflicts
+		// Copy all objects from this PDF to the merged PDF, remapping object
+		// numbers to avoid collisions.  Two passes are required: the first builds
+		// the complete remap table so that forward references (object A referencing
+		// object B, where B appears later in the iteration) are resolved correctly.
 		objNumMap := make(map[int]int) // old objNum -> new objNum
 
+		// Pass 1: assign new object numbers without reading content.
+		for _, objNum := range pdf.Objects() {
+			objNumMap[objNum] = nextObjNum
+			nextObjNum++
+		}
+
+		// Pass 2: copy content with fully-resolved reference remapping.
 		for _, objNum := range pdf.Objects() {
 			obj, err := pdf.GetObject(objNum)
 			if err != nil {
@@ -53,16 +62,10 @@ func MergePDFs(pdfBytesList [][]byte, passwords [][]byte, verbose bool) ([]byte,
 				continue
 			}
 
-			newObjNum := nextObjNum
-			nextObjNum++
-			objNumMap[objNum] = newObjNum
-
-			// Update object references in the content
-			updatedObj := updateObjectReferences(obj, objNumMap, pdfIdx == 0)
-
+			newObjNum := objNumMap[objNum]
+			updatedObj := updateObjectReferences(obj, objNumMap)
 			writer.SetObject(newObjNum, updatedObj)
 
-			// If this is a page object, add it to our pages list
 			for _, pageObjNum := range pageObjNums {
 				if objNum == pageObjNum {
 					allPageObjNums = append(allPageObjNums, newObjNum)
@@ -167,7 +170,7 @@ func extractPageObjectNumbersFromPDF(pdf *parse.PDF, pagesObjNum int) ([]int, er
 
 // updateObjectReferences updates object references in a PDF object string
 // objNumMap maps old object numbers to new object numbers
-func updateObjectReferences(obj []byte, objNumMap map[int]int, isFirstPDF bool) []byte {
+func updateObjectReferences(obj []byte, objNumMap map[int]int) []byte {
 	objStr := string(obj)
 
 	// Find all object references (pattern: "5 0 R")
@@ -178,14 +181,9 @@ func updateObjectReferences(obj []byte, objNumMap map[int]int, isFirstPDF bool) 
 		var objNum, genNum int
 		fmt.Sscanf(match, "%d %d R", &objNum, &genNum)
 
-		// Check if we need to remap this reference
 		if newObjNum, ok := objNumMap[objNum]; ok {
 			return fmt.Sprintf("%d 0 R", newObjNum)
 		}
-
-		// For first PDF, keep original references (they're already in the map)
-		// For subsequent PDFs, references to objects not in the map should be updated
-		// For now, return as-is (this is a simplified version)
 		return match
 	})
 

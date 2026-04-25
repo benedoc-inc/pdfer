@@ -16,10 +16,14 @@ type RedactBox struct {
 }
 
 // Redact permanently removes content within the specified regions and replaces
-// each area with an opaque black rectangle. It decodes the existing content
-// streams, rewrites them to suppress operators that draw inside the redaction
-// boxes, and overwrites the original stream objects so the content is not
-// recoverable from within the stream data.
+// each area with an opaque black rectangle. It:
+//   - rewrites page content streams to suppress text/path operators inside boxes
+//   - zeros out image XObject streams whose placement overlaps a box
+//   - zeros out annotation objects (text, links, highlights, etc.) whose /Rect
+//     overlaps a box
+//
+// XMP metadata and /Info dictionary entries are not cleared by this call; call
+// RedactMetadata separately for document-level metadata.
 //
 // Note: PDF incremental updates may contain prior revisions. Supply a clean
 // (already-repaired/flattened) source PDF for full forensic redaction; or call
@@ -93,7 +97,8 @@ func (m *PDFManipulator) redactPage(pageObjNum int, boxes [][4]float64) error {
 	}
 
 	// Rewrite the stream, suppressing redacted content.
-	rewritten := redactContentStream(combined.String(), boxes)
+	suppressedXObjs := make(map[string]bool)
+	rewritten := redactContentStream(combined.String(), boxes, suppressedXObjs)
 
 	// Append opaque fill rectangles as an overlay.
 	var overlay strings.Builder
@@ -125,7 +130,135 @@ func (m *PDFManipulator) redactPage(pageObjNum int, boxes [][4]float64) error {
 		m.objects[pageObjNum] = []byte(pageStr)
 	}
 
+	// Zero out image XObject data for every image whose placement was suppressed.
+	for name := range suppressedXObjs {
+		m.zeroXObjectStream(pageObjNum, name)
+	}
+
+	// Zero out annotation objects whose /Rect overlaps any redaction box.
+	m.redactPageAnnotations(pageObjNum, boxes)
+
 	return nil
+}
+
+// redactPageAnnotations zeros out annotation objects whose /Rect overlaps any
+// of the given boxes. The /Annots array in the page dict is left intact; the
+// referenced objects are replaced with empty dicts so the data is unrecoverable.
+func (m *PDFManipulator) redactPageAnnotations(pageObjNum int, boxes [][4]float64) {
+	pageStr := string(m.objects[pageObjNum])
+
+	annotsRaw := extractDictValue(pageStr, "/Annots")
+	if annotsRaw == "" {
+		return
+	}
+
+	// /Annots can be an inline array "[N G R ...]" or an indirect ref "N G R".
+	annotsStr := annotsRaw
+	indirectRE := regexp.MustCompile(`^(\d+)\s+\d+\s+R$`)
+	if m2 := indirectRE.FindStringSubmatch(strings.TrimSpace(annotsRaw)); m2 != nil {
+		n, _ := strconv.Atoi(m2[1])
+		if obj, ok := m.objects[n]; ok {
+			s := string(obj)
+			start := strings.Index(s, "[")
+			end := strings.LastIndex(s, "]")
+			if start >= 0 && end > start {
+				annotsStr = s[start : end+1]
+			}
+		}
+	}
+
+	refRE := regexp.MustCompile(`(\d+)\s+\d+\s+R`)
+	for _, ref := range refRE.FindAllStringSubmatch(annotsStr, -1) {
+		annotObjNum, _ := strconv.Atoi(ref[1])
+		annotObj, ok := m.objects[annotObjNum]
+		if !ok {
+			continue
+		}
+		rectStr := extractDictValue(string(annotObj), "/Rect")
+		llx, lly, urx, ury, ok2 := parseRectArray(rectStr)
+		if !ok2 {
+			continue
+		}
+		if redactBBoxOverlap(llx, lly, urx, ury, boxes) {
+			genNum := redactGenNum(annotObj)
+			m.objects[annotObjNum] = []byte(fmt.Sprintf("%d %d obj\n<<>>\nendobj\n", annotObjNum, genNum))
+		}
+	}
+}
+
+// zeroXObjectStream resolves an XObject name to its object number via the page's
+// resource dictionary and replaces its stream with a 1×1 black pixel so that
+// no image data remains.
+func (m *PDFManipulator) zeroXObjectStream(pageObjNum int, xobjName string) {
+	objNum := m.xObjectObjNum(pageObjNum, xobjName)
+	if objNum == 0 {
+		return
+	}
+	target, ok := m.objects[objNum]
+	if !ok {
+		return
+	}
+	ts := string(target)
+	if !strings.Contains(ts, "/Subtype/Image") && !strings.Contains(ts, "/Subtype /Image") {
+		return
+	}
+	genNum := redactGenNum(target)
+	m.objects[objNum] = []byte(fmt.Sprintf(
+		"%d %d obj\n<</Type/XObject/Subtype/Image/Width 1/Height 1/ColorSpace/DeviceGray/BitsPerComponent 8/Length 1>>\nstream\n\x00\nendstream\nendobj\n",
+		objNum, genNum))
+}
+
+// xObjectObjNum resolves an XObject resource name to its object number by
+// searching the page dict and (if needed) an indirect /Resources object.
+func (m *PDFManipulator) xObjectObjNum(pageObjNum int, xobjName string) int {
+	search := []string{string(m.objects[pageObjNum])}
+
+	// Follow indirect /Resources if present.
+	resVal := extractDictValue(search[0], "/Resources")
+	if resVal != "" {
+		refRE := regexp.MustCompile(`^(\d+)\s+\d+\s+R$`)
+		if m2 := refRE.FindStringSubmatch(strings.TrimSpace(resVal)); m2 != nil {
+			n, _ := strconv.Atoi(m2[1])
+			if obj, ok := m.objects[n]; ok {
+				search = append(search, string(obj))
+			}
+		}
+	}
+
+	// Look for "/<name> N G R" in the search set.
+	pat := regexp.MustCompile(`(?:^|[\s/<>])` + regexp.QuoteMeta("/"+xobjName) + `\s+(\d+)\s+\d+\s+R`)
+	for _, s := range search {
+		if m2 := pat.FindStringSubmatch(s); m2 != nil {
+			n, _ := strconv.Atoi(m2[1])
+			return n
+		}
+	}
+	return 0
+}
+
+// parseRectArray parses a PDF array string "[x1 y1 x2 y2]" into four floats.
+func parseRectArray(s string) (llx, lly, urx, ury float64, ok bool) {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 || s[0] != '[' {
+		return 0, 0, 0, 0, false
+	}
+	end := strings.Index(s, "]")
+	if end < 1 {
+		return 0, 0, 0, 0, false
+	}
+	parts := strings.Fields(s[1:end])
+	if len(parts) < 4 {
+		return 0, 0, 0, 0, false
+	}
+	v := [4]float64{}
+	for i := 0; i < 4; i++ {
+		f, err := strconv.ParseFloat(parts[i], 64)
+		if err != nil {
+			return 0, 0, 0, 0, false
+		}
+		v[i] = f
+	}
+	return v[0], v[1], v[2], v[3], true
 }
 
 // redactDecodeStream extracts and decompresses stream data from raw object bytes.
@@ -184,8 +317,9 @@ func redactGenNum(objBytes []byte) int {
 // ---- Content stream rewriter -----------------------------------------------
 
 // redactContentStream rewrites a PDF content stream, suppressing operators
-// that draw within any of the given bounding boxes.
-func redactContentStream(content string, boxes [][4]float64) string {
+// that draw within any of the given bounding boxes. If suppressedXObjs is
+// non-nil, XObject names whose Do invocation is suppressed are recorded there.
+func redactContentStream(content string, boxes [][4]float64, suppressedXObjs map[string]bool) string {
 	tokens := redactTokenize(content)
 
 	var out strings.Builder
@@ -482,16 +616,12 @@ func redactContentStream(content string, boxes [][4]float64) string {
 
 		// ---- XObject invocation ----
 		case "Do":
-			// Check if the XObject's origin (0,0 transformed by CTM) overlaps a box.
-			// This is a heuristic: the XObject could be any size, but checking the
-			// CTM translation gives the anchor point.
-			ox, oy := ctm[4], ctm[5]
-			suppress := false
-			for _, box := range boxes {
-				if ox >= box[0] && ox <= box[2] && oy >= box[1] && oy <= box[3] {
-					suppress = true
-					break
-				}
+			// Transform the unit square through the current CTM to get the image's
+			// bounding box in page space, then check against redaction boxes.
+			minX, minY, maxX, maxY := imageCtmBBox(ctm)
+			suppress := redactBBoxOverlap(minX, minY, maxX, maxY, boxes)
+			if suppress && suppressedXObjs != nil && len(ops) > 0 {
+				suppressedXObjs[strings.TrimPrefix(ops[len(ops)-1], "/")] = true
 			}
 			if !suppress {
 				emit("Do")
@@ -713,4 +843,31 @@ func redactScanArray(s string, i int) int {
 		i++
 	}
 	return i
+}
+
+// imageCtmBBox returns the axis-aligned bounding box of the unit square [0,1]²
+// transformed by ctm. When an image XObject is invoked with Do, the CTM maps
+// the unit square to the image's page-space footprint.
+func imageCtmBBox(ctm [6]float64) (minX, minY, maxX, maxY float64) {
+	a, b, c, d, e, f := ctm[0], ctm[1], ctm[2], ctm[3], ctm[4], ctm[5]
+	// Four corners of the unit square mapped through the CTM.
+	xs := [4]float64{e, a + e, c + e, a + c + e}
+	ys := [4]float64{f, b + f, d + f, b + d + f}
+	minX, maxX = xs[0], xs[0]
+	minY, maxY = ys[0], ys[0]
+	for i := 1; i < 4; i++ {
+		if xs[i] < minX {
+			minX = xs[i]
+		}
+		if xs[i] > maxX {
+			maxX = xs[i]
+		}
+		if ys[i] < minY {
+			minY = ys[i]
+		}
+		if ys[i] > maxY {
+			maxY = ys[i]
+		}
+	}
+	return
 }

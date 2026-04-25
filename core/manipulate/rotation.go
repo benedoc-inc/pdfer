@@ -74,6 +74,30 @@ func (m *PDFManipulator) RotateAllPages(angle int) error {
 	return nil
 }
 
+// RotatePage rotates a single page in pdfBytes by angle degrees (90, 180, or 270).
+func RotatePage(pdfBytes []byte, pageNumber, angle int, password []byte, verbose bool) ([]byte, error) {
+	m, err := NewPDFManipulator(pdfBytes, password, verbose)
+	if err != nil {
+		return nil, fmt.Errorf("rotate page: %w", err)
+	}
+	if err := m.RotatePage(pageNumber, angle); err != nil {
+		return nil, err
+	}
+	return m.Rebuild()
+}
+
+// RotateAllPages rotates every page in pdfBytes by angle degrees (90, 180, or 270).
+func RotateAllPages(pdfBytes []byte, angle int, password []byte, verbose bool) ([]byte, error) {
+	m, err := NewPDFManipulator(pdfBytes, password, verbose)
+	if err != nil {
+		return nil, fmt.Errorf("rotate all pages: %w", err)
+	}
+	if err := m.RotateAllPages(angle); err != nil {
+		return nil, err
+	}
+	return m.Rebuild()
+}
+
 // getPageObjectNumber gets the object number for a given page (1-based)
 func (m *PDFManipulator) getPageObjectNumber(pageNumber int) (int, error) {
 	pageObjNums, err := m.getAllPageObjectNumbers()

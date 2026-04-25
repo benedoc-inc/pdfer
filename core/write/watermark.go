@@ -44,20 +44,14 @@ func (pb *PageBuilder) AddWatermark(options *WatermarkOptions) error {
 	// Save graphics state
 	pb.content.SaveState()
 
-	// Set opacity using ExtGState (if opacity < 1.0)
+	// Set true transparency via ExtGState /ca (fill alpha) and /CA (stroke alpha)
 	if options.Opacity < 1.0 {
-		// For simplicity, we'll use the gs operator with an ExtGState
-		// For now, just set color with reduced opacity by adjusting RGB
-		// Full ExtGState support would require adding it to resources
-		opacity := options.Opacity
-		pb.content.SetFillColorRGB(
-			options.Color.R*opacity,
-			options.Color.G*opacity,
-			options.Color.B*opacity,
-		)
-	} else {
-		pb.content.SetFillColorRGB(options.Color.R, options.Color.G, options.Color.B)
+		gsName := "WMgs"
+		gsDict := fmt.Sprintf("<</Type/ExtGState/ca %.4f/CA %.4f>>", options.Opacity, options.Opacity)
+		pb.addExtGState(gsName, gsDict)
+		pb.content.SetExtGState(gsName)
 	}
+	pb.content.SetFillColorRGB(options.Color.R, options.Color.G, options.Color.B)
 
 	// Calculate center if not specified
 	centerX := options.X

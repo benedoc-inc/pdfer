@@ -14,15 +14,43 @@ import (
 
 // OIDs required for CMS/PKCS#7 detached signatures.
 var (
-	oidData            = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 1}
-	oidSignedData      = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 2}
-	oidSHA256          = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 1}
-	oidRSAEncryption   = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 1}
-	oidECDSAWithSHA256 = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 2}
-	oidContentType     = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 3}
-	oidMessageDigest   = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 4}
-	oidSigningTime     = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 5}
+	oidData                  = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 1}
+	oidSignedData            = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 2}
+	oidSHA256                = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 1}
+	oidRSAEncryption         = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 1}
+	oidECDSAWithSHA256       = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 2}
+	oidContentType           = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 3}
+	oidMessageDigest         = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 4}
+	oidSigningTime           = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 5}
+	oidSigTimeStampToken     = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 16, 2, 14}
 )
+
+// derOIDs holds pre-computed DER encodings of the OIDs used in PKCS#7
+// structures. Populated once at init; asn1.Marshal on a valid, non-nil OID
+// cannot fail, so any error here indicates a compile-time constant bug.
+var derOIDs struct {
+	data, signedData, sha256, rsaEncryption, ecdsaWithSHA256 []byte
+	contentType, messageDigest, signingTime, sigTimeStampToken []byte
+}
+
+func init() {
+	enc := func(oid asn1.ObjectIdentifier) []byte {
+		b, err := asn1.Marshal(oid)
+		if err != nil {
+			panic(fmt.Sprintf("pkcs7 init: marshal OID %v: %v", oid, err))
+		}
+		return b
+	}
+	derOIDs.data = enc(oidData)
+	derOIDs.signedData = enc(oidSignedData)
+	derOIDs.sha256 = enc(oidSHA256)
+	derOIDs.rsaEncryption = enc(oidRSAEncryption)
+	derOIDs.ecdsaWithSHA256 = enc(oidECDSAWithSHA256)
+	derOIDs.contentType = enc(oidContentType)
+	derOIDs.messageDigest = enc(oidMessageDigest)
+	derOIDs.signingTime = enc(oidSigningTime)
+	derOIDs.sigTimeStampToken = enc(oidSigTimeStampToken)
+}
 
 // derLen encodes a DER length field.
 func derLen(n int) []byte {
@@ -63,113 +91,101 @@ func cat(parts ...[]byte) []byte {
 	return out
 }
 
-// marshalOID returns the DER encoding of an OID.
-func marshalOID(oid asn1.ObjectIdentifier) []byte {
-	b, err := asn1.Marshal(oid)
-	if err != nil {
-		panic(fmt.Sprintf("marshal oid: %v", err))
-	}
-	return b
-}
-
 // algID encodes AlgorithmIdentifier { oid, NULL }.
 // RSA algorithm identifiers conventionally include a NULL parameters field.
-func algID(oid asn1.ObjectIdentifier) []byte {
-	return derSequence(marshalOID(oid), []byte{0x05, 0x00})
+func algID(derOID []byte) []byte {
+	return derSequence(derOID, []byte{0x05, 0x00})
 }
 
 // algIDNoParams encodes AlgorithmIdentifier { oid } with no parameters field.
 // ECDSA algorithm identifiers (ecdsa-with-SHA256 etc.) MUST omit parameters.
-func algIDNoParams(oid asn1.ObjectIdentifier) []byte {
-	return derSequence(marshalOID(oid))
+func algIDNoParams(derOID []byte) []byte {
+	return derSequence(derOID)
 }
 
 // attr encodes a PKCS#9 attribute: SEQUENCE { OID, SET { value... } }.
-func attr(oid asn1.ObjectIdentifier, values ...[]byte) []byte {
-	return derSequence(marshalOID(oid), derSet(values...))
+func attr(derOID []byte, values ...[]byte) []byte {
+	return derSequence(derOID, derSet(values...))
 }
 
-// buildDetachedPKCS7 produces a CMS SignedData detached signature.
-//
-// digest is SHA-256 of the byte ranges to be signed (the two regions outside
-// the /Contents hex string). The signature is detached — no content is
-// embedded in the structure.
-func buildDetachedPKCS7(cert *x509.Certificate, key crypto.Signer, digest []byte, t time.Time) ([]byte, error) {
+// pkcs7Context holds the intermediate state produced by preparePKCS7.
+// Use assemblePKCS7 to build the final DER bytes.
+type pkcs7Context struct {
+	signedAttrsImplicit []byte // [0] IMPLICIT signed attributes (for SignerInfo)
+	sigAlgDER           []byte // AlgorithmIdentifier for the signature algorithm
+	sigValue            []byte // raw signature bytes (RSA PKCS#1 or ECDSA DER)
+	issuerAndSerial     []byte // IssuerAndSerialNumber for SignerIdentifier
+	certsDER            []byte // [0] IMPLICIT certificates block
+}
+
+// preparePKCS7 computes the signed attributes and signature value exactly once.
+// The returned context can be passed to assemblePKCS7, optionally with a TSA token.
+func preparePKCS7(cert *x509.Certificate, key crypto.Signer, digest []byte, t time.Time) (*pkcs7Context, error) {
 	// ---- signed attributes ----
-	// id-contentType { id-data }
 	contentTypeAttrVal, _ := asn1.Marshal(oidData)
-	contentTypeAttr := attr(oidContentType, contentTypeAttrVal)
-
-	// id-messageDigest { OCTET STRING(digest) }
 	digestAttrVal, _ := asn1.Marshal(digest)
-	digestAttr := attr(oidMessageDigest, digestAttrVal)
-
-	// id-signingTime { UTCTime }
 	signingTimeAttrVal, _ := asn1.Marshal(t.UTC())
-	signingTimeAttr := attr(oidSigningTime, signingTimeAttrVal)
 
-	// The inner content of signedAttrs (concatenated attribute encodings).
-	// This content gets wrapped in two different outer tags:
-	//   0x31  (SET)   — for computing the hash that RSA signs
-	//   0xa0  ([0])   — for embedding in SignerInfo
-	attrsContent := cat(contentTypeAttr, digestAttr, signingTimeAttr)
+	attrsContent := cat(
+		attr(derOIDs.contentType, contentTypeAttrVal),
+		attr(derOIDs.messageDigest, digestAttrVal),
+		attr(derOIDs.signingTime, signingTimeAttrVal),
+	)
 
 	// Hash the SET-wrapped attrs (per PKCS#7 §9.3).
-	signedAttrsForSigning := derWrap(0x31, attrsContent)
-	h := sha256.Sum256(signedAttrsForSigning)
+	h := sha256.Sum256(derWrap(0x31, attrsContent))
 	sig, err := key.Sign(rand.Reader, h[:], crypto.SHA256)
 	if err != nil {
-		return nil, fmt.Errorf("RSA sign: %w", err)
+		return nil, fmt.Errorf("sign: %w", err)
 	}
 
-	// [0] IMPLICIT tag for embedding in SignerInfo.
-	signedAttrsImplicit := derContextImplicit(0, attrsContent)
-
-	// ---- SignerInfo ----
-	// Choose signature AlgorithmIdentifier based on key type.
-	// ECDSA: ecdsa-with-SHA256 with no parameters (RFC 5754 §3.2).
-	// RSA:   rsaEncryption with NULL parameters (PKCS#1).
 	var sigAlgDER []byte
 	switch key.Public().(type) {
 	case *ecdsa.PublicKey:
-		sigAlgDER = algIDNoParams(oidECDSAWithSHA256)
+		sigAlgDER = algIDNoParams(derOIDs.ecdsaWithSHA256)
 	default:
-		sigAlgDER = algID(oidRSAEncryption)
+		sigAlgDER = algID(derOIDs.rsaEncryption)
 	}
 
-	version1, _ := asn1.Marshal(1)
 	serialDER, _ := asn1.Marshal(cert.SerialNumber)
-	issuerAndSerial := derSequence(cert.RawIssuer, serialDER)
-	sigOctet, _ := asn1.Marshal(sig)
+	return &pkcs7Context{
+		signedAttrsImplicit: derContextImplicit(0, attrsContent),
+		sigAlgDER:           sigAlgDER,
+		sigValue:            sig,
+		issuerAndSerial:     derSequence(cert.RawIssuer, serialDER),
+		certsDER:            derContextImplicit(0, cert.Raw),
+	}, nil
+}
 
-	signerInfo := derSequence(
+// assemblePKCS7 builds the final CMS ContentInfo DER from a prepared signing
+// context. tsaToken, if non-nil, is embedded as the id-aa-signatureTimeStampToken
+// unsigned attribute in SignerInfo (RFC 3161 §3.4).
+func assemblePKCS7(ctx *pkcs7Context, tsaToken []byte) []byte {
+	version1, _ := asn1.Marshal(1)
+	sigOctet, _ := asn1.Marshal(ctx.sigValue)
+
+	signerInfoParts := [][]byte{
 		version1,
-		issuerAndSerial,
-		algID(oidSHA256),
-		signedAttrsImplicit,
-		sigAlgDER,
+		ctx.issuerAndSerial,
+		algID(derOIDs.sha256),
+		ctx.signedAttrsImplicit,
+		ctx.sigAlgDER,
 		sigOctet,
-	)
+	}
+	if len(tsaToken) > 0 {
+		// unsignedAttrs [1] IMPLICIT containing the timestamp token attribute.
+		tsaAttr := attr(derOIDs.sigTimeStampToken, tsaToken)
+		signerInfoParts = append(signerInfoParts, derContextImplicit(1, tsaAttr))
+	}
 
-	// ---- SignedData ----
 	sdVersion, _ := asn1.Marshal(1)
-
-	// encapContentInfo: SEQUENCE { id-data }  (no content — detached)
-	encapContentInfo := derSequence(marshalOID(oidData))
-
-	// certificates: [0] IMPLICIT containing one DER certificate
-	certsDER := derContextImplicit(0, cert.Raw)
-
 	signedData := derSequence(
 		sdVersion,
-		derSet(algID(oidSHA256)), // digestAlgorithms
-		encapContentInfo,
-		certsDER,
-		derSet(signerInfo), // signerInfos
+		derSet(algID(derOIDs.sha256)),
+		derSequence(derOIDs.data), // encapContentInfo (detached)
+		ctx.certsDER,
+		derSet(derSequence(signerInfoParts...)),
 	)
-
-	// ---- ContentInfo ----
-	oidSignedDataDER := marshalOID(oidSignedData)
-	contentExplicit := derContextImplicit(0, signedData)
-	return derSequence(oidSignedDataDER, contentExplicit), nil
+	return derSequence(derOIDs.signedData, derContextImplicit(0, signedData))
 }
+

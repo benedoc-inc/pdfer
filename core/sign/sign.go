@@ -28,9 +28,26 @@ const (
 	byteRangePlaceholder = "[0000000000 0000000000 0000000000 0000000000]"
 
 	// reservedSigBytes is the number of bytes reserved for the PKCS#7 DER
-	// encoding (hex-encoded → reservedSigBytes*2 characters in /Contents).
+	// encoding (hex-encoded → N*2 characters in /Contents).
 	reservedSigBytes = 8192
+
+	// reservedSigBytesWithTSA is the reservation used when a TSA token will be
+	// embedded. A typical PKCS#7 is ~2KB; a TSA token adds ~2–4KB.
+	reservedSigBytesWithTSA = 20480
 )
+
+// SignAppearance defines the visual rendering of a signature widget on the page.
+// When set in SignOptions, the widget becomes visible and displays the signer
+// name (from the certificate CommonName), signing date, and Reason if provided.
+// When nil (the default), the widget remains invisible (Rect [0 0 0 0]).
+type SignAppearance struct {
+	// X, Y are the lower-left corner of the signature box in default user space
+	// (points from the bottom-left of the page).
+	X, Y float64
+	// Width, Height are the dimensions of the signature box. Typical values:
+	// Width 200, Height 50.
+	Width, Height float64
+}
 
 // SignOptions configures PDF digital signature creation.
 type SignOptions struct {
@@ -44,8 +61,29 @@ type SignOptions struct {
 	// FieldName is the PDF field name for the signature widget. Defaults to "Signature1".
 	FieldName string
 
-	// Page is the 0-indexed page the invisible widget is wired to. Defaults to 0.
+	// Page is the 0-indexed page the widget is placed on. Defaults to 0.
 	Page int
+
+	// Appearance, when non-nil, renders a visible signature box on the page at
+	// the specified position. The box contains the signer name, signing date,
+	// and Reason (if set). When nil, the widget is invisible (Rect [0 0 0 0]).
+	Appearance *SignAppearance
+
+	// TSAEndpoint is the URL of an RFC 3161 Timestamp Authority. When set, the
+	// signature value is timestamped via an HTTP POST and the token is embedded
+	// as the id-aa-signatureTimeStampToken unsigned attribute (RFC 3161 §3.4).
+	// If empty, no timestamp is requested and behaviour is unchanged.
+	TSAEndpoint string
+
+	// CertChain is an optional chain of certificates (e.g. CA + intermediate)
+	// to embed in a /DSS (Document Security Store) incremental update after
+	// signing. Enables long-term validation without network access.
+	CertChain []*x509.Certificate
+
+	// OCSPResponse is an optional pre-fetched OCSP response (DER bytes) for the
+	// signing certificate. Embedded in /DSS alongside CertChain. Callers are
+	// responsible for fetching the response; the library embeds it as-is.
+	OCSPResponse []byte
 }
 
 // SignPDF appends a digital signature to pdfBytes using an incremental update.
@@ -92,6 +130,11 @@ func SignPDF(pdfBytes []byte, opts SignOptions) ([]byte, error) {
 	nextObjNum++
 	widgetObjNum := nextObjNum
 	nextObjNum++
+	var appObjNum int
+	if opts.Appearance != nil {
+		appObjNum = nextObjNum
+		nextObjNum++
+	}
 	var newAcroFormObjNum int
 	if !acroFormExists {
 		newAcroFormObjNum = nextObjNum
@@ -99,6 +142,12 @@ func SignPDF(pdfBytes []byte, opts SignOptions) ([]byte, error) {
 	}
 
 	signingTime := time.Now()
+
+	// Choose /Contents reservation size: larger when a TSA token will be embedded.
+	reserved := reservedSigBytes
+	if opts.TSAEndpoint != "" {
+		reserved = reservedSigBytesWithTSA
+	}
 
 	// ---- Build incremental update ----
 	var buf bytes.Buffer
@@ -118,7 +167,7 @@ func SignPDF(pdfBytes []byte, opts SignOptions) ([]byte, error) {
 	sigDictBuf.WriteString(byteRangePlaceholder)
 	sigDictBuf.WriteString("/Contents <")
 	contentsHexRelPos := sigDictBuf.Len() // position of first hex char
-	sigDictBuf.WriteString(strings.Repeat("0", reservedSigBytes*2))
+	sigDictBuf.WriteString(strings.Repeat("0", reserved*2))
 	contentsHexEndRelPos := sigDictBuf.Len() // position just past last hex char (= position of '>')
 	sigDictBuf.WriteByte('>')
 	if opts.Reason != "" {
@@ -142,11 +191,31 @@ func SignPDF(pdfBytes []byte, opts SignOptions) ([]byte, error) {
 	buf.Write(sigDictBuf.Bytes())
 	buf.WriteString("\nendobj\n")
 
-	// --- Widget annotation (invisible: /Rect [0 0 0 0]) ---
-	widgetDict := fmt.Sprintf(
-		"<</Type/Annot/Subtype/Widget/FT/Sig/Rect[0 0 0 0]/F 132/T(%s)/V %d 0 R/P %d 0 R>>",
-		escapePDFStr(opts.FieldName), sigDictObjNum, pageObjNum,
-	)
+	// --- Appearance stream (Form XObject) when a visible widget is requested ---
+	if opts.Appearance != nil {
+		ap := opts.Appearance
+		cn := opts.Certificate.Subject.CommonName
+		dateStr := signingTime.UTC().Format("2006-01-02 15:04:05 UTC")
+		appDict, appContent := buildAppearanceStream(ap.Width, ap.Height, cn, dateStr, opts.Reason)
+		offsets[appObjNum] = int64(buf.Len())
+		fmt.Fprintf(&buf, "%d 0 obj\n%s\nstream\n%sendstream\nendobj\n", appObjNum, appDict, appContent)
+	}
+
+	// --- Widget annotation ---
+	var widgetDict string
+	if opts.Appearance != nil {
+		ap := opts.Appearance
+		widgetDict = fmt.Sprintf(
+			"<</Type/Annot/Subtype/Widget/FT/Sig/Rect[%.4f %.4f %.4f %.4f]/F 4/T(%s)/V %d 0 R/P %d 0 R/AP<</N %d 0 R>>>>",
+			ap.X, ap.Y, ap.X+ap.Width, ap.Y+ap.Height,
+			escapePDFStr(opts.FieldName), sigDictObjNum, pageObjNum, appObjNum,
+		)
+	} else {
+		widgetDict = fmt.Sprintf(
+			"<</Type/Annot/Subtype/Widget/FT/Sig/Rect[0 0 0 0]/F 132/T(%s)/V %d 0 R/P %d 0 R>>",
+			escapePDFStr(opts.FieldName), sigDictObjNum, pageObjNum,
+		)
+	}
 	offsets[widgetObjNum] = int64(buf.Len())
 	fmt.Fprintf(&buf, "%d 0 obj\n", widgetObjNum)
 	buf.WriteString(widgetDict)
@@ -221,17 +290,37 @@ func SignPDF(pdfBytes []byte, opts SignOptions) ([]byte, error) {
 	h.Write(result[posGt+1:])
 	digest := h.Sum(nil)
 
-	pkcs7Bytes, err := buildDetachedPKCS7(opts.Certificate, opts.PrivateKey, digest, signingTime)
+	// Sign once; if a TSA endpoint is set, timestamp the signature value, then
+	// reassemble the PKCS#7 with the token as an unsigned attribute.
+	ctx, err := preparePKCS7(opts.Certificate, opts.PrivateKey, digest, signingTime)
 	if err != nil {
 		return nil, fmt.Errorf("build PKCS#7: %w", err)
 	}
-	if len(pkcs7Bytes) > reservedSigBytes {
-		return nil, fmt.Errorf("PKCS#7 size %d exceeds reserved %d bytes", len(pkcs7Bytes), reservedSigBytes)
+
+	var tsaToken []byte
+	if opts.TSAEndpoint != "" {
+		tsaToken, err = requestTSAToken(opts.TSAEndpoint, ctx.sigValue)
+		if err != nil {
+			return nil, fmt.Errorf("TSA timestamp: %w", err)
+		}
+	}
+
+	pkcs7Bytes := assemblePKCS7(ctx, tsaToken)
+	if len(pkcs7Bytes) > reserved {
+		return nil, fmt.Errorf("PKCS#7 size %d exceeds reserved %d bytes", len(pkcs7Bytes), reserved)
 	}
 
 	hexSig := strings.ToUpper(hex.EncodeToString(pkcs7Bytes))
-	hexSig += strings.Repeat("0", reservedSigBytes*2-len(hexSig))
+	hexSig += strings.Repeat("0", reserved*2-len(hexSig))
 	copy(result[contentsHexAbsPos:], hexSig)
+
+	// Append a /DSS incremental update for long-term validation if requested.
+	if len(opts.CertChain) > 0 || len(opts.OCSPResponse) > 0 {
+		result, err = appendDSS(result, pkcs7Bytes, opts.CertChain, opts.OCSPResponse)
+		if err != nil {
+			return nil, fmt.Errorf("append DSS: %w", err)
+		}
+	}
 
 	return result, nil
 }
@@ -476,6 +565,31 @@ func escapePDFStr(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// buildAppearanceStream returns the dict and content for a signature Form XObject.
+// The dict includes /BBox, /Resources (inline Helvetica font), and /Length.
+// The content stream draws a light border and shows signer name, date, and
+// optional reason using 8pt Helvetica.
+func buildAppearanceStream(width, height float64, cn, dateStr, reason string) (dict, content string) {
+	var cs strings.Builder
+	fmt.Fprintf(&cs, "q\n0.7 G\n0.5 w\n0.5 0.5 %.4f %.4f re\nS\n", width-1, height-1)
+	cs.WriteString("0 0 0 rg\nBT\n/F1 8 Tf\n")
+	y := height - 11.0
+	fmt.Fprintf(&cs, "4 %.4f Td\n(%s) Tj\n", y, escapePDFStr("Signed by: "+cn))
+	cs.WriteString("0 -10 Td\n")
+	fmt.Fprintf(&cs, "(%s) Tj\n", escapePDFStr("Date: "+dateStr))
+	if reason != "" {
+		cs.WriteString("0 -10 Td\n")
+		fmt.Fprintf(&cs, "(%s) Tj\n", escapePDFStr("Reason: "+reason))
+	}
+	cs.WriteString("ET\nQ\n")
+	content = cs.String()
+	dict = fmt.Sprintf(
+		"<</Type/XObject/Subtype/Form/BBox[0 0 %.4f %.4f]/Resources<</Font<</F1<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>>>>>/Length %d>>",
+		width, height, len(content),
+	)
+	return
 }
 
 // writeXRefSubsections writes xref entries grouped into contiguous subsections.

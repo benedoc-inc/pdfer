@@ -11,14 +11,15 @@ import (
 	"github.com/benedoc-inc/pdfer/types"
 )
 
-// DecryptPDF decrypts a PDF using the provided password
-// Returns decrypted PDF bytes and encryption info
-// Note: Implementation inspired by UniPDF but written from first principles
-func DecryptPDF(pdfBytes []byte, password []byte, verbose bool) ([]byte, *types.PDFEncryption, error) {
+// DecryptPDF verifies the password and derives the file encryption key.
+// Returns the populated encryption info (EncryptKey set) so callers can
+// decrypt individual objects on demand via DecryptObject.
+// To produce a fully decrypted PDF document use manipulate.DecryptPDF instead.
+func DecryptPDF(pdfBytes []byte, password []byte, verbose bool) (*types.PDFEncryption, error) {
 	// Parse encryption dictionary
 	encrypt, err := ParseEncryptionDictionary(pdfBytes, verbose)
 	if err != nil {
-		return nil, nil, types.WrapError(types.ErrCodeInvalidObject, "error parsing encryption dictionary", err)
+		return nil, types.WrapError(types.ErrCodeInvalidObject, "error parsing encryption dictionary", err)
 	}
 
 	if verbose {
@@ -35,7 +36,7 @@ func DecryptPDF(pdfBytes []byte, password []byte, verbose bool) ([]byte, *types.
 		// V5: Derive password key, verify U value, then unwrap actual encryption key from /UE
 		passwordKey, err := DeriveEncryptionKey(password, encrypt, fileID, verbose)
 		if err != nil {
-			return nil, nil, types.WrapError(types.ErrCodeDecryptionFailed, "error deriving password key", err)
+			return nil, types.WrapError(types.ErrCodeDecryptionFailed, "error deriving password key", err)
 		}
 
 		if verbose {
@@ -45,7 +46,7 @@ func DecryptPDF(pdfBytes []byte, password []byte, verbose bool) ([]byte, *types.
 		// Step 1: Verify U value to confirm password is correct
 		uMatch, err := VerifyUValueV5(password, passwordKey, encrypt, fileID, verbose)
 		if err != nil {
-			return nil, nil, types.WrapError(types.ErrCodeDecryptionFailed, "error verifying U value", err)
+			return nil, types.WrapError(types.ErrCodeDecryptionFailed, "error verifying U value", err)
 		}
 
 		if !uMatch {
@@ -73,14 +74,14 @@ func DecryptPDF(pdfBytes []byte, password []byte, verbose bool) ([]byte, *types.
 		}
 
 		if !uMatch {
-			return nil, nil, types.NewPDFError(types.ErrCodeWrongPassword, "password incorrect or encryption parameters invalid")
+			return nil, types.NewPDFError(types.ErrCodeWrongPassword, "password incorrect or encryption parameters invalid")
 		}
 
 		// Step 2: Unwrap the actual encryption key from /UE (only if user password was used)
 		if encryptKey == nil {
 			unwrappedKey, err := UnwrapUserKeyV5(passwordKey, encrypt, verbose)
 			if err != nil {
-				return nil, nil, types.WrapError(types.ErrCodeDecryptionFailed, "error unwrapping encryption key from /UE", err)
+				return nil, types.WrapError(types.ErrCodeDecryptionFailed, "error unwrapping encryption key from /UE", err)
 			}
 
 			encryptKey = unwrappedKey
@@ -97,7 +98,7 @@ func DecryptPDF(pdfBytes []byte, password []byte, verbose bool) ([]byte, *types.
 		// V1-V4: Standard key derivation
 		encryptKey, err = DeriveEncryptionKey(password, encrypt, fileID, verbose)
 		if err != nil {
-			return nil, nil, types.WrapError(types.ErrCodeDecryptionFailed, "error deriving encryption key", err)
+			return nil, types.WrapError(types.ErrCodeDecryptionFailed, "error deriving encryption key", err)
 		}
 
 		encrypt.EncryptKey = encryptKey
@@ -109,7 +110,7 @@ func DecryptPDF(pdfBytes []byte, password []byte, verbose bool) ([]byte, *types.
 		// Verify password by checking U value
 		uValue, err := ComputeUValue(encryptKey, encrypt, fileID, verbose)
 		if err != nil {
-			return nil, nil, types.WrapError(types.ErrCodeDecryptionFailed, "error computing U value", err)
+			return nil, types.WrapError(types.ErrCodeDecryptionFailed, "error computing U value", err)
 		}
 
 		// Compare with stored U value
@@ -162,7 +163,7 @@ func DecryptPDF(pdfBytes []byte, password []byte, verbose bool) ([]byte, *types.
 		}
 
 		if !uMatch {
-			return nil, nil, types.NewPDFError(types.ErrCodeWrongPassword, "password incorrect or encryption parameters invalid")
+			return nil, types.NewPDFError(types.ErrCodeWrongPassword, "password incorrect or encryption parameters invalid")
 		}
 	}
 
@@ -170,29 +171,7 @@ func DecryptPDF(pdfBytes []byte, password []byte, verbose bool) ([]byte, *types.
 		log.Printf("Password verified successfully")
 	}
 
-	// Decrypt PDF objects
-	decryptedPDF, err := DecryptPDFObjects(pdfBytes, encrypt, verbose)
-	if err != nil {
-		return nil, nil, types.WrapError(types.ErrCodeDecryptionFailed, "error decrypting PDF objects", err)
-	}
-
-	return decryptedPDF, encrypt, nil
-}
-
-// DecryptPDFObjects decrypts all encrypted objects in the PDF
-// This is a simplified version - full implementation would parse xref table
-// and decrypt objects individually
-func DecryptPDFObjects(pdfBytes []byte, encrypt *types.PDFEncryption, verbose bool) ([]byte, error) {
-	// For now, return original bytes
-	// Full implementation would:
-	// 1. Parse cross-reference table
-	// 2. For each object, check if encrypted
-	// 3. Derive object-specific key
-	// 4. Decrypt object content
-	// 5. Reconstruct PDF with decrypted objects
-
-	// This is a placeholder - we'll decrypt objects on-demand when accessing them
-	return pdfBytes, nil
+	return encrypt, nil
 }
 
 // DecryptObject decrypts a single PDF object or stream

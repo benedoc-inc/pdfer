@@ -95,7 +95,7 @@ func TestRedactContentStream_TextSuppressed(t *testing.T) {
 	stream := "BT\n/F1 12 Tf\n72 700 Td\n(secret) Tj\nET\n"
 	// Redaction box covers (50, 680) to (200, 720) — contains (72, 700).
 	boxes := [][4]float64{{50, 680, 200, 720}}
-	rewritten := redactContentStream(stream, boxes)
+	rewritten := redactContentStream(stream, boxes, nil)
 	if strings.Contains(rewritten, "secret") {
 		t.Errorf("redacted content stream still contains 'secret': %q", rewritten)
 	}
@@ -109,7 +109,7 @@ func TestRedactContentStream_TextOutsideBoxPreserved(t *testing.T) {
 	stream := "BT\n/F1 12 Tf\n72 200 Td\n(visible) Tj\nET\n"
 	// Box is far from (72, 200).
 	boxes := [][4]float64{{300, 300, 500, 500}}
-	rewritten := redactContentStream(stream, boxes)
+	rewritten := redactContentStream(stream, boxes, nil)
 	if !strings.Contains(rewritten, "visible") {
 		t.Error("content outside redaction box should be preserved")
 	}
@@ -119,7 +119,7 @@ func TestRedactContentStream_PathSuppressed(t *testing.T) {
 	// A filled rectangle centred inside the redaction box.
 	stream := "10 10 80 80 re\nf\n"
 	boxes := [][4]float64{{0, 0, 200, 200}}
-	rewritten := redactContentStream(stream, boxes)
+	rewritten := redactContentStream(stream, boxes, nil)
 	// The path should be suppressed (no re or f).
 	if strings.Contains(rewritten, " re\n") || strings.Contains(rewritten, "\nre\n") {
 		t.Error("path inside box should be suppressed")
@@ -129,7 +129,7 @@ func TestRedactContentStream_PathSuppressed(t *testing.T) {
 func TestRedactContentStream_PathOutsideBoxPreserved(t *testing.T) {
 	stream := "300 300 100 100 re\nf\n"
 	boxes := [][4]float64{{0, 0, 100, 100}}
-	rewritten := redactContentStream(stream, boxes)
+	rewritten := redactContentStream(stream, boxes, nil)
 	if !strings.Contains(rewritten, "re") {
 		t.Error("path outside redaction box should be preserved")
 	}
@@ -273,6 +273,161 @@ func TestRedact_TwoPagePDF(t *testing.T) {
 	// /Count 2 must still be present (both pages remain).
 	if !bytes.Contains(out, []byte("/Count 2")) {
 		t.Error("page count changed after single-page redaction")
+	}
+}
+
+// --- new helper tests -------------------------------------------------------
+
+func TestParseRectArray(t *testing.T) {
+	tests := []struct {
+		input                          string
+		wantOK                         bool
+		wantLLX, wantLLY, wantURX, wantURY float64
+	}{
+		{"[50 100 200 300]", true, 50, 100, 200, 300},
+		{"[0 0 612 792]", true, 0, 0, 612, 792},
+		{"[ 10.5 20.5 100.5 200.5 ]", true, 10.5, 20.5, 100.5, 200.5},
+		{"", false, 0, 0, 0, 0},
+		{"[1 2 3]", false, 0, 0, 0, 0},
+		{"not an array", false, 0, 0, 0, 0},
+	}
+	for _, tc := range tests {
+		llx, lly, urx, ury, ok := parseRectArray(tc.input)
+		if ok != tc.wantOK {
+			t.Errorf("parseRectArray(%q) ok=%v, want %v", tc.input, ok, tc.wantOK)
+			continue
+		}
+		if ok && (llx != tc.wantLLX || lly != tc.wantLLY || urx != tc.wantURX || ury != tc.wantURY) {
+			t.Errorf("parseRectArray(%q) = (%v,%v,%v,%v), want (%v,%v,%v,%v)",
+				tc.input, llx, lly, urx, ury, tc.wantLLX, tc.wantLLY, tc.wantURX, tc.wantURY)
+		}
+	}
+}
+
+func TestImageCtmBBox(t *testing.T) {
+	tests := []struct {
+		ctm                                    [6]float64
+		wantMinX, wantMinY, wantMaxX, wantMaxY float64
+	}{
+		// Identity: unit square unchanged
+		{[6]float64{1, 0, 0, 1, 0, 0}, 0, 0, 1, 1},
+		// Scale only: 100×50
+		{[6]float64{100, 0, 0, 50, 0, 0}, 0, 0, 100, 50},
+		// Scale + translate: 100×50 at (200,300)
+		{[6]float64{100, 0, 0, 50, 200, 300}, 200, 300, 300, 350},
+		// Negative scale (flipped): min/max must still be correct
+		{[6]float64{-100, 0, 0, -50, 300, 400}, 200, 350, 300, 400},
+	}
+	for _, tc := range tests {
+		minX, minY, maxX, maxY := imageCtmBBox(tc.ctm)
+		if minX != tc.wantMinX || minY != tc.wantMinY || maxX != tc.wantMaxX || maxY != tc.wantMaxY {
+			t.Errorf("imageCtmBBox(%v) = (%.0f,%.0f,%.0f,%.0f), want (%.0f,%.0f,%.0f,%.0f)",
+				tc.ctm, minX, minY, maxX, maxY, tc.wantMinX, tc.wantMinY, tc.wantMaxX, tc.wantMaxY)
+		}
+	}
+}
+
+// --- annotation redaction tests ---------------------------------------------
+
+// buildPDFWithAnnot creates a one-page PDF with a text annotation at annotRect.
+func buildPDFWithAnnot(t *testing.T, annotRect [4]float64) []byte {
+	t.Helper()
+	b := write.NewSimplePDFBuilder()
+	page := b.AddPage(write.PageSizeLetter)
+	fn := page.AddStandardFont("Helvetica")
+	page.Content().BeginText().SetFont(fn, 12).SetTextPosition(72, 700).ShowText("body").EndText()
+	b.FinalizePage(page)
+	src, err := b.Bytes()
+	if err != nil {
+		t.Fatalf("Bytes: %v", err)
+	}
+	out, err := AddAnnotation(src, 1, AnnotationConfig{
+		Type:     AnnotText,
+		Rect:     annotRect,
+		Contents: "secret note",
+	}, nil, false)
+	if err != nil {
+		t.Fatalf("AddAnnotation: %v", err)
+	}
+	return out
+}
+
+func TestRedact_AnnotationInBoxIsZeroed(t *testing.T) {
+	// Annotation rect (72,700,200,720) is inside the redaction box.
+	src := buildPDFWithAnnot(t, [4]float64{72, 700, 200, 720})
+
+	out, err := Redact(src, []RedactBox{{Page: 1, Rect: [4]float64{50, 680, 250, 740}}}, nil)
+	if err != nil {
+		t.Fatalf("Redact: %v", err)
+	}
+	if strings.Contains(string(out), "secret note") {
+		t.Error("annotation content 'secret note' still present after redaction")
+	}
+}
+
+func TestRedact_AnnotationOutsideBoxKept(t *testing.T) {
+	// Annotation rect (72,300,200,320) is outside the redaction box (y 680-740).
+	src := buildPDFWithAnnot(t, [4]float64{72, 300, 200, 320})
+
+	out, err := Redact(src, []RedactBox{{Page: 1, Rect: [4]float64{50, 680, 250, 740}}}, nil)
+	if err != nil {
+		t.Fatalf("Redact: %v", err)
+	}
+	if !strings.Contains(string(out), "secret note") {
+		t.Error("annotation outside redaction box should be preserved")
+	}
+}
+
+// --- image XObject zeroing tests --------------------------------------------
+
+// buildPDFWithEmbeddedImage creates a one-page PDF with one JPEG image XObject.
+func buildPDFWithEmbeddedImage(t *testing.T) (pdfBytes []byte, imgObjNum int) {
+	t.Helper()
+	jpegBytes := makeMinimalJPEG()
+	builder := write.NewSimplePDFBuilder()
+	w := builder.Writer()
+	page := builder.AddPage(write.PageSizeLetter)
+	imgInfo, err := w.AddJPEGImage(jpegBytes, "RedactImg")
+	if err != nil {
+		t.Fatalf("AddJPEGImage: %v", err)
+	}
+	page.AddImage(imgInfo)
+	builder.FinalizePage(page)
+	src, err := builder.Bytes()
+	if err != nil {
+		t.Fatalf("builder.Bytes: %v", err)
+	}
+	return src, imgInfo.ObjectNum
+}
+
+func TestRedact_ImageXObjectZeroed(t *testing.T) {
+	src, _ := buildPDFWithEmbeddedImage(t)
+
+	// Redact the entire page — the image placement must fall inside.
+	out, err := Redact(src, []RedactBox{{Page: 1, Rect: [4]float64{0, 0, 612, 792}}}, nil)
+	if err != nil {
+		t.Fatalf("Redact: %v", err)
+	}
+
+	// The zeroed image XObject has /Width 1 /Height 1 /ColorSpace/DeviceGray.
+	outStr := string(out)
+	if !strings.Contains(outStr, "/Width 1") || !strings.Contains(outStr, "/Height 1") {
+		t.Error("expected a zeroed 1×1 image XObject in output; image data may not have been cleared")
+	}
+}
+
+func TestRedact_ImageXObjectOutsideBoxKept(t *testing.T) {
+	src, _ := buildPDFWithEmbeddedImage(t)
+
+	// Redact a tiny area in the far corner — should not touch the image.
+	out, err := Redact(src, []RedactBox{{Page: 1, Rect: [4]float64{600, 780, 612, 792}}}, nil)
+	if err != nil {
+		t.Fatalf("Redact: %v", err)
+	}
+
+	// The image XObject must still have DCTDecode (the original JPEG filter).
+	if !strings.Contains(string(out), "DCTDecode") {
+		t.Error("image XObject outside redaction box should retain its DCTDecode filter")
 	}
 }
 

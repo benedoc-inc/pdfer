@@ -518,10 +518,6 @@ func compareSinglePage(page1, page2 types.Page, pageNum int, opts CompareOptions
 	return diff
 }
 
-// compareText compares text elements between two pages
-// Implementation moved to text_diff.go for better organization
-// This is a placeholder - the actual implementation is in text_diff.go
-
 // textElementsEqual compares two text elements for equality
 func textElementsEqual(t1, t2 types.TextElement) bool {
 	return t1.Text == t2.Text &&

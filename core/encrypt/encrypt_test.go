@@ -33,7 +33,7 @@ func TestEncryption_RoundTrip(t *testing.T) {
 	pdfBytes := buildEncryptedPDF(t, userPwd, ownerPwd)
 
 	// Verify the password is accepted.
-	if _, _, err := encrypt.DecryptPDF(pdfBytes, userPwd, false); err != nil {
+	if _, err := encrypt.DecryptPDF(pdfBytes, userPwd, false); err != nil {
 		t.Fatalf("DecryptPDF failed: %v", err)
 	}
 
@@ -50,7 +50,7 @@ func TestEncryption_RoundTrip(t *testing.T) {
 func TestEncryption_WrongPasswordRejected(t *testing.T) {
 	pdfBytes := buildEncryptedPDF(t, []byte("secret"), []byte("owner"))
 
-	_, _, err := encrypt.DecryptPDF(pdfBytes, []byte("wrong"), false)
+	_, err := encrypt.DecryptPDF(pdfBytes, []byte("wrong"), false)
 	if err == nil {
 		t.Fatal("expected error with wrong password, got nil")
 	}
@@ -60,7 +60,7 @@ func TestEncryption_EmptyUserPassword(t *testing.T) {
 	// No user password — should open without a password.
 	pdfBytes := buildEncryptedPDF(t, nil, []byte("owner"))
 
-	if _, _, err := encrypt.DecryptPDF(pdfBytes, nil, false); err != nil {
+	if _, err := encrypt.DecryptPDF(pdfBytes, nil, false); err != nil {
 		t.Fatalf("DecryptPDF with empty password failed: %v", err)
 	}
 	doc, err := extract.ExtractContent(pdfBytes, nil, false)

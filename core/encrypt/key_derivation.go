@@ -241,35 +241,41 @@ func DeriveOwnerKey(ownerPassword []byte, encrypt *types.PDFEncryption, fileID [
 		ownerHash = ownerHash[:encrypt.KeyLength]
 	}
 
-	// Decrypt O value using owner key
-	// O value is encrypted with RC4 using owner key
-	decryptedO := make([]byte, len(encrypt.O))
+	// Decrypt O value to recover the padded user password.
+	decryptedO := make([]byte, min(32, len(encrypt.O)))
+	copy(decryptedO, encrypt.O)
 	if encrypt.R == 2 {
-		cipher, err := rc4.NewCipher(ownerHash)
+		// R=2: single RC4 pass (Algorithm 3 step e, R=2 variant)
+		rc4Cipher, err := rc4.NewCipher(ownerHash)
 		if err != nil {
 			return nil, err
 		}
-		cipher.XORKeyStream(decryptedO, encrypt.O)
+		rc4Cipher.XORKeyStream(decryptedO, decryptedO)
 	} else {
-		// Revision 3+: decrypt O with RC4, then use it to derive user key
-		cipher, err := rc4.NewCipher(ownerHash)
-		if err != nil {
-			return nil, err
+		// R≥3: Algorithm 3 step e inverse — 20 RC4 passes in descending order.
+		// Algorithm 3 step e encrypted the user password 20 times (i = 0..19),
+		// each time XOR-ing all key bytes with i.  Reversing requires applying the
+		// same single-pass RC4 for i = 19, 18, …, 0.
+		for i := 19; i >= 0; i-- {
+			keyI := make([]byte, len(ownerHash))
+			for j := range keyI {
+				keyI[j] = ownerHash[j] ^ byte(i)
+			}
+			rc4Cipher, err := rc4.NewCipher(keyI)
+			if err != nil {
+				return nil, err
+			}
+			rc4Cipher.XORKeyStream(decryptedO, decryptedO)
 		}
-		cipher.XORKeyStream(decryptedO, encrypt.O[:min(32, len(encrypt.O))])
 	}
 
-	// Now derive user key from decrypted O (which is the user password hash)
-	// Use decrypted O as if it were the user password
+	// decryptedO is now the padded user password; derive the file encryption key from it.
 	return DeriveEncryptionKey(decryptedO, encrypt, fileID, verbose)
 }
 
-// DeriveUserKeyFromOwner derives the user encryption key from owner key
-func DeriveUserKeyFromOwner(ownerKey []byte, encrypt *types.PDFEncryption, verbose bool) ([]byte, error) {
-	// The owner key approach: decrypt O value, then use it to derive user key
-	// This is a simplified version - full implementation would follow Algorithm 3
-
-	// For now, return ownerKey as userKey (this needs proper implementation)
+// DeriveUserKeyFromOwner is a pass-through: DeriveOwnerKey performs the full
+// Algorithm 3 inverse and already returns the file encryption key directly.
+func DeriveUserKeyFromOwner(ownerKey []byte, _ *types.PDFEncryption, _ bool) ([]byte, error) {
 	return ownerKey, nil
 }
 

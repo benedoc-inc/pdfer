@@ -66,7 +66,7 @@ func ExtractPages(pdfBytes []byte, pageNumbers []int, password []byte, verbose b
 			obj = []byte(objStr)
 		}
 
-		writer.SetObject(newObjNum, updateObjectReferences(obj, objNumMap, false))
+		writer.SetObject(newObjNum, updateObjectReferences(obj, objNumMap))
 	}
 
 	// Build Kids array in the caller-specified order.

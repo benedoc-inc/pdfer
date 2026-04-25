@@ -1,3 +1,6 @@
+// Command pdfer is a BeneDoc-internal tool for filling XFA forms and extracting
+// XFA schemas from eSTAR PDFs. It is not a general-purpose PDF CLI — for the
+// full library API see the root pdfer package documentation.
 package main
 
 import (
@@ -130,7 +133,7 @@ func main() {
 		}
 
 		// Try to decrypt with empty password (most eSTAR PDFs allow this)
-		decryptedBytes, encInfo, err := encrypt.DecryptPDF(pdfBytes, []byte(""), *verbose)
+		encInfo, err := encrypt.DecryptPDF(pdfBytes, []byte(""), *verbose)
 		if err != nil {
 			if *verbose {
 				log.Printf("Empty password failed, trying common passwords...")
@@ -139,9 +142,9 @@ func main() {
 			commonPasswords := [][]byte{[]byte(""), []byte("admin"), []byte("password"), []byte("1234")}
 			decrypted := false
 			for _, pwd := range commonPasswords {
-				decryptedBytes, encInfo, err := encrypt.DecryptPDF(pdfBytes, pwd, *verbose)
-				if err == nil {
-					pdfBytes = decryptedBytes
+				tryInfo, tryErr := encrypt.DecryptPDF(pdfBytes, pwd, *verbose)
+				if tryErr == nil {
+					encInfo = tryInfo
 					encryptInfo = encInfo
 					decrypted = true
 					if *verbose {
@@ -154,7 +157,6 @@ func main() {
 				log.Fatalf("Could not decrypt PDF: %v", err)
 			}
 		} else {
-			pdfBytes = decryptedBytes
 			encryptInfo = encInfo
 			if *verbose {
 				log.Printf("Successfully decrypted PDF with empty password")
@@ -162,9 +164,7 @@ func main() {
 		}
 	}
 
-	// Update XFA in PDF
-	// Note: After decryption, objects are still encrypted in the PDF bytes
-	// We need to decrypt them on-demand when accessing them
+	// Update XFA in PDF — objects are decrypted on-demand via encryptInfo
 	updatedPDF, err := xfa.UpdateXFAInPDF(pdfBytes, formData, encryptInfo, *verbose)
 	if err != nil {
 		log.Fatalf("Error updating XFA: %v", err)
@@ -217,7 +217,7 @@ func handleExtractSchema(inputPDF, outputJSON string, verbose bool) {
 		}
 
 		// Try to decrypt with empty password (most eSTAR PDFs allow this)
-		decryptedBytes, encInfo, err := encrypt.DecryptPDF(pdfBytes, []byte(""), verbose)
+		encInfo, err := encrypt.DecryptPDF(pdfBytes, []byte(""), verbose)
 		if err != nil {
 			if verbose {
 				log.Printf("Empty password failed, trying common passwords...")
@@ -226,9 +226,9 @@ func handleExtractSchema(inputPDF, outputJSON string, verbose bool) {
 			commonPasswords := [][]byte{[]byte(""), []byte("admin"), []byte("password"), []byte("1234")}
 			decrypted := false
 			for _, pwd := range commonPasswords {
-				decryptedBytes, encInfo, err = encrypt.DecryptPDF(pdfBytes, pwd, verbose)
-				if err == nil {
-					pdfBytes = decryptedBytes
+				tryInfo, tryErr := encrypt.DecryptPDF(pdfBytes, pwd, verbose)
+				if tryErr == nil {
+					encInfo = tryInfo
 					encryptInfo = encInfo
 					decrypted = true
 					if verbose {
@@ -241,7 +241,6 @@ func handleExtractSchema(inputPDF, outputJSON string, verbose bool) {
 				log.Fatalf("Could not decrypt PDF: %v", err)
 			}
 		} else {
-			pdfBytes = decryptedBytes
 			encryptInfo = encInfo
 			if verbose {
 				log.Printf("Successfully decrypted PDF with empty password")

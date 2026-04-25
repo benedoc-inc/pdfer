@@ -8,97 +8,276 @@ behaviour.
 
 ## P1 — High impact
 
-### ~~`DecryptPDF` returns encrypted bytes unchanged~~ ✅ Fixed in v0.9.27
+### ~~`DecryptPDF` returns encrypted bytes unchanged~~ ✅ Fixed in v0.9.27–v0.9.28
 `manipulate.DecryptPDF` / `pdfer.DecryptPDF` now produces a fully decrypted
-plaintext PDF. `encrypt.DecryptPDFObjects` remains a stub but is no longer
-called by the public API.
+plaintext PDF. `encrypt.DecryptPDF` signature changed to `(*PDFEncryption,
+error)` — callers that want fully decrypted bytes use `manipulate.DecryptPDF`.
+`PDFDocument.reconstruct()` is now implemented (rebuilds xref + trailer from
+revision components instead of returning nil).
 
-### Owner-password authentication is broken for R≤4
-**File:** `core/encrypt/key_derivation.go:268` — `DeriveUserKeyFromOwner`  
-The function returns the owner key unchanged instead of implementing Algorithm 3
-inverse (ISO 32000-1 §7.6.3.4): RC4-decrypt `/O` with the owner-derived key to
-recover the padded user password, then derive the file encryption key from
-that. Opening an encrypted PDF with the *owner* password (rather than the user
-password) fails or accepts wrong passwords for R=3/4 documents.
+### ~~Owner-password authentication is broken for R≤4~~ ✅ Fixed in v0.9.30
+`DeriveOwnerKey` now applies Algorithm 3 step-e inverse correctly for R≥3:
+20 RC4 passes in descending order (i=19→0), each XOR-ing key bytes with `i`,
+before calling `DeriveEncryptionKey` to produce the file key. R=2 still uses a
+single pass (correct per spec). `DeriveUserKeyFromOwner` is a correct pass-through
+since `DeriveOwnerKey` already returns the file encryption key.
 
 ---
 
 ## P2 — Medium impact
 
-### PDF comparison text diff is not wired up
-**File:** `core/compare/compare.go:521`  
-`compareText` is declared as a placeholder; the actual implementation is in
-`text_diff.go` but `compareSinglePage` never calls it. `PageDifference.TextDiff`
-is always nil, making `ComparePDFs` / `ComparePDFsWithOptions` blind to text
-changes between pages.  
-**To fix:** Call the text diff logic from `text_diff.go` inside
-`compareSinglePage`.
+### ~~PDF comparison text diff is not wired up~~ ✅ Already wired (stale gap)
+`compareText` is implemented in `text_diff.go` and called from
+`compareSinglePage` at line 453. The stub comment at line 521 was an artefact;
+it has been removed. `PageDifference.TextDiff` is populated correctly.
 
-### `FlattenForm` silently skips pages with indirect `/Resources`
-**File:** `forms/acroform/flatten.go:24`  
-Pages whose `/Resources` is an indirect object reference (rather than an inline
-dict) are passed through without flattening. Widget annotations on those pages
-are silently dropped from the output.  
-**To fix:** Dereference the indirect resource object, inject XObject entries,
-write back the modified object.
+### ~~`FlattenForm` silently skips pages with indirect `/Resources`~~ ✅ Fixed in v0.9.30
+`flattenIndirectResourcesObjNum` detects `/Resources N G R` patterns; when found,
+`flattenAddXObjectsToDict` injects XObject entries directly into the resources
+object. Both inline and indirect `/Resources` dicts are now handled.
 
-### PDF merge leaves dangling references for cross-document refs
-**File:** `core/manipulate/merging.go:188`  
-Object numbers are remapped when merging PDFs to avoid collisions, but
-references to objects not in the remap table are passed through unchanged.
-Complex PDFs with object streams or shared resources may have dangling
-references in the merged output.
+### ~~PDF merge leaves dangling references for cross-document refs~~ ✅ Fixed in v0.9.30
+`MergePDFs` now uses a two-pass approach: pass 1 assigns all new object numbers
+before any content is read, so pass 2 has a complete remap table when rewriting
+references. Forward references (object A → B where B appears later) are now
+resolved correctly.
 
-### Inline AcroForm dict not supported
-**File:** `forms/acroform/parser.go:78`  
-PDFs where `/AcroForm` is an inline dict in the catalog (rather than an
-indirect object reference) return `ErrCodeUnsupportedPDF`. Rare in practice but
-produced by some older generators.
+### ~~Inline AcroForm dict not supported~~ ✅ Fixed in v0.9.29
+`parseAcroFormFromBytes` now extracts the inline `<< ... >>` dict using a
+bracket-counting helper (`extractBracketedDict`) and passes it directly to
+`parseAcroFormDict`. Nested dicts (e.g. `/DR`) and string literals with angle
+brackets are handled correctly.
 
-### Page deletion does not update ancestor `/Count`
-**File:** `core/manipulate/deletion.go:233`  
-Deleting a page updates the `/Count` of its immediate parent `/Pages` node only.
-Ancestor nodes in multi-level page trees retain stale counts, which confuses
-some PDF readers on large documents.
+### ~~Page deletion does not update ancestor `/Count`~~ ✅ Fixed in v0.9.30
+`updatePageCounts` now walks the full `/Parent` chain from the immediate parent
+up to the root `/Pages` node, decrementing `/Count` at every level. Multi-level
+page trees produce correct counts throughout the hierarchy.
+
+### ~~`FlattenForm` appearance streams with indirect `/Resources` may have nested XObject issues~~ ✅ Fixed in v1.1.0
+`flattenAddXObjectsToDict` now uses a `findDictEnd` bracket-counter instead of
+the regex `[^<>]*` character class. Arbitrarily nested dicts inside an existing
+`/XObject` entry are handled correctly.
+
+### ~~`Form.Validate()` silently succeeds for XFA forms~~ ✅ Fixed in v1.1.0
+`XFAFormWrapper.Validate()` now returns `[]error{fmt.Errorf("XFA form validation
+is not implemented")}`, so callers can distinguish "no validation errors" from
+"validation not supported."
+
+### ~~xref stream Type-2 entries partially skipped~~ ✅ Fixed in v1.1.0
+`ParseXRefStreamWithEncryption` and `ParseCrossReferenceTableWithEncryption` now
+delegate to `ParseXRefStreamFull`, which handles both Type-1 and Type-2 entries
+using a single implementation. The duplicate parsing logic has been removed.
+Type-2 entries (compressed objects in object streams) are fully parsed; callers
+that receive the `map[int]int64` return type still see only Type-1 byte offsets —
+callers needing full Type-2 support should call `ParseXRefStreamFull` directly.
+
+### ~~AcroForm field actions use a simplified replace~~ ✅ Fixed in v1.1.0
+`AddActionToField` and `AddMouseAction` now use a `removeDictKey` helper that
+bracket-counts through nested dicts and literal strings to cleanly remove any
+existing `/A` or `/AA` entry before injecting the new action. String substitution
+and `strings.LastIndex` have been replaced throughout.
 
 ---
 
 ## P3 — Low impact
 
-### Font subsetting embeds the full font
-**File:** `resources/font/font.go:517` — `CreateSubsetFont`  
-The function embeds the full font program rather than a subset containing only
-the glyphs used in the document. File size is larger than necessary, sometimes
-significantly for CJK or large symbol fonts.
+### ~~Font subsetting embeds the full font~~ ✅ Fixed in v1.1.0
+`CreateSubsetFont` now builds a real TTF subset: it rebuilds `glyf`, `loca`,
+`hmtx`, and `cmap` (format 4) tables containing only the glyphs in `f.Subset`
+plus any composite components they reference. All other tables (`head`, `hhea`,
+`maxp`, `name`, `OS/2`, `post`, etc.) are copied as-is. Output is a valid TTF
+with a correct offset table, table directory, and `head.checkSumAdjustment`.
+Falls back to the full font on any parse error.
 
-### Watermark opacity uses colour blending instead of `ExtGState`
-**File:** `core/write/watermark.go:50`  
-Transparency is approximated by blending the requested colour toward white
-rather than using a proper `/ca` fill-alpha entry in a graphics state
-dictionary. The result is a lighter colour, not true transparency, and does not
-composite correctly over non-white backgrounds.
+### ~~Watermark opacity uses colour blending instead of `ExtGState`~~ ✅ Fixed in v1.1.0
+`AddWatermark` now registers a `WMgs` ExtGState resource with `/ca` (fill alpha)
+and `/CA` (stroke alpha) at the requested opacity and applies it via the `gs`
+operator. `PageBuilder` gained an `extgstates` map and a `Build()` block that
+emits `/ExtGState << ... >>` in the page resources dictionary.
 
-### XFA form validation always returns nil
-**File:** `forms/forms.go:98`  
-`Form.Validate()` on XFA forms returns nil unconditionally. XFA validation
-rules (mandatory fields, patterns, value ranges) are not evaluated.
+### ~~XFA script parsing is approximate~~ ✅ Fixed in v1.2.0
+`convertXFAEventToRule` now dispatches to a structured `parseXFAScript`
+analyser that detects language (FormCalc vs JavaScript), then tries four
+pattern families in order:
+- **Visibility** — `$.presence = "visible"/"hidden"` → `RuleTypeVisibility` +
+  `ActionTypeShow`/`ActionTypeHide` with extracted target field
+- **SetValue** — `$.rawValue = expr` or `xfa.resolveNode("x").rawValue = expr`
+  → `RuleTypeSetValue` + `ActionTypeSetValue` with extracted expression
+- **Validation** — scripts containing `return true/false` or message-box calls
+  → `RuleTypeValidate` + `ActionTypeValidate`
+- **Calculate** — scripts using FormCalc built-ins (`Sum`, `Avg`, `Concat`, …)
+  or JavaScript `return expr` → `RuleTypeCalculate` + `ActionTypeCalculate`
+  with the extracted expression
 
-### XFA script parsing is approximate
-**File:** `forms/xfa/xfa_form_translator.go:866,916`  
-FormCalc/JavaScript script bodies are extracted with a simplified parser that
-may misread complex expressions. Calculation and validation scripts may produce
-incorrect results.
+Conditional guards (`if (cond) then … endif` / `if (cond) { … }`) are parsed
+into a `*Condition` with operator, field reference, and literal value where the
+expression is a simple binary comparison. The full raw script is always
+preserved in `Action.Script` for evaluation. Complex scripts that match none of
+the above patterns fall back to `ActionTypeExecute` as before.
 
-### xref stream Type-2 entries partially skipped
-**File:** `core/parse/xref_stream.go:185`  
-When the xref is a cross-reference stream (PDF 1.5+), Type-2 entries pointing
-into object streams are skipped during xref construction. Object streams are
-parsed separately so most objects are reachable, but objects that appear
-*exclusively* via a Type-2 entry in a file with no traditional xref table may
-be inaccessible.
+---
 
-### AcroForm field actions use a simplified replace
-**File:** `forms/acroform/actions.go:72`  
-Replacing an existing `/A` or `/AA` entry uses a simple string substitution
-rather than a proper dict parser, which may corrupt the dict if the existing
-action value contains nested structures.
+## Open gaps
+
+### P1 — High impact
+
+#### ~~Redaction is incomplete (content streams only)~~ ✅ Fixed in v1.3.0
+`Redact` now handles three of the four previously missing surfaces:
+- **Annotation objects** — every annotation object whose `/Rect` overlaps a
+  redaction box is zeroed out (replaced with an empty dict), so that URIs,
+  note text, and tooltip strings are unrecoverable.
+- **Image XObjects** — the placement bounding box is computed by transforming
+  the unit square through the current CTM, not just checking the translation
+  anchor. Image objects whose footprint overlaps a box are replaced with a 1×1
+  black pixel stream so no image data remains.
+- **Content streams** — existing behaviour (text/path operator suppression)
+  plus an opaque overlay rectangle.
+
+**Remaining gap**: XMP metadata and `/Info` dictionary entries are not cleared
+by `Redact`. Call `RedactMetadata` separately for document-level metadata.
+
+---
+
+### P2 — Medium impact
+
+#### JavaScript action removal API missing
+`core/parse` can detect JavaScript in a PDF (e.g. scanning `/S /JavaScript`
+objects), but the public API exposes no way to strip embedded JavaScript from
+action dictionaries (`/AA`, `/A`, `/OpenAction`). This matters for security
+sandboxing and PDF/A conformance.
+
+**Workaround**: none — callers must implement their own object-walk and
+rewrite.
+
+**File**: `core/manipulate/` (new file needed), `api.go`
+
+#### PDF/A validation is heuristic
+`ValidatePDFA` uses text-scanning heuristics rather than a full structural
+traversal. Violations it misses:
+- **Type0/CIDFont subset tag** — embedded CID fonts must carry a 6-character
+  subset prefix; this is not checked
+- **Transparency and blend modes** — `/Group`, `/BM`, `/SMask` in content
+  streams
+- **Overprint** — `/op`, `/OP`, `/OPM` operator sequences
+- **Annotation appearances** — every annotation must have an `/AP` stream
+- **Action types** — `Launch`, `Sound`, `Movie`, `ResetForm` are forbidden in
+  PDF/A-1b
+
+**File**: `core/write/pdfa_validate.go`
+
+#### ~~Digital signatures lack timestamps (TSA / RFC 3161)~~ ✅ Fixed in v1.3.0
+Set `SignOptions.TSAEndpoint` to any RFC 3161 URL. `SignPDF` signs once, hashes
+the raw `signerInfo.signature` bytes with SHA-256, POSTs a `TimeStampReq` to
+the endpoint, and embeds the `TimeStampToken` (ContentInfo) as the
+`id-aa-signatureTimeStampToken` unsigned attribute in SignerInfo. The
+`/Contents` reservation is automatically increased to 20 KB when a TSA is
+configured. Leaving `TSAEndpoint` empty is a no-op — fully backward compatible.
+
+**Files**: `core/sign/tsa.go`, `core/sign/pkcs7.go`, `core/sign/sign.go`
+
+#### ~~No long-term validation (LTV) support~~ ✅ Fixed in v1.3.0
+Set `SignOptions.CertChain` and/or `SignOptions.OCSPResponse`. After signing,
+`appendDSS` adds a `/DSS` incremental update containing:
+- Stream objects for each cert in the chain (`/Certs`)
+- A stream object for the pre-fetched OCSP response (`/OCSPs`), if provided
+- A `/VRI` dict keyed by SHA-1 of the CMS SignedData bytes
+- `/DSS N 0 R` injected into the catalog
+
+The library embeds whatever bytes the caller provides; callers are responsible
+for fetching OCSP responses from the URL in the signing cert's `OCSPServer`
+field (use `golang.org/x/crypto/ocsp` or any RFC 2560 client).
+
+**Files**: `core/sign/ltv.go`, `core/sign/sign.go`
+
+#### ~~Signature fields are always invisible~~ ✅ Fixed in v1.3.0
+Set `SignOptions.Appearance` to a `*SignAppearance{X, Y, Width, Height}`. When
+set, `SignPDF` allocates a Form XObject appearance stream containing a light
+border, the signer name (from the certificate CommonName), the signing date,
+and the Reason (if provided) in 8pt Helvetica. The widget `/Rect` is set to the
+requested bounding box and `/AP << /N N 0 R >>` points to the stream. Omitting
+`Appearance` (nil) is fully backward compatible — the widget remains invisible
+with `Rect [0 0 0 0]`.
+
+**File**: `core/sign/sign.go`
+
+---
+
+### P3 — Low impact
+
+#### Optional Content Groups (PDF layers) not supported
+PDFs can carry an `/OCProperties` dictionary that defines named layers
+(`/OCGs`). There is no API to list layer names, toggle visibility, or flatten a
+layer (burn its content into the page permanently).
+
+**File**: new `core/manipulate/layers.go` + `api.go`
+
+#### Named destinations not exposed
+The document catalog may contain a `/Dests` dictionary mapping human-readable
+names to page destinations. `GetBookmarks` does not resolve named destination
+strings, and there is no `GetNamedDestinations()` API.
+
+**File**: `content/extract/bookmarks.go`, `api.go`
+
+#### Embedded file attachments not supported
+PDFs can carry file attachments via `/EmbeddedFiles` in the catalog names tree.
+There is no API to list, extract, add, or remove attached files (useful for
+PDF Portfolios and FDA eCTD submissions).
+
+**File**: new `core/manipulate/attachments.go` + `api.go`
+
+#### JPEG2000 (JPXDecode) images not decoded
+`images.go` identifies `JPXDecode`-filtered streams and reports the format, but
+returns the raw compressed bytes without decoding. Standard `image/jpeg` cannot
+parse JPEG2000; a pure-Go JPEG2000 decoder would be needed (or `golang.org/x/image/jpeg2000`).
+
+**File**: `content/extract/images.go`
+
+#### JBIG2 images not decoded
+`JBig2Decode`-filtered streams (common in scanned documents and fax) are
+completely unhandled — no format detection and no decoding path.
+
+**File**: `content/extract/images.go`, `core/parse/decode.go`
+
+#### CMYK images not converted on extraction
+Images in `DeviceCMYK` color space are extracted with raw CMYK bytes. Callers
+expecting RGB data (e.g. to re-embed as JPEG or PNG) must perform the
+conversion themselves.
+
+**File**: `content/extract/images.go`
+
+#### Linearize omits the `/H` hint stream
+`Linearize` writes a `/Linearized` parameter dict but leaves the `/H` field
+set to a zero placeholder. Strictly, a linearized PDF should include a hint
+stream so that byte-serving HTTP clients can fetch only the first page's objects
+without reading the entire file. Current output still benefits from object
+ordering but not from byte-serving optimisation.
+
+**File**: `core/manipulate/linearize.go:20`
+
+#### `StampText` does not support multi-line text
+`StampText` emits a single `Tj` PDF operator. Text longer than the page width
+or text containing explicit newlines is not wrapped or split across lines.
+
+**File**: `core/manipulate/stamp.go`
+
+#### No text search / find-and-highlight API
+There is no `FindText(pdfBytes, query string)` function that returns match
+coordinates. Building this on top of the existing text extractor + bounding-box
+data is straightforward but not yet wired up.
+
+**File**: new `core/manipulate/search.go` + `api.go`
+
+#### Calculated form fields are not auto-evaluated on fill
+`form.Fill()` writes raw values directly into field objects. Fields that carry
+a `/AA /C` (Calculate action) are not re-evaluated, so dependent computed fields
+remain stale until the PDF is opened in a viewer.
+
+**File**: `forms/acroform/fill.go`
+
+#### CID font / Type0 vertical writing not supported
+`CreateSubsetFont` only handles horizontal TrueType fonts (glyph advances in
+the `hmtx` table). CIDFont Type0 (OpenType CFF) and vertical-writing fonts
+(`vmtx` table, `vhea` table) are not subsetted or embedded. Affected scripts:
+CJK vertical text, some Arabic/Hebrew layout engines.
+
+**File**: `resources/font/font.go`, `resources/font/subset.go`

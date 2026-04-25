@@ -6,6 +6,30 @@ import (
 	"strconv"
 )
 
+// DeletePage removes a single page from pdfBytes (1-based page number).
+func DeletePage(pdfBytes []byte, pageNumber int, password []byte, verbose bool) ([]byte, error) {
+	m, err := NewPDFManipulator(pdfBytes, password, verbose)
+	if err != nil {
+		return nil, fmt.Errorf("delete page: %w", err)
+	}
+	if err := m.DeletePage(pageNumber); err != nil {
+		return nil, err
+	}
+	return m.Rebuild()
+}
+
+// DeletePages removes multiple pages from pdfBytes (1-based page numbers).
+func DeletePages(pdfBytes []byte, pageNumbers []int, password []byte, verbose bool) ([]byte, error) {
+	m, err := NewPDFManipulator(pdfBytes, password, verbose)
+	if err != nil {
+		return nil, fmt.Errorf("delete pages: %w", err)
+	}
+	if err := m.DeletePages(pageNumbers); err != nil {
+		return nil, err
+	}
+	return m.Rebuild()
+}
+
 // DeletePage deletes a specific page from the PDF
 // pageNumber is 1-based (first page is 1)
 func (m *PDFManipulator) DeletePage(pageNumber int) error {
@@ -74,17 +98,12 @@ func (m *PDFManipulator) DeletePage(pageNumber int) error {
 	}
 	newKidsStr += " ]"
 
-	// Update /Kids and /Count in parent Pages object
-	updatedPagesStr := setDictValue(parentPagesStr, "/Kids", newKidsStr)
-	newCount := len(newKidsRefs)
-	if newCount < 1 {
+	if len(newKidsRefs) < 1 {
 		return fmt.Errorf("cannot delete page: would result in 0 pages")
 	}
 
-	// Update Count using direct regex replacement to ensure it works
-	countPattern := regexp.MustCompile(`/Count\s+\d+`)
-	updatedPagesStr = countPattern.ReplaceAllString(updatedPagesStr, fmt.Sprintf("/Count %d", newCount))
-
+	// Update /Kids in parent Pages object; updatePageCounts handles /Count for all ancestors.
+	updatedPagesStr := setDictValue(parentPagesStr, "/Kids", newKidsStr)
 	m.objects[parentPagesObjNum] = []byte(updatedPagesStr)
 
 	// Also need to update /Count in all ancestor Pages objects
@@ -201,36 +220,35 @@ func (m *PDFManipulator) findParentPagesObjectRecursive(pagesObjNum, targetPageO
 	return 0, fmt.Errorf("page object %d not found in page tree", targetPageObjNum)
 }
 
-// updatePageCounts updates the /Count field in the given Pages object and all ancestors
+// updatePageCounts updates /Count in the given Pages node and every ancestor,
+// following /Parent refs up the page tree until there are no more.
 func (m *PDFManipulator) updatePageCounts(pagesObjNum int, delta int) error {
-	// Update this Pages object's count
-	pagesObj, ok := m.objects[pagesObjNum]
-	if !ok {
-		return fmt.Errorf("Pages object %d not found", pagesObjNum)
-	}
-
-	pagesStr := string(pagesObj)
-	countStr := extractDictValue(pagesStr, "/Count")
-	currentCount := 0
-	if countStr != "" {
-		var err error
-		currentCount, err = strconv.Atoi(countStr)
-		if err != nil {
-			currentCount = 0
+	current := pagesObjNum
+	for current != 0 {
+		pagesObj, ok := m.objects[current]
+		if !ok {
+			break
 		}
+		pagesStr := string(pagesObj)
+		countStr := extractDictValue(pagesStr, "/Count")
+		currentCount := 0
+		if countStr != "" {
+			currentCount, _ = strconv.Atoi(countStr)
+		}
+		newCount := currentCount + delta
+		if newCount < 0 {
+			newCount = 0
+		}
+		m.objects[current] = []byte(setDictValue(pagesStr, "/Count", fmt.Sprintf("%d", newCount)))
+		parentRef := extractDictValue(pagesStr, "/Parent")
+		if parentRef == "" {
+			break
+		}
+		parentObjNum, err := parseObjectRef(parentRef)
+		if err != nil || parentObjNum == 0 {
+			break
+		}
+		current = parentObjNum
 	}
-
-	newCount := currentCount + delta
-	if newCount < 0 {
-		newCount = 0
-	}
-
-	updatedPagesStr := setDictValue(pagesStr, "/Count", fmt.Sprintf("%d", newCount))
-	m.objects[pagesObjNum] = []byte(updatedPagesStr)
-
-	// Note: Updating parent Pages objects' /Count would require
-	// finding the parent of this Pages object in the tree.
-	// For now, we only update the immediate Pages object.
-	// This is sufficient for most cases where pages are direct children.
 	return nil
 }

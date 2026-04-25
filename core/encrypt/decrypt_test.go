@@ -132,22 +132,6 @@ func TestDecryptObject_NoEncryption(t *testing.T) {
 	}
 }
 
-func TestDecryptPDFObjects(t *testing.T) {
-	pdfBytes := []byte("%PDF-1.4\n")
-	encrypt := &types.PDFEncryption{
-		EncryptKey: []byte{0x01, 0x02, 0x03},
-	}
-
-	// Should return original bytes (placeholder implementation)
-	result, err := DecryptPDFObjects(pdfBytes, encrypt, false)
-	if err != nil {
-		t.Fatalf("DecryptPDFObjects() error = %v", err)
-	}
-
-	if !bytes.Equal(result, pdfBytes) {
-		t.Errorf("DecryptPDFObjects() = %q, want %q", result, pdfBytes)
-	}
-}
 
 // deriveObjectKey is a helper function for tests to derive object key
 func deriveObjectKey(encryptKey []byte, objNum, genNum, r, keyLength int) []byte {

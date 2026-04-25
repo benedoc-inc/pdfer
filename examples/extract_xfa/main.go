@@ -37,7 +37,7 @@ func main() {
 	if bytes.Contains(pdfBytes, []byte("/Encrypt")) {
 		fmt.Println("PDF is encrypted, decrypting...")
 
-		_, encryptInfo, err = encrypt.DecryptPDF(pdfBytes, []byte(*password), *verbose)
+		encryptInfo, err = encrypt.DecryptPDF(pdfBytes, []byte(*password), *verbose)
 		if err != nil {
 			log.Fatalf("Decryption failed: %v", err)
 		}

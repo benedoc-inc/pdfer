@@ -57,18 +57,18 @@ func TestE2E_AES256_Decrypt(t *testing.T) {
 
 	t.Logf("Encryption parameters: U=%d bytes, UE=%d bytes, OE=%d bytes", len(encInfo.U), len(encInfo.UE), len(encInfo.OE))
 
-	// Try to decrypt with user password
+	// Verify password and derive key
 	userPassword := []byte("testpass") // Default password from qpdf command
-	decryptedBytes, decryptInfo, err := encrypt.DecryptPDF(pdfBytes, userPassword, false)
+	decryptInfo, err := encrypt.DecryptPDF(pdfBytes, userPassword, false)
 	if err != nil {
 		// Try empty password
-		decryptedBytes, decryptInfo, err = encrypt.DecryptPDF(pdfBytes, []byte(""), false)
+		decryptInfo, err = encrypt.DecryptPDF(pdfBytes, []byte(""), false)
 		if err != nil {
 			t.Fatalf("Failed to decrypt PDF with user password: %v", err)
 		}
-		t.Logf("Decrypted with empty password")
+		t.Logf("Verified with empty password")
 	} else {
-		t.Logf("Decrypted with user password")
+		t.Logf("Verified with user password")
 	}
 
 	if decryptInfo == nil {
@@ -79,25 +79,7 @@ func TestE2E_AES256_Decrypt(t *testing.T) {
 		t.Errorf("Encryption key should be 32 bytes for AES-256, got %d", len(decryptInfo.EncryptKey))
 	}
 
-	t.Logf("Successfully decrypted PDF: %d bytes", len(decryptedBytes))
-
-	// Verify decrypted PDF is valid
-	if !bytes.HasPrefix(decryptedBytes, []byte("%PDF-")) {
-		t.Error("Decrypted PDF should start with %PDF-")
-	}
-
-	// Try to parse the decrypted PDF
-	pdf, err := parse.Open(decryptedBytes)
-	if err != nil {
-		t.Fatalf("Failed to parse decrypted PDF: %v", err)
-	}
-
-	t.Logf("Successfully parsed decrypted PDF: version=%s, objects=%d", pdf.Version(), pdf.ObjectCount())
-
-	// Verify PDF is not encrypted anymore (in the decrypted bytes)
-	if bytes.Contains(decryptedBytes, []byte("/Encrypt")) {
-		t.Log("Note: Decrypted PDF still contains /Encrypt reference (this is normal)")
-	}
+	t.Logf("Successfully verified PDF: %d bytes, %d-byte key", len(pdfBytes), len(decryptInfo.EncryptKey))
 }
 
 // TestE2E_AES256_CreateAndDecrypt creates an AES-256 encrypted PDF using qpdf and then decrypts it
@@ -168,8 +150,8 @@ func TestE2E_AES256_CreateAndDecrypt(t *testing.T) {
 		t.Errorf("Expected KeyLength=32 for AES-256, got %d", encInfo.KeyLength)
 	}
 
-	// Decrypt with user password
-	decryptedBytes, decryptInfo, err := encrypt.DecryptPDF(encryptedBytes, []byte("testpass"), false)
+	// Verify user password and derive key
+	decryptInfo, err := encrypt.DecryptPDF(encryptedBytes, []byte("testpass"), false)
 	if err != nil {
 		t.Fatalf("Failed to decrypt PDF: %v", err)
 	}
@@ -182,27 +164,22 @@ func TestE2E_AES256_CreateAndDecrypt(t *testing.T) {
 		t.Errorf("Expected 32-byte encryption key, got %d bytes", len(decryptInfo.EncryptKey))
 	}
 
-	// Verify decrypted content
-	if !bytes.HasPrefix(decryptedBytes, []byte("%PDF-")) {
-		t.Error("Decrypted PDF should start with %PDF-")
-	}
-
-	// Verify we can parse it
-	pdf, err := parse.Open(decryptedBytes)
+	// Parse encrypted PDF using the correct password
+	pdf, err := parse.OpenWithOptions(encryptedBytes, parse.ParseOptions{Password: []byte("testpass")})
 	if err != nil {
-		t.Fatalf("Failed to parse decrypted PDF: %v", err)
+		t.Fatalf("Failed to parse PDF with password: %v", err)
 	}
 
-	t.Logf("Successfully decrypted and parsed AES-256 PDF: version=%s, objects=%d", pdf.Version(), pdf.ObjectCount())
+	t.Logf("Successfully verified and parsed AES-256 PDF: version=%s, objects=%d", pdf.Version(), pdf.ObjectCount())
 
-	// Also test owner password
-	decryptedBytes2, _, err := encrypt.DecryptPDF(encryptedBytes, []byte("ownerpass"), false)
+	// Owner password should yield the same file encryption key
+	decryptInfo2, err := encrypt.DecryptPDF(encryptedBytes, []byte("ownerpass"), false)
 	if err != nil {
-		t.Fatalf("Failed to decrypt with owner password: %v", err)
+		t.Fatalf("Failed to verify with owner password: %v", err)
 	}
 
-	if !bytes.Equal(decryptedBytes, decryptedBytes2) {
-		t.Error("Decryption with user and owner passwords should produce same result")
+	if !bytes.Equal(decryptInfo.EncryptKey, decryptInfo2.EncryptKey) {
+		t.Error("User and owner passwords should derive the same file encryption key")
 	}
 }
 
@@ -231,10 +208,10 @@ func TestE2E_AES256_VerifyUValue(t *testing.T) {
 
 	// Test with correct password - should succeed
 	userPassword := []byte("testpass")
-	_, decryptInfo, err := encrypt.DecryptPDF(pdfBytes, userPassword, false)
+	decryptInfo, err := encrypt.DecryptPDF(pdfBytes, userPassword, false)
 	if err != nil {
 		// Try empty password
-		_, decryptInfo, err = encrypt.DecryptPDF(pdfBytes, []byte(""), false)
+		decryptInfo, err = encrypt.DecryptPDF(pdfBytes, []byte(""), false)
 		if err != nil {
 			t.Fatalf("Failed to decrypt with correct password: %v", err)
 		}
@@ -245,7 +222,7 @@ func TestE2E_AES256_VerifyUValue(t *testing.T) {
 	}
 
 	// Test with wrong password - should fail
-	_, _, err = encrypt.DecryptPDF(pdfBytes, []byte("wrongpass"), false)
+	_, err = encrypt.DecryptPDF(pdfBytes, []byte("wrongpass"), false)
 	if err == nil {
 		t.Error("Decryption should fail with wrong password")
 	}

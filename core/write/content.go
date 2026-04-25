@@ -56,6 +56,13 @@ func (cs *ContentStream) Scale(sx, sy float64) *ContentStream {
 	return cs.SetMatrix(sx, 0, 0, sy, 0, 0)
 }
 
+// SetExtGState applies a named ExtGState dictionary (gs operator)
+// name should be a bare resource name (e.g. "WMgs") without a leading slash
+func (cs *ContentStream) SetExtGState(name string) *ContentStream {
+	cs.buf.WriteString(name + " gs\n")
+	return cs
+}
+
 // --- Color Operations ---
 
 // SetFillColorRGB sets the fill color (rg operator)

@@ -98,7 +98,7 @@ func TestRebuildPDFWithUpdatedXFA(t *testing.T) {
 	// Get encryption info
 	var encryptInfo *types.PDFEncryption
 	if bytes.Contains(pdfBytes, []byte("/Encrypt")) {
-		_, encInfo, err := encrypt.DecryptPDF(pdfBytes, []byte(""), true)
+		encInfo, err := encrypt.DecryptPDF(pdfBytes, []byte(""), true)
 		if err == nil {
 			encryptInfo = encInfo
 		}
@@ -171,7 +171,7 @@ func TestBuildPDFFromExtractedXFA(t *testing.T) {
 	// Get encryption info
 	var encryptInfo *types.PDFEncryption
 	if bytes.Contains(pdfBytes, []byte("/Encrypt")) {
-		_, encInfo, err := encrypt.DecryptPDF(pdfBytes, []byte(""), true)
+		encInfo, err := encrypt.DecryptPDF(pdfBytes, []byte(""), true)
 		if err == nil {
 			encryptInfo = encInfo
 		}

@@ -113,6 +113,42 @@ func (m *PDFManipulator) StampPageNumbers(opts PageNumberOptions) error {
 	return nil
 }
 
+// StampText adds a text overlay to one page of pdfBytes (1-based page number).
+func StampText(pdfBytes []byte, pageNumber int, stamp TextStamp, password []byte, verbose bool) ([]byte, error) {
+	m, err := NewPDFManipulator(pdfBytes, password, verbose)
+	if err != nil {
+		return nil, fmt.Errorf("stamp text: %w", err)
+	}
+	if err := m.StampText(pageNumber, stamp); err != nil {
+		return nil, err
+	}
+	return m.Rebuild()
+}
+
+// StampAllPages adds the same text overlay to every page of pdfBytes.
+func StampAllPages(pdfBytes []byte, stamp TextStamp, password []byte, verbose bool) ([]byte, error) {
+	m, err := NewPDFManipulator(pdfBytes, password, verbose)
+	if err != nil {
+		return nil, fmt.Errorf("stamp all pages: %w", err)
+	}
+	if err := m.StampAllPages(stamp); err != nil {
+		return nil, err
+	}
+	return m.Rebuild()
+}
+
+// StampPageNumbers adds automatic page numbers to all pages of pdfBytes.
+func StampPageNumbers(pdfBytes []byte, opts PageNumberOptions, password []byte, verbose bool) ([]byte, error) {
+	m, err := NewPDFManipulator(pdfBytes, password, verbose)
+	if err != nil {
+		return nil, fmt.Errorf("stamp page numbers: %w", err)
+	}
+	if err := m.StampPageNumbers(opts); err != nil {
+		return nil, err
+	}
+	return m.Rebuild()
+}
+
 // --- internal helpers -------------------------------------------------------
 
 func (m *PDFManipulator) stampOnPage(pageObjNum int, stamp TextStamp) error {

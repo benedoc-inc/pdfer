@@ -3,6 +3,8 @@
 package forms
 
 import (
+	"fmt"
+
 	"github.com/benedoc-inc/pdfer/forms/acroform"
 	"github.com/benedoc-inc/pdfer/forms/xfa"
 	"github.com/benedoc-inc/pdfer/types"
@@ -94,9 +96,7 @@ func (w *XFAFormWrapper) Fill(pdfBytes []byte, data types.FormData, password []b
 }
 
 func (w *XFAFormWrapper) Validate(data types.FormData) []error {
-	// XFA validation would go here
-	// For now, return empty (XFA validation is more complex)
-	return []error{}
+	return []error{fmt.Errorf("XFA form validation is not implemented")}
 }
 
 func (w *XFAFormWrapper) GetValues() map[string]interface{} {

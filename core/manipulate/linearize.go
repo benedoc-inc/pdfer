@@ -92,7 +92,7 @@ func Linearize(pdfBytes []byte, password []byte) ([]byte, error) {
 		if err != nil {
 			continue
 		}
-		remapped := updateObjectReferences(body, oldToNew, true)
+		remapped := updateObjectReferences(body, oldToNew)
 		w.SetObject(newNum, remapped)
 	}
 

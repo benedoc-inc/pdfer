@@ -2,16 +2,51 @@
 //
 // # Common operations
 //
-// Encrypt and decrypt:
+// Encrypt, decrypt, and permissions:
 //
-//	out, err := pdfer.EncryptPDF(pdfBytes, []byte("password"), nil)
-//	out, _, err := pdfer.DecryptPDF(pdfBytes, []byte("password"), false)
+//	out, err := pdfer.EncryptPDF(pdfBytes, []byte("password"), nil, false)
+//	out, err := pdfer.DecryptPDF(pdfBytes, []byte("password"), false)
+//	perms, err := pdfer.GetPermissions(pdfBytes, []byte("password"))
 //
-// Merge, split, redact:
+// Merge, split, extract, reorder, insert, delete:
 //
 //	out, err := pdfer.MergePDFs([][]byte{a, b}, nil, false)
 //	parts, err := pdfer.SplitPDF(pdfBytes, []pdfer.PageRange{{1, 3}, {4, 6}}, nil, false)
+//	out, err := pdfer.ExtractPages(pdfBytes, []int{1, 3, 5}, nil, false)
+//	out, err := pdfer.ReorderPages(pdfBytes, []int{3, 1, 2}, nil, false)
+//	out, err := pdfer.InsertBlankPage(pdfBytes, 2, 612, 792, nil, false)
+//	out, err := pdfer.DuplicatePage(pdfBytes, 1, 2, nil, false)
+//	out, err := pdfer.DeletePage(pdfBytes, 2, nil, false)
+//
+// Redact, repair, linearize, rotate, crop, stamp:
+//
 //	out, err := pdfer.Redact(pdfBytes, []pdfer.RedactBox{{Page: 1, Rect: [4]float64{50, 680, 200, 720}}}, nil)
+//	out, err := pdfer.Repair(pdfBytes, nil)
+//	out, err := pdfer.Linearize(pdfBytes, nil)
+//	out, err := pdfer.RotatePage(pdfBytes, 1, 90, nil, false)
+//	out, err := pdfer.CropPage(pdfBytes, 1, [4]float64{36, 36, 576, 756}, nil, false)
+//	out, err := pdfer.SetPageSize(pdfBytes, 1, 612, 792, nil, false)
+//	out, err := pdfer.StampAllPages(pdfBytes, pdfer.TextStamp{Text: "DRAFT", X: 72, Y: 72}, nil, false)
+//	out, err := pdfer.StampPageNumbers(pdfBytes, pdfer.PageNumberOptions{Position: pdfer.BottomCenter}, nil, false)
+//
+// Metadata:
+//
+//	meta, err := pdfer.GetMetadata(pdfBytes, nil, false)
+//	out, err := pdfer.SetMetadata(pdfBytes, pdfer.MetadataUpdate{Title: "Report", Author: "Alice"}, nil, false)
+//	out, err := pdfer.RedactMetadata(pdfBytes, nil, false)
+//
+// Annotations and bookmarks:
+//
+//	out, err := pdfer.AddAnnotation(pdfBytes, 1, pdfer.AnnotationConfig{
+//	    Type: pdfer.AnnotLink, Rect: [4]float64{72, 700, 200, 720}, URI: "https://example.com",
+//	}, nil, false)
+//	bmarks, err := pdfer.GetBookmarks(pdfBytes, nil, false)
+//	out, err := pdfer.SetBookmarks(pdfBytes, []pdfer.BookmarkEntry{{Title: "Intro", Page: 1}}, nil, false)
+//
+// Digital signatures:
+//
+//	out, err := pdfer.SignPDF(pdfBytes, pdfer.SignOptions{Certificate: cert, PrivateKey: key})
+//	sigs, err := pdfer.ValidateSignatures(pdfBytes)
 //
 // Fill and flatten forms (AcroForm and XFA auto-detected):
 //
@@ -19,16 +54,25 @@
 //	out, err := form.Fill(pdfBytes, pdfer.FormData{"name": "Alice"}, nil, false)
 //	out, err = pdfer.FlattenForm(out, nil, false)
 //
+// Extract content, images, compare, and validate PDF/A:
+//
+//	doc, err := pdfer.ExtractContent(pdfBytes, nil, false)
+//	imgs, err := pdfer.ExtractAllImages(pdfBytes, nil, false)
+//	result, err := pdfer.ComparePDFs(pdf1, pdf2, nil, nil, false)
+//	vr := pdfer.ValidatePDFA(pdfBytes)
+//
 // # Sub-packages
 //
 // Import sub-packages directly for lower-level control:
 //
-//   - core/encrypt  — RC4/AES decryption and AES-128/256 encryption primitives
-//   - core/parse    — PDF structure parsing (xref, objects, streams)
-//   - core/write    — PDF generation (SimplePDFBuilder, PDFWriter)
-//   - core/manipulate — document-level operations (merge, split, redact, encrypt)
-//   - forms/acroform — AcroForm parsing, filling, appearance streams
-//   - forms/xfa     — XFA stream extraction and dataset updating
+//   - core/encrypt    — RC4/AES decryption and AES-128/256 encryption primitives
+//   - core/parse      — PDF structure parsing (xref, objects, streams)
+//   - core/write      — PDF generation (SimplePDFBuilder, PDFWriter, ValidatePDFA)
+//   - core/manipulate — document-level operations (all page/metadata/annotation ops)
+//   - core/sign       — PDF digital signatures (create and validate PKCS#7/CMS)
+//   - core/compare    — visual and structural PDF diffing
+//   - forms/acroform  — AcroForm parsing, filling, appearance streams
+//   - forms/xfa       — XFA stream extraction and dataset updating
 //   - content/extract — text, image, annotation and metadata extraction
 package pdfer
 
@@ -65,5 +109,5 @@ type XFALocaleSet = types.XFALocaleSet
 
 // Version returns the library version.
 func Version() string {
-	return "0.9.27"
+	return "1.3.0"
 }

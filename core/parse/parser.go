@@ -168,8 +168,14 @@ func ParseCrossReferenceTableWithEncryption(pdfBytes []byte, startXRef int64, en
 	// Check if it's a cross-reference stream (PDF 1.5+)
 	// Cross-reference streams have /Type/XRef and /W[widths]
 	if strings.Contains(xrefStr, "/Type/XRef") || strings.Contains(xrefStr, "/W[") {
-		// Cross-reference stream - need to find the stream object and decompress it
-		return ParseXRefStreamWithEncryption(pdfBytes, startXRef, encryptInfo, verbose)
+		// Cross-reference stream - delegate to ParseXRefStreamFull which handles
+		// both Type-1 and Type-2 entries. Note: xref streams are never encrypted,
+		// so encryptInfo is not needed here.
+		result, err := ParseXRefStreamFull(pdfBytes, startXRef, verbose)
+		if err != nil {
+			return nil, err
+		}
+		return result.Objects, nil
 	}
 
 	// Traditional xref table

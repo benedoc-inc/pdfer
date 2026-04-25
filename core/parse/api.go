@@ -125,7 +125,7 @@ func (p *PDF) handleEncryption() error {
 
 	if enc != nil {
 		// PDF is encrypted - validate password
-		_, validatedEnc, err := encrypt.DecryptPDF(p.raw, p.opts.Password, p.opts.Verbose)
+		validatedEnc, err := encrypt.DecryptPDF(p.raw, p.opts.Password, p.opts.Verbose)
 		if err != nil {
 			return types.WrapError(types.ErrCodeWrongPassword, "decryption failed (wrong password?)", err)
 		}

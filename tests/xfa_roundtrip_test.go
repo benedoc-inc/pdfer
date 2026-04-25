@@ -52,8 +52,7 @@ func TestXFARoundTrip(t *testing.T) {
 	var encryptInfo *types.PDFEncryption
 	if bytes.Contains(pdfBytes, []byte("/Encrypt")) {
 		// Use DecryptPDF to verify password and get encryption info
-		// Even though DecryptPDFObjects is a placeholder, it still verifies the password
-		_, encInfo, err := encrypt.DecryptPDF(pdfBytes, []byte(""), true)
+		encInfo, err := encrypt.DecryptPDF(pdfBytes, []byte(""), true)
 		if err != nil {
 			t.Logf("Failed to verify password (may not be encrypted or wrong password): %v", err)
 			// Try to parse encryption info anyway

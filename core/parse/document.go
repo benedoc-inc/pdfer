@@ -1,6 +1,12 @@
 // Package parser provides PDF parsing with byte-perfect reconstruction support
 package parse
 
+import (
+	"bytes"
+	"fmt"
+	"sort"
+)
+
 // PDFDocument represents a complete PDF with all revisions and raw bytes preserved
 // This enables byte-perfect reconstruction of the original PDF
 type PDFDocument struct {
@@ -115,11 +121,83 @@ func (d *PDFDocument) Bytes() []byte {
 	return d.reconstruct()
 }
 
-// reconstruct rebuilds the PDF from its components
+// reconstruct rebuilds the PDF from its revision components.
+// Each revision's objects are re-serialised in their original offset order,
+// then a fresh xref table + trailer + startxref + %%EOF is appended.
 func (d *PDFDocument) reconstruct() []byte {
-	// TODO: Implement full reconstruction
-	// For now, return raw bytes if available
-	return d.RawBytes
+	if len(d.Revisions) == 0 {
+		return nil
+	}
+
+	var buf bytes.Buffer
+
+	// Write PDF header.
+	if d.Header != nil && len(d.Header.RawBytes) > 0 {
+		buf.Write(d.Header.RawBytes)
+	} else {
+		buf.WriteString("%PDF-1.7\n%\xe2\xe3\xcf\xd3\n")
+	}
+
+	for _, rev := range d.Revisions {
+		// Sort objects by original byte offset to preserve their order.
+		objs := make([]*PDFRawObject, 0, len(rev.Objects))
+		for _, obj := range rev.Objects {
+			objs = append(objs, obj)
+		}
+		sort.Slice(objs, func(i, j int) bool {
+			return objs[i].Offset < objs[j].Offset
+		})
+
+		// Write objects and record their new byte offsets.
+		newOffsets := make(map[int]int64, len(objs))
+		genNums := make(map[int]int, len(objs))
+		for _, obj := range objs {
+			newOffsets[obj.Number] = int64(buf.Len())
+			genNums[obj.Number] = obj.Generation
+			buf.Write(obj.RawBytes)
+			if len(obj.RawBytes) > 0 && obj.RawBytes[len(obj.RawBytes)-1] != '\n' {
+				buf.WriteByte('\n')
+			}
+		}
+
+		// Build a sorted list of all in-use object numbers.
+		objNums := make([]int, 0, len(newOffsets))
+		for n := range newOffsets {
+			objNums = append(objNums, n)
+		}
+		sort.Ints(objNums)
+
+		// Write a traditional xref table covering 0..maxObjNum.
+		xrefOffset := int64(buf.Len())
+		maxObjNum := 0
+		if len(objNums) > 0 {
+			maxObjNum = objNums[len(objNums)-1]
+		}
+		fmt.Fprintf(&buf, "xref\n0 %d\n", maxObjNum+1)
+		// Object 0 is always the free-list head.
+		buf.WriteString("0000000000 65535 f \r\n")
+		for i := 1; i <= maxObjNum; i++ {
+			if offset, ok := newOffsets[i]; ok {
+				fmt.Fprintf(&buf, "%010d %05d n \r\n", offset, genNums[i])
+			} else {
+				buf.WriteString("0000000000 00000 f \r\n")
+			}
+		}
+
+		// Write trailer dictionary.
+		if rev.Trailer != nil && len(rev.Trailer.RawBytes) > 0 {
+			buf.Write(rev.Trailer.RawBytes)
+		} else {
+			fmt.Fprintf(&buf, "trailer\n<< /Size %d >>\n", maxObjNum+1)
+		}
+
+		// Write startxref and %%EOF.
+		buf.WriteString("\nstartxref\n")
+		fmt.Fprintf(&buf, "%d\n", xrefOffset)
+		buf.WriteString("%%EOF\n")
+	}
+
+	return buf.Bytes()
 }
 
 // GetObject returns an object by number, searching from newest to oldest revision

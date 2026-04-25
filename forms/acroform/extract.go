@@ -16,7 +16,7 @@ func ExtractAcroForm(pdfBytes []byte, password []byte, verbose bool) (*AcroForm,
 	var encryptInfo *types.PDFEncryption
 	if bytes.Contains(pdfBytes, []byte("/Encrypt")) {
 		var err error
-		_, encryptInfo, err = encrypt.DecryptPDF(pdfBytes, password, verbose)
+		encryptInfo, err = encrypt.DecryptPDF(pdfBytes, password, verbose)
 		if err != nil {
 			return nil, fmt.Errorf("failed to decrypt PDF: %w", err)
 		}

@@ -841,39 +841,447 @@ func extractXFARules(xfaXML string, xfaData *XFAStructure, verbose bool) ([]type
 	return rules, nil
 }
 
-// convertXFAEventToRule converts an XFA event to a Rule
+// convertXFAEventToRule converts an XFA event to a Rule, parsing the script
+// body to extract structured conditions and actions where possible.
 func convertXFAEventToRule(event XFAEvent, sourceField string, index int) (*types.Rule, error) {
-	// Basic conversion - can be extended to parse scripts more deeply
 	rule := &types.Rule{
 		ID:     fmt.Sprintf("rule_%d", index),
 		Source: sourceField,
-		Type:   types.RuleTypeCalculate, // Default
+		Type:   types.RuleTypeCalculate,
 	}
 
+	// Map event activity to rule type.
 	switch strings.ToLower(event.Type) {
-	case "initialize", "enter":
-		// Could be visibility or set value
-		rule.Type = types.RuleTypeSetValue
-	case "change", "exit":
-		// Could be calculate or validate
-		rule.Type = types.RuleTypeCalculate
 	case "validate":
 		rule.Type = types.RuleTypeValidate
+	case "calculate":
+		rule.Type = types.RuleTypeCalculate
+	case "initialize", "docReady":
+		rule.Type = types.RuleTypeSetValue
+	case "change", "exit", "enter":
+		rule.Type = types.RuleTypeCalculate
 	}
 
-	if event.Script != "" {
-		// Try to extract actions from script
-		// This is a simplified version - full script parsing would be more complex
-		action := types.Action{
-			Type:       types.ActionTypeExecute,
-			Script:     event.Script,
-			Target:     event.Target,
-			Expression: event.Script,
-		}
-		rule.Actions = []types.Action{action}
+	if event.Script == "" {
+		return rule, nil
 	}
+
+	parsed := parseXFAScript(event.Script, sourceField, event.Target)
+
+	// Use parsed rule type if more specific than the event-derived default.
+	if parsed.ruleType != "" {
+		rule.Type = parsed.ruleType
+	}
+	if parsed.description != "" {
+		rule.Description = parsed.description
+	}
+	rule.Condition = parsed.condition
+	rule.Actions = parsed.actions
 
 	return rule, nil
+}
+
+// scriptParseResult holds the structured result of parsing an XFA script body.
+type scriptParseResult struct {
+	ruleType    types.RuleType
+	condition   *types.Condition
+	actions     []types.Action
+	description string
+}
+
+// parseXFAScript analyses an XFA script (FormCalc or JavaScript) and returns
+// whatever structured information can be extracted. It always succeeds — for
+// scripts it cannot understand it returns a single ActionTypeExecute action.
+func parseXFAScript(script, sourceField, targetField string) scriptParseResult {
+	s := strings.TrimSpace(script)
+	lang := detectScriptLanguage(s)
+
+	// Try each pattern family in order of specificity.
+	// Validation is tried before set-value so that scripts containing both
+	// a rawValue reference and return true/false are classified as validation.
+	if r, ok := tryParseVisibilityScript(s, lang, sourceField, targetField); ok {
+		return r
+	}
+	if r, ok := tryParseValidationScript(s, lang, sourceField); ok {
+		return r
+	}
+	if r, ok := tryParseSetValueScript(s, lang, sourceField, targetField); ok {
+		return r
+	}
+	if r, ok := tryParseCalculateScript(s, lang, sourceField); ok {
+		return r
+	}
+
+	// Fallback: wrap raw script in an execute action.
+	return scriptParseResult{
+		actions: []types.Action{{
+			Type:       types.ActionTypeExecute,
+			Target:     targetField,
+			Script:     script,
+			Expression: script,
+		}},
+	}
+}
+
+// detectScriptLanguage returns "formcalc" or "javascript".
+// FormCalc uses `then`/`endif` keywords; JavaScript uses `{`/`}` blocks.
+func detectScriptLanguage(s string) string {
+	lower := strings.ToLower(s)
+	if strings.Contains(lower, "then") && (strings.Contains(lower, "endif") || strings.Contains(lower, "end if")) {
+		return "formcalc"
+	}
+	if strings.Contains(s, "{") && strings.Contains(s, "}") {
+		return "javascript"
+	}
+	// FormCalc uses $ for field references and has no braces.
+	if strings.Contains(s, "$.") || strings.Contains(s, "$parent.") {
+		return "formcalc"
+	}
+	return "javascript"
+}
+
+// tryParseVisibilityScript detects scripts that show or hide a field.
+//
+// FormCalc patterns:
+//   $.presence = "visible" / "hidden" / "invisible"
+//   if (cond) then $.presence = "hidden" else $.presence = "visible" endif
+//
+// JavaScript patterns:
+//   this.presence = "visible"
+//   xfa.resolveNode("fieldName").presence = "hidden"
+func tryParseVisibilityScript(s, lang, sourceField, targetField string) (scriptParseResult, bool) {
+	lower := strings.ToLower(s)
+	if !strings.Contains(lower, "presence") {
+		return scriptParseResult{}, false
+	}
+
+	// Determine which visibility action is being set.
+	actionType := types.ActionTypeShow
+	if strings.Contains(lower, `"hidden"`) || strings.Contains(lower, `"invisible"`) ||
+		strings.Contains(lower, "'hidden'") || strings.Contains(lower, "'invisible'") {
+		actionType = types.ActionTypeHide
+	}
+
+	// Extract target field name.
+	target := extractResolveNodeTarget(s)
+	if target == "" {
+		target = targetField
+	}
+	if target == "" {
+		target = sourceField
+	}
+
+	// Check if the assignment is conditional.
+	cond := extractSimpleCondition(s, lang, sourceField)
+
+	action := types.Action{
+		Type:   actionType,
+		Target: target,
+	}
+
+	return scriptParseResult{
+		ruleType:    types.RuleTypeVisibility,
+		condition:   cond,
+		actions:     []types.Action{action},
+		description: fmt.Sprintf("%s field %q", actionType, target),
+	}, true
+}
+
+// tryParseSetValueScript detects scripts that assign a value to a field.
+//
+// FormCalc: $.rawValue = "literal" or $.rawValue = fieldRef.rawValue
+// JavaScript: this.rawValue = expr  or  xfa.resolveNode("x").rawValue = expr
+func tryParseSetValueScript(s, lang, sourceField, targetField string) (scriptParseResult, bool) {
+	lower := strings.ToLower(s)
+	if !strings.Contains(lower, "rawvalue") && !strings.Contains(lower, ".value") {
+		return scriptParseResult{}, false
+	}
+	// Must contain an assignment.
+	if !strings.Contains(s, "=") {
+		return scriptParseResult{}, false
+	}
+	// Skip comparisons (== / != / <= / >=).
+	assignIdx := findAssignmentOp(s)
+	if assignIdx == -1 {
+		return scriptParseResult{}, false
+	}
+
+	rhs := strings.TrimSpace(s[assignIdx+1:])
+	// Trim trailing semicolons or statement ends.
+	rhs = strings.TrimRight(rhs, "; \t\n\r")
+
+	target := extractResolveNodeTarget(s)
+	if target == "" {
+		target = targetField
+	}
+	if target == "" {
+		target = sourceField
+	}
+
+	cond := extractSimpleCondition(s, lang, sourceField)
+
+	action := types.Action{
+		Type:       types.ActionTypeSetValue,
+		Target:     target,
+		Expression: rhs,
+		Value:      unquoteLiteral(rhs),
+	}
+
+	return scriptParseResult{
+		ruleType:    types.RuleTypeSetValue,
+		condition:   cond,
+		actions:     []types.Action{action},
+		description: fmt.Sprintf("set %q = %s", target, rhs),
+	}, true
+}
+
+// tryParseValidationScript detects scripts used for validation (return true/false).
+func tryParseValidationScript(s, lang, sourceField string) (scriptParseResult, bool) {
+	lower := strings.ToLower(s)
+	hasReturn := strings.Contains(lower, "return true") || strings.Contains(lower, "return false") ||
+		strings.Contains(lower, "return 1") || strings.Contains(lower, "return 0")
+	hasMessage := strings.Contains(lower, "xfa.host.messageBox") || strings.Contains(lower, "app.alert") ||
+		strings.Contains(lower, "console.print") || strings.Contains(lower, "messagebox")
+	if !hasReturn && !hasMessage {
+		return scriptParseResult{}, false
+	}
+
+	cond := extractSimpleCondition(s, lang, sourceField)
+
+	action := types.Action{
+		Type:       types.ActionTypeValidate,
+		Target:     sourceField,
+		Script:     s,
+		Expression: s,
+	}
+
+	return scriptParseResult{
+		ruleType:    types.RuleTypeValidate,
+		condition:   cond,
+		actions:     []types.Action{action},
+		description: "validate " + sourceField,
+	}, true
+}
+
+// tryParseCalculateScript detects scripts that compute a value (Sum, arithmetic, concat).
+func tryParseCalculateScript(s, lang, sourceField string) (scriptParseResult, bool) {
+	lower := strings.ToLower(s)
+	// FormCalc built-in functions or obvious arithmetic.
+	calcKeywords := []string{"sum(", "count(", "avg(", "min(", "max(", "concat(", "len(", "substr(", "num2str(", "str2num("}
+	isCalc := false
+	for _, kw := range calcKeywords {
+		if strings.Contains(lower, kw) {
+			isCalc = true
+			break
+		}
+	}
+	// JavaScript: typical calculate pattern involves return of an expression.
+	if !isCalc && lang == "javascript" && strings.Contains(lower, "return ") {
+		isCalc = true
+	}
+	if !isCalc {
+		return scriptParseResult{}, false
+	}
+
+	// Extract the expression: look for last `return <expr>` or the whole script.
+	expr := extractReturnExpression(s)
+	if expr == "" {
+		expr = s
+	}
+
+	action := types.Action{
+		Type:       types.ActionTypeCalculate,
+		Target:     sourceField,
+		Expression: expr,
+		Script:     s,
+	}
+
+	return scriptParseResult{
+		ruleType:    types.RuleTypeCalculate,
+		actions:     []types.Action{action},
+		description: fmt.Sprintf("calculate %s", sourceField),
+	}, true
+}
+
+// extractSimpleCondition parses an `if` guard from the script and returns a
+// *Condition for simple comparisons (field == value, field != value, etc.).
+// Returns nil if no parseable condition is present.
+func extractSimpleCondition(s, lang, sourceField string) *types.Condition {
+	// Extract the condition expression from an if-statement.
+	var condExpr string
+	if lang == "formcalc" {
+		// if (expr) then ... endif  OR  if expr then ... endif
+		if i := strings.Index(strings.ToLower(s), "if "); i >= 0 {
+			rest := s[i+3:]
+			// Find the matching "then"
+			thenIdx := strings.Index(strings.ToLower(rest), " then")
+			if thenIdx > 0 {
+				condExpr = strings.TrimSpace(rest[:thenIdx])
+				condExpr = strings.TrimPrefix(condExpr, "(")
+				condExpr = strings.TrimSuffix(condExpr, ")")
+			}
+		}
+	} else {
+		// JavaScript: if (expr) { ... }
+		if i := strings.Index(s, "if ("); i >= 0 {
+			rest := s[i+4:]
+			depth := 1
+			for j := 0; j < len(rest); j++ {
+				if rest[j] == '(' {
+					depth++
+				} else if rest[j] == ')' {
+					depth--
+					if depth == 0 {
+						condExpr = strings.TrimSpace(rest[:j])
+						break
+					}
+				}
+			}
+		} else if i := strings.Index(s, "if("); i >= 0 {
+			rest := s[i+3:]
+			depth := 1
+			for j := 0; j < len(rest); j++ {
+				if rest[j] == '(' {
+					depth++
+				} else if rest[j] == ')' {
+					depth--
+					if depth == 0 {
+						condExpr = strings.TrimSpace(rest[:j])
+						break
+					}
+				}
+			}
+		}
+	}
+
+	if condExpr == "" {
+		return nil
+	}
+
+	// Try to parse a simple binary comparison: lhs op rhs
+	op, lhs, rhs := parseSimpleComparison(condExpr)
+	if op == "" {
+		// Return the condition as a raw expression.
+		return &types.Condition{Expression: condExpr}
+	}
+
+	// Resolve lhs to a field reference where possible.
+	fieldRef := extractFieldRef(lhs, sourceField)
+
+	return &types.Condition{
+		Operator:   op,
+		Expression: condExpr,
+		Value:      unquoteLiteral(rhs),
+		Children: []types.Condition{{
+			Expression: fieldRef,
+		}},
+	}
+}
+
+// parseSimpleComparison splits "lhs op rhs" into parts.
+// Returns empty op if the expression is not a simple binary comparison.
+func parseSimpleComparison(expr string) (types.Operator, string, string) {
+	ops := []struct {
+		sym string
+		op  types.Operator
+	}{
+		{"==", types.OperatorEquals},
+		{"!=", types.OperatorNotEquals},
+		{"<>", types.OperatorNotEquals},
+		{">=", types.OperatorGreaterOrEqual},
+		{"<=", types.OperatorLessOrEqual},
+		{">", types.OperatorGreaterThan},
+		{"<", types.OperatorLessThan},
+	}
+	for _, candidate := range ops {
+		idx := strings.Index(expr, candidate.sym)
+		if idx < 0 {
+			continue
+		}
+		lhs := strings.TrimSpace(expr[:idx])
+		rhs := strings.TrimSpace(expr[idx+len(candidate.sym):])
+		if lhs != "" && rhs != "" {
+			return candidate.op, lhs, rhs
+		}
+	}
+	return "", "", ""
+}
+
+// extractFieldRef converts an XFA field reference token (e.g. "$.rawValue",
+// "this.rawValue", "fieldName.rawValue") into a plain field name.
+func extractFieldRef(token, currentField string) string {
+	t := strings.TrimSpace(token)
+	// $.rawValue / $.value → current field
+	if strings.HasPrefix(t, "$.") || t == "$" {
+		return currentField
+	}
+	// this.rawValue / this.value → current field
+	if strings.HasPrefix(strings.ToLower(t), "this.") || t == "this" {
+		return currentField
+	}
+	// Strip .rawValue / .value suffixes.
+	for _, suffix := range []string{".rawValue", ".value", ".rawvalue"} {
+		if strings.HasSuffix(strings.ToLower(t), suffix) {
+			return t[:len(t)-len(suffix)]
+		}
+	}
+	return t
+}
+
+// extractResolveNodeTarget parses `xfa.resolveNode("fieldName")` and returns fieldName.
+func extractResolveNodeTarget(s string) string {
+	lower := strings.ToLower(s)
+	idx := strings.Index(lower, "resolvenode(")
+	if idx == -1 {
+		return ""
+	}
+	rest := s[idx+12:]
+	end := strings.IndexByte(rest, ')')
+	if end == -1 {
+		return ""
+	}
+	return strings.Trim(strings.TrimSpace(rest[:end]), `"'`)
+}
+
+// extractReturnExpression finds the last `return <expr>` in a script and
+// returns the expression part.
+func extractReturnExpression(s string) string {
+	lower := strings.ToLower(s)
+	idx := strings.LastIndex(lower, "return ")
+	if idx == -1 {
+		return ""
+	}
+	expr := strings.TrimSpace(s[idx+7:])
+	// Trim trailing statement terminators.
+	expr = strings.TrimRight(expr, "; \t\n\r")
+	// Take only the first line.
+	if nl := strings.IndexAny(expr, "\n\r"); nl > 0 {
+		expr = strings.TrimSpace(expr[:nl])
+	}
+	return strings.TrimRight(expr, ";")
+}
+
+// findAssignmentOp returns the index of a bare `=` that is not part of
+// `==`, `!=`, `<=`, or `>=`. Returns -1 if none found.
+func findAssignmentOp(s string) int {
+	for i := 1; i < len(s)-1; i++ {
+		if s[i] == '=' && s[i-1] != '!' && s[i-1] != '<' && s[i-1] != '>' && s[i-1] != '=' && s[i+1] != '=' {
+			return i
+		}
+	}
+	return -1
+}
+
+// unquoteLiteral strips surrounding " or ' from a string literal.
+// Returns nil if the value is not a string literal.
+func unquoteLiteral(s string) interface{} {
+	s = strings.TrimSpace(s)
+	if len(s) >= 2 {
+		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
+			return s[1 : len(s)-1]
+		}
+	}
+	return nil
 }
 
 // Helper functions

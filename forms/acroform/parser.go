@@ -69,13 +69,23 @@ func parseAcroFormFromBytes(pdfBytes []byte, encryptInfo *types.PDFEncryption, v
 	acroFormMatch := acroFormPattern.FindStringSubmatch(pdfStr)
 
 	if acroFormMatch == nil {
-		// Try inline AcroForm
+		// Try inline AcroForm dict (e.g. /AcroForm << /Fields [...] >> )
 		acroFormInlinePattern := regexp.MustCompile(`/AcroForm\s*<<`)
-		if acroFormInlinePattern.FindStringIndex(pdfStr) == nil {
+		loc := acroFormInlinePattern.FindStringIndex(pdfStr)
+		if loc == nil {
 			return nil, types.NewPDFError(types.ErrCodeNoForms, "AcroForm not found in PDF")
 		}
-		// Inline AcroForm - would need more complex parsing
-		return nil, types.NewPDFError(types.ErrCodeUnsupportedPDF, "inline AcroForm not yet supported")
+		// dictStart points to the '<<' opener of the inline dict
+		dictStart := loc[1] - 2 // loc[1] is after '<<', step back
+		inlineDict := extractBracketedDict(pdfStr, dictStart)
+		if inlineDict == nil {
+			return nil, types.NewPDFError(types.ErrCodeInvalidObject, "failed to extract inline AcroForm dictionary")
+		}
+		acroForm := &AcroForm{Fields: make([]*Field, 0)}
+		if err := parseAcroFormDict(inlineDict, acroForm, pdfBytes, encryptInfo, verbose); err != nil {
+			return nil, types.WrapError(types.ErrCodeInvalidForm, "failed to parse inline AcroForm dictionary", err)
+		}
+		return acroForm, nil
 	}
 
 	acroFormObjNum, err := strconv.Atoi(acroFormMatch[1])
@@ -411,4 +421,38 @@ func mapFieldTypeWithFlags(ft string, flags int) types.ResponseType {
 	default:
 		return types.ResponseTypeUnknown
 	}
+}
+
+// extractBracketedDict extracts a complete << ... >> dict from s starting at
+// offset start (which must point to the first '<' of '<<').  Nested dicts are
+// handled by counting depth.  Returns nil if the brackets are unbalanced.
+func extractBracketedDict(s string, start int) []byte {
+	depth := 0
+	i := start
+	for i < len(s)-1 {
+		switch {
+		case s[i] == '<' && s[i+1] == '<':
+			depth++
+			i += 2
+		case s[i] == '>' && s[i+1] == '>':
+			depth--
+			i += 2
+			if depth == 0 {
+				return []byte(s[start:i])
+			}
+		case s[i] == '(':
+			// Skip PDF string literal to avoid false bracket matches inside strings.
+			i++
+			for i < len(s) && s[i] != ')' {
+				if s[i] == '\\' {
+					i++ // skip escaped character
+				}
+				i++
+			}
+			i++ // skip closing ')'
+		default:
+			i++
+		}
+	}
+	return nil
 }

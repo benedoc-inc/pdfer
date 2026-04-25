@@ -94,7 +94,7 @@ func TestEncryptPDF_CorrectPasswordAccepted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EncryptPDF: %v", err)
 	}
-	if _, _, err := encrypt.DecryptPDF(out, []byte("mypassword"), false); err != nil {
+	if _, err := encrypt.DecryptPDF(out, []byte("mypassword"), false); err != nil {
 		t.Fatalf("DecryptPDF with correct password failed: %v", err)
 	}
 }
@@ -105,7 +105,7 @@ func TestEncryptPDF_WrongPasswordRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EncryptPDF: %v", err)
 	}
-	if _, _, err := encrypt.DecryptPDF(out, []byte("wrong"), false); err == nil {
+	if _, err := encrypt.DecryptPDF(out, []byte("wrong"), false); err == nil {
 		t.Error("expected error with wrong password, got nil")
 	}
 }
@@ -117,7 +117,7 @@ func TestEncryptPDF_RoundTrip(t *testing.T) {
 		t.Fatalf("EncryptPDF: %v", err)
 	}
 	// Verify the correct password is accepted.
-	if _, _, err := encrypt.DecryptPDF(encrypted, []byte("pass"), false); err != nil {
+	if _, err := encrypt.DecryptPDF(encrypted, []byte("pass"), false); err != nil {
 		t.Fatalf("DecryptPDF: %v", err)
 	}
 	// Verify the encrypted PDF is still structurally intact by parsing with password.
@@ -132,7 +132,7 @@ func TestEncryptPDF_EmptyUserPassword(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EncryptPDF: %v", err)
 	}
-	if _, _, err := encrypt.DecryptPDF(out, nil, false); err != nil {
+	if _, err := encrypt.DecryptPDF(out, nil, false); err != nil {
 		t.Fatalf("DecryptPDF with empty password failed: %v", err)
 	}
 }

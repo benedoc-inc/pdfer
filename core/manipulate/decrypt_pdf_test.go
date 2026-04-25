@@ -97,7 +97,7 @@ func TestDecryptPDF_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-EncryptPDF: %v", err)
 	}
-	if _, _, err := encrypt.DecryptPDF(reEncrypted, []byte("new"), false); err != nil {
+	if _, err := encrypt.DecryptPDF(reEncrypted, []byte("new"), false); err != nil {
 		t.Fatalf("re-encrypted PDF not openable: %v", err)
 	}
 }

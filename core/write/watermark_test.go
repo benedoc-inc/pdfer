@@ -1,6 +1,7 @@
 package write
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/benedoc-inc/pdfer/core/parse"
@@ -53,6 +54,66 @@ func TestWatermark_Text(t *testing.T) {
 	// Watermark text may be in compressed content stream, so we verify PDF is valid
 	// In a real scenario, you'd extract and decompress content streams to verify
 	t.Logf("Generated PDF with watermark: %d bytes, %d objects", len(pdfBytes), pdf.ObjectCount())
+}
+
+// TestWatermark_ExtGState verifies that a semi-transparent watermark produces
+// a proper /ExtGState entry (not just an RGB colour approximation).
+func TestWatermark_ExtGState(t *testing.T) {
+	builder := NewSimplePDFBuilder()
+	page := builder.AddPage(PageSizeLetter)
+
+	options := DefaultWatermarkOptions()
+	options.Text = "DRAFT"
+	options.Opacity = 0.3
+
+	if err := page.AddWatermark(options); err != nil {
+		t.Fatalf("AddWatermark: %v", err)
+	}
+	builder.FinalizePage(page)
+
+	pdfBytes, err := builder.Bytes()
+	if err != nil {
+		t.Fatalf("Bytes: %v", err)
+	}
+
+	pdfStr := string(pdfBytes)
+
+	// The page resources dictionary must contain an /ExtGState entry.
+	if !strings.Contains(pdfStr, "/ExtGState") {
+		t.Error("expected /ExtGState in PDF resources")
+	}
+
+	// The ExtGState dict must carry a fill-alpha (/ca) entry.
+	if !strings.Contains(pdfStr, "/ca") {
+		t.Error("expected /ca (fill alpha) in ExtGState")
+	}
+
+}
+
+// TestWatermark_Opaque verifies that opacity == 1.0 skips the ExtGState path
+// (no unnecessary /ExtGState in a fully opaque watermark).
+func TestWatermark_Opaque(t *testing.T) {
+	builder := NewSimplePDFBuilder()
+	page := builder.AddPage(PageSizeLetter)
+
+	options := DefaultWatermarkOptions()
+	options.Text = "SOLID"
+	options.Opacity = 1.0
+
+	if err := page.AddWatermark(options); err != nil {
+		t.Fatalf("AddWatermark: %v", err)
+	}
+	builder.FinalizePage(page)
+
+	pdfBytes, err := builder.Bytes()
+	if err != nil {
+		t.Fatalf("Bytes: %v", err)
+	}
+
+	// A fully opaque watermark should not need /ExtGState transparency state.
+	if strings.Contains(string(pdfBytes), "/ExtGState") {
+		t.Error("did not expect /ExtGState for opacity=1.0")
+	}
 }
 
 func TestWatermark_ConvenienceMethod(t *testing.T) {

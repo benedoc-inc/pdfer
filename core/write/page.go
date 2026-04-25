@@ -30,9 +30,10 @@ var (
 type PageBuilder struct {
 	writer      *PDFWriter
 	size        PageSize
-	fonts       map[string]int // font name -> object number
-	images      map[string]int // image name -> object number
-	annotations []int          // annotation object numbers, in addition order
+	fonts       map[string]int    // font name -> object number
+	images      map[string]int    // image name -> object number
+	extgstates  map[string]string // ExtGState name -> inline dict string
+	annotations []int             // annotation object numbers, in addition order
 	content     *ContentStream
 	pageObjNum  int
 	pagesObjNum int
@@ -41,11 +42,12 @@ type PageBuilder struct {
 // NewPageBuilder creates a new page builder
 func (w *PDFWriter) NewPageBuilder(size PageSize) *PageBuilder {
 	return &PageBuilder{
-		writer:  w,
-		size:    size,
-		fonts:   make(map[string]int),
-		images:  make(map[string]int),
-		content: NewContentStream(),
+		writer:     w,
+		size:       size,
+		fonts:      make(map[string]int),
+		images:     make(map[string]int),
+		extgstates: make(map[string]string),
+		content:    NewContentStream(),
 	}
 }
 
@@ -119,6 +121,13 @@ func (pb *PageBuilder) AddEmbeddedFont(f *font.Font) (string, error) {
 	return "/" + resourceName, nil
 }
 
+// addExtGState registers an ExtGState resource on the page.
+// name is the resource name (e.g. "WMgs") and dict is the inline PDF dict string
+// (e.g. "<</Type/ExtGState/ca 0.3000/CA 0.3000>>").
+func (pb *PageBuilder) addExtGState(name, dict string) {
+	pb.extgstates[name] = dict
+}
+
 // fontWriterWrapper wraps PDFWriter to implement font.PDFWriter interface
 type fontWriterWrapper struct {
 	w *PDFWriter
@@ -161,6 +170,15 @@ func (pb *PageBuilder) Build(pagesObjNum int) int {
 		resources += "/XObject<<"
 		for name, objNum := range pb.images {
 			resources += fmt.Sprintf("/%s %d 0 R", name, objNum)
+		}
+		resources += ">>"
+	}
+
+	// Add ExtGState entries (e.g. transparency alpha states)
+	if len(pb.extgstates) > 0 {
+		resources += "/ExtGState<<"
+		for name, dict := range pb.extgstates {
+			resources += fmt.Sprintf("/%s %s", name, dict)
 		}
 		resources += ">>"
 	}

@@ -20,8 +20,7 @@ import (
 // removed from the catalog. Unfilled fields (no AP stream) are silently
 // dropped; they leave no visual trace.
 //
-// Limitation: /Resources given as an indirect reference (rather than an inline
-// dict) is not yet supported; such pages are passed through unmodified.
+// Both inline and indirect /Resources dicts are handled.
 func FlattenForm(pdfBytes []byte, password []byte, verbose bool) ([]byte, error) {
 	pdf, err := parse.OpenWithOptions(pdfBytes, parse.ParseOptions{Password: password})
 	if err != nil {
@@ -142,7 +141,16 @@ func FlattenForm(pdfBytes []byte, password []byte, verbose bool) ([]byte, error)
 			"<</Length %d>>\nstream\n%sendstream", len(overlayStr), overlayStr))
 
 		pageDict = flattenAppendContents(pageDict, overlayNum)
-		pageDict = flattenAddXObjects(pageDict, xobjs)
+
+		// If /Resources is an indirect reference, update that object directly;
+		// otherwise inject into the inline /Resources dict in the page dict.
+		if resObjNum := flattenIndirectResourcesObjNum(pageDict); resObjNum > 0 {
+			if resBody, ok := contents[resObjNum]; ok {
+				contents[resObjNum] = []byte(flattenAddXObjectsToDict(string(resBody), xobjs))
+			}
+		} else {
+			pageDict = flattenAddXObjects(pageDict, xobjs)
+		}
 		contents[pageNum] = []byte(pageDict)
 	}
 
@@ -313,9 +321,90 @@ func flattenAppendContents(pageDict string, newObjNum int) string {
 	return strings.Replace(pageDict, m[0], "/Contents "+newContents, 1)
 }
 
+// flattenIndirectResourcesObjNum returns the object number if the page dict's
+// /Resources entry is an indirect reference (e.g. "/Resources 10 0 R"), or 0
+// if /Resources is an inline dict or absent.
+func flattenIndirectResourcesObjNum(pageDict string) int {
+	re := regexp.MustCompile(`/Resources\s+(\d+)\s+\d+\s+R`)
+	m := re.FindStringSubmatch(pageDict)
+	if m == nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(m[1])
+	return n
+}
+
+// findDictEnd returns the index of the first byte of the closing ">>" that
+// matches the opening "<<" at position start in s.  It counts nested "<<"/">> "
+// pairs so that embedded sub-dicts are skipped correctly.  Returns -1 if no
+// matching ">>" is found.
+func findDictEnd(s string, start int) int {
+	depth := 0
+	i := start
+	for i < len(s)-1 {
+		if s[i] == '<' && s[i+1] == '<' {
+			depth++
+			i += 2
+		} else if s[i] == '>' && s[i+1] == '>' {
+			depth--
+			if depth == 0 {
+				return i
+			}
+			i += 2
+		} else {
+			i++
+		}
+	}
+	return -1
+}
+
+// flattenAddXObjectsToDict injects XObject resource entries into a standalone
+// resources dict body (the raw << … >> bytes of the /Resources object, not a
+// full page dict).  It mirrors the behaviour of flattenAddXObjects but operates
+// on the resources dict directly.
+func flattenAddXObjectsToDict(resStr string, xobjs map[string]int) string {
+	if len(xobjs) == 0 {
+		return resStr
+	}
+	var entries strings.Builder
+	for alias, num := range xobjs {
+		fmt.Fprintf(&entries, "/%s %d 0 R", alias, num)
+	}
+	newEntries := entries.String()
+
+	// Inject into existing /XObject if present.
+	if xobjIdx := strings.Index(resStr, "/XObject"); xobjIdx != -1 {
+		// Find the opening << of the /XObject value.
+		openIdx := strings.Index(resStr[xobjIdx:], "<<")
+		if openIdx != -1 {
+			openIdx += xobjIdx
+			closeIdx := findDictEnd(resStr, openIdx)
+			if closeIdx != -1 {
+				return resStr[:closeIdx] + newEntries + resStr[closeIdx:]
+			}
+		}
+	}
+
+	// No /XObject yet: insert before the outermost closing >> of the dict.
+	depth := 0
+	for i := 0; i < len(resStr)-1; i++ {
+		if resStr[i] == '<' && resStr[i+1] == '<' {
+			depth++
+			i++
+		} else if resStr[i] == '>' && resStr[i+1] == '>' {
+			depth--
+			if depth == 0 {
+				return resStr[:i] + "/XObject<<" + newEntries + ">>" + resStr[i:]
+			}
+			i++
+		}
+	}
+	return resStr
+}
+
 // flattenAddXObjects injects XObject resource entries into the page dict's
 // /Resources /XObject sub-dict, creating the sub-dict if it does not exist.
-// Assumes /Resources is an inline dict (indirect resource refs are not handled).
+// Call flattenAddXObjectsToDict instead when /Resources is an indirect object.
 func flattenAddXObjects(pageDict string, xobjs map[string]int) string {
 	if len(xobjs) == 0 {
 		return pageDict

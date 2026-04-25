@@ -48,3 +48,9 @@ Thumbs.db
 vendor/
 go.work
 go.work.sum
+
+# Claude Code local state
+.claude/
+output.pdf
+output_encrypted.pdf
+kitchen_sink

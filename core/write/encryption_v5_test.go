@@ -155,8 +155,8 @@ func TestWriteAES256EncryptedPDF(t *testing.T) {
 		t.Error("PDF should contain /OE")
 	}
 
-	// Try to decrypt and parse
-	decryptedBytes, decryptInfo, err := encrypt.DecryptPDF(pdfBytes, userPassword, true)
+	// Verify password and derive key
+	decryptInfo, err := encrypt.DecryptPDF(pdfBytes, userPassword, true)
 	if err != nil {
 		t.Fatalf("Failed to decrypt PDF: %v", err)
 	}
@@ -169,23 +169,16 @@ func TestWriteAES256EncryptedPDF(t *testing.T) {
 		t.Errorf("Decryption key length = %d, want 32", len(decryptInfo.EncryptKey))
 	}
 
-	// Verify decrypted PDF is valid (starts with %PDF-)
-	if !bytes.HasPrefix(decryptedBytes, []byte("%PDF-")) {
-		t.Error("Decrypted PDF should start with %PDF-")
-	}
+	t.Logf("Successfully verified password: %d-byte key", len(decryptInfo.EncryptKey))
 
-	// Note: parser.Open will try to decrypt again if it finds /Encrypt
-	// For this test, we just verify decryption worked
-	t.Logf("Successfully decrypted PDF: %d bytes", len(decryptedBytes))
-
-	// Test owner password
-	decryptedBytes2, _, err := encrypt.DecryptPDF(pdfBytes, ownerPassword, false)
+	// Owner password should also be accepted and yield the same file encryption key
+	decryptInfo2, err := encrypt.DecryptPDF(pdfBytes, ownerPassword, false)
 	if err != nil {
 		t.Fatalf("Failed to decrypt with owner password: %v", err)
 	}
 
-	if !bytes.Equal(decryptedBytes, decryptedBytes2) {
-		t.Error("Decryption with user and owner passwords should produce same result")
+	if !bytes.Equal(decryptInfo.EncryptKey, decryptInfo2.EncryptKey) {
+		t.Error("User and owner passwords should derive the same file encryption key")
 	}
 }
 
@@ -225,8 +218,8 @@ func TestWriteAES256EncryptedPDF_SimpleBuilder(t *testing.T) {
 		t.Error("PDF should use V5 encryption")
 	}
 
-	// Decrypt and verify
-	decryptedBytes, decryptInfo, err := encrypt.DecryptPDF(pdfBytes, userPassword, false)
+	// Verify password and derive key
+	decryptInfo, err := encrypt.DecryptPDF(pdfBytes, userPassword, false)
 	if err != nil {
 		t.Fatalf("Failed to decrypt: %v", err)
 	}
@@ -235,11 +228,7 @@ func TestWriteAES256EncryptedPDF_SimpleBuilder(t *testing.T) {
 		t.Error("Decryption should produce 32-byte key")
 	}
 
-	if !bytes.HasPrefix(decryptedBytes, []byte("%PDF-")) {
-		t.Error("Decrypted PDF should start with %PDF-")
-	}
-
-	t.Logf("Successfully created, encrypted, and decrypted PDF: %d bytes", len(decryptedBytes))
+	t.Logf("Successfully created, encrypted, and decrypted PDF: %d bytes", len(pdfBytes))
 }
 
 // TestEncryptedPDF_DictStringsAreEncrypted verifies that string values in
