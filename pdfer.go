@@ -1,32 +1,35 @@
-// Package pdfer provides pure Go PDF processing with comprehensive XFA support.
+// Package pdfer provides pure Go PDF processing with zero external dependencies.
 //
-// This is a zero-dependency PDF library that can:
-//   - Decrypt PDFs (RC4 and AES encryption)
-//   - Parse PDF structure (xref, objects, streams)
-//   - Extract and modify XFA forms
-//   - Create PDFs from scratch
+// # Common operations
 //
-// # Quick Start
+// Encrypt and decrypt:
 //
-// Extract XFA from an encrypted PDF:
+//	out, err := pdfer.EncryptPDF(pdfBytes, []byte("password"), nil)
+//	out, _, err := pdfer.DecryptPDF(pdfBytes, []byte("password"), false)
 //
-//	import "github.com/benedoc-inc/pdfer"
-//	import "github.com/benedoc-inc/pdfer/core/encrypt"
-//	import "github.com/benedoc-inc/pdfer/forms/xfa"
+// Merge, split, redact:
 //
-//	// Decrypt
-//	_, encInfo, _ := encryption.DecryptPDF(pdfBytes, password, false)
+//	out, err := pdfer.MergePDFs([][]byte{a, b}, nil, false)
+//	parts, err := pdfer.SplitPDF(pdfBytes, []pdfer.PageRange{{1, 3}, {4, 6}}, nil, false)
+//	out, err := pdfer.Redact(pdfBytes, []pdfer.RedactBox{{Page: 1, Rect: [4]float64{50, 680, 200, 720}}}, nil)
 //
-//	// Extract XFA
-//	streams, _ := xfa.ExtractAllXFAStreams(pdfBytes, encInfo, false)
+// Fill and flatten forms (AcroForm and XFA auto-detected):
 //
-// # Packages
+//	form, err := pdfer.ExtractForm(pdfBytes, nil, false)
+//	out, err := form.Fill(pdfBytes, pdfer.FormData{"name": "Alice"}, nil, false)
+//	out, err = pdfer.FlattenForm(out, nil, false)
 //
-//   - encryption: PDF decryption (RC4, AES-128, AES-256)
-//   - parser: Low-level PDF parsing
-//   - types: Common data structures
-//   - writer: PDF creation and modification
-//   - xfa: XFA form processing
+// # Sub-packages
+//
+// Import sub-packages directly for lower-level control:
+//
+//   - core/encrypt  — RC4/AES decryption and AES-128/256 encryption primitives
+//   - core/parse    — PDF structure parsing (xref, objects, streams)
+//   - core/write    — PDF generation (SimplePDFBuilder, PDFWriter)
+//   - core/manipulate — document-level operations (merge, split, redact, encrypt)
+//   - forms/acroform — AcroForm parsing, filling, appearance streams
+//   - forms/xfa     — XFA stream extraction and dataset updating
+//   - content/extract — text, image, annotation and metadata extraction
 package pdfer
 
 import (
@@ -62,5 +65,5 @@ type XFALocaleSet = types.XFALocaleSet
 
 // Version returns the library version.
 func Version() string {
-	return "0.9.24"
+	return "0.9.25"
 }

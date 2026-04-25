@@ -24,6 +24,7 @@ type PDFObject struct {
 	Content    []byte     // Raw content (dictionary, stream, etc.)
 	Stream     []byte     // Stream data (if this is a stream object)
 	Dict       Dictionary // Parsed dictionary (for convenience)
+	RawDict    []byte     // Raw dict bytes for raw stream objects (see SetRawStreamObject)
 	IsFree     bool
 }
 
@@ -160,6 +161,22 @@ func (w *PDFWriter) SetStreamObject(objNum int, dict Dictionary, data []byte, co
 	}
 }
 
+// SetRawStreamObject stores a stream object from its raw dict bytes and raw stream bytes.
+// Unlike SetStreamObject, the dict is kept as-is (no parsing required) and the stream
+// data is stored for per-object encryption during Bytes(). This is used by EncryptPDF
+// to re-encrypt existing stream objects without decompress/recompress round-trips.
+func (w *PDFWriter) SetRawStreamObject(objNum int, rawDict, rawStream []byte) {
+	w.objects[objNum] = &PDFObject{
+		Number:     objNum,
+		Generation: 0,
+		RawDict:    rawDict,
+		Stream:     rawStream,
+	}
+	if objNum >= w.nextObjNum {
+		w.nextObjNum = objNum + 1
+	}
+}
+
 // SetRoot sets the root (catalog) object reference
 func (w *PDFWriter) SetRoot(objNum int) {
 	w.rootRef = fmt.Sprintf("%d 0 R", objNum)
@@ -258,7 +275,25 @@ func (w *PDFWriter) Write(out io.Writer) error {
 		buf.WriteString(fmt.Sprintf("%d %d obj\n", objNum, obj.Generation))
 
 		// Write content
-		if obj.Stream != nil {
+		if obj.RawDict != nil {
+			// Raw stream object: dict kept as raw bytes, stream encrypted in place.
+			streamData := obj.Stream
+			if w.encryptInfo != nil {
+				if encrypted, err := w.encryptStream(streamData, objNum, obj.Generation); err == nil {
+					streamData = encrypted
+				}
+			}
+			dictContent := rawStreamUpdateLength(obj.RawDict, len(streamData))
+			if w.encryptInfo != nil && objNum != encryptDictObjNum {
+				if enc, err := w.encryptStringsInContent(dictContent, objNum, obj.Generation); err == nil {
+					dictContent = enc
+				}
+			}
+			buf.Write(dictContent)
+			buf.WriteString("\nstream\n")
+			buf.Write(streamData)
+			buf.WriteString("\nendstream")
+		} else if obj.Stream != nil {
 			// Stream object
 			content := w.formatDictionary(obj.Dict)
 
@@ -529,4 +564,33 @@ func (w *PDFWriter) GetObject(objNum int) ([]byte, error) {
 		return obj.Stream, nil
 	}
 	return nil, fmt.Errorf("object %d has no content", objNum)
+}
+
+// rawStreamUpdateLength replaces the /Length value in raw dict bytes with the
+// given length. Called after encrypting a raw stream so the length is correct.
+func rawStreamUpdateLength(dictBytes []byte, length int) []byte {
+	newLen := []byte(fmt.Sprintf("%d", length))
+	out := make([]byte, 0, len(dictBytes))
+	i := 0
+	for i < len(dictBytes) {
+		// Look for /Length followed by whitespace and digits.
+		if i+7 < len(dictBytes) && string(dictBytes[i:i+7]) == "/Length" {
+			out = append(out, dictBytes[i:i+7]...)
+			i += 7
+			// Consume whitespace.
+			for i < len(dictBytes) && (dictBytes[i] == ' ' || dictBytes[i] == '\t' || dictBytes[i] == '\r' || dictBytes[i] == '\n') {
+				out = append(out, dictBytes[i])
+				i++
+			}
+			// Skip old digits.
+			for i < len(dictBytes) && dictBytes[i] >= '0' && dictBytes[i] <= '9' {
+				i++
+			}
+			out = append(out, newLen...)
+			continue
+		}
+		out = append(out, dictBytes[i])
+		i++
+	}
+	return out
 }

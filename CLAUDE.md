@@ -53,17 +53,41 @@ pdfer is a pure Go PDF library with zero external dependencies. The codebase fol
 
 ## Key Entry Points
 
+Most operations are available directly from the root package:
+
+```go
+import "github.com/benedoc-inc/pdfer"
+
+// Encrypt / decrypt
+out, err := pdfer.EncryptPDF(pdfBytes, []byte("password"), nil, false)
+out, _, err := pdfer.DecryptPDF(pdfBytes, []byte("password"), false)
+
+// Merge / split
+out, err := pdfer.MergePDFs([][]byte{a, b}, nil, false)
+parts, err := pdfer.SplitPDF(pdfBytes, []pdfer.PageRange{{1, 3}, {4, 6}}, nil, false)
+
+// Redact
+out, err := pdfer.Redact(pdfBytes, []pdfer.RedactBox{{Page: 1, Rect: [4]float64{50, 680, 200, 720}}}, nil)
+
+// Forms (AcroForm and XFA auto-detected)
+form, err := pdfer.ExtractForm(pdfBytes, nil, false)
+out, err := form.Fill(pdfBytes, pdfer.FormData{"name": "Alice"}, nil, false)
+out, err = pdfer.FlattenForm(out, nil, false)
+
+// Compare two PDFs
+result, err := pdfer.ComparePDFs(pdf1, pdf2, nil, nil, false)
+fmt.Println(pdfer.CompareReport(result))
+```
+
+For lower-level control, import sub-packages directly:
+
 ```go
 // Parse PDF
 pdf, err := parse.Open(pdfBytes)
 pdf, err := parse.OpenWithOptions(pdfBytes, parse.ParseOptions{
     Password:    []byte("secret"),
-    BytePerfect: true,  // For reconstruction
+    BytePerfect: true,
 })
-
-// Unified form handling (auto-detects AcroForm/XFA)
-form, err := forms.Extract(pdfBytes, password, verbose)
-filledPDF, err := form.Fill(pdfBytes, formData, password, verbose)
 
 // Create PDF from scratch
 builder := write.NewSimplePDFBuilder()
