@@ -2,6 +2,7 @@ package write
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/binary"
 	"fmt"
 	"strings"
@@ -48,6 +49,15 @@ func (w *PDFWriter) preparePDFA(opts PDFAOptions, now time.Time) (metaObjNum, ou
 	default:
 		part = 2
 		w.SetVersion("1.7")
+	}
+
+	// PDF/A requires a trailer /ID array (ISO 19005 §6.7.3). Generate one if
+	// the writer doesn't already have a file ID (i.e. no encryption was set up).
+	if len(w.fileID) == 0 {
+		id := make([]byte, 16)
+		if _, randErr := rand.Read(id); randErr == nil {
+			w.fileID = id
+		}
 	}
 
 	created := opts.CreationDate
