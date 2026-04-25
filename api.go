@@ -2,7 +2,6 @@ package pdfer
 
 import (
 	"github.com/benedoc-inc/pdfer/core/compare"
-	"github.com/benedoc-inc/pdfer/core/encrypt"
 	"github.com/benedoc-inc/pdfer/core/manipulate"
 	"github.com/benedoc-inc/pdfer/forms"
 	"github.com/benedoc-inc/pdfer/forms/acroform"
@@ -30,11 +29,12 @@ const (
 
 // --- Encryption / decryption -------------------------------------------------
 
-// DecryptPDF decrypts an encrypted PDF using the provided password.
+// DecryptPDF produces a fully decrypted, plaintext PDF from an encrypted one.
 // It accepts both user and owner passwords and supports RC4 (40/128-bit) and
-// AES (128/256-bit). Returns the decrypted bytes and the encryption parameters.
-func DecryptPDF(pdfBytes []byte, password []byte, verbose bool) ([]byte, *Encryption, error) {
-	return encrypt.DecryptPDF(pdfBytes, password, verbose)
+// AES (128/256-bit). The returned bytes can be opened by any PDF tool without
+// a password.
+func DecryptPDF(pdfBytes []byte, password []byte, verbose bool) ([]byte, error) {
+	return manipulate.DecryptPDF(pdfBytes, password, verbose)
 }
 
 // EncryptPDF applies AES-128 encryption to an existing unencrypted PDF.

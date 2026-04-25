@@ -8,16 +8,10 @@ behaviour.
 
 ## P1 — High impact
 
-### `DecryptPDF` returns encrypted bytes unchanged
-**File:** `core/encrypt/decrypt.go:185` — `DecryptPDFObjects`  
-The function verifies the password and derives the key but returns the original
-encrypted bytes unchanged. Callers expecting a decrypted file are silently
-misled. Decryption works *inside* `parse.OpenWithOptions` (objects are
-decrypted on demand during parsing), but there is no standalone "decrypt to
-plaintext PDF" operation.  
-**To fix:** Walk the xref, derive a per-object key, decrypt each stream and
-string in place, strip `/Encrypt` from the catalog, emit clean bytes — the
-inverse of `EncryptPDF`.
+### ~~`DecryptPDF` returns encrypted bytes unchanged~~ ✅ Fixed in v0.9.27
+`manipulate.DecryptPDF` / `pdfer.DecryptPDF` now produces a fully decrypted
+plaintext PDF. `encrypt.DecryptPDFObjects` remains a stub but is no longer
+called by the public API.
 
 ### Owner-password authentication is broken for R≤4
 **File:** `core/encrypt/key_derivation.go:268` — `DeriveUserKeyFromOwner`  
