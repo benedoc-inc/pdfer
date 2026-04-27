@@ -918,5 +918,45 @@ func ReplaceStreamInPDF(pdfBytes []byte, streamObjNum int, newStream []byte, ver
 		log.Printf("Replaced stream %d: old length %s, new length %d", streamObjNum, string(pdfBytes[lengthStart:lengthEnd]), len(newStream))
 	}
 
+	// Update startxref so PDF readers can find the cross-reference table after
+	// the byte shift caused by the stream size change.
+	delta := int64(len(result)) - int64(len(pdfBytes))
+	if delta != 0 {
+		result = shiftStartXRef(result, delta)
+	}
+
 	return result, nil
+}
+
+// shiftStartXRef adjusts the startxref offset near the end of a PDF by delta bytes.
+// This is required after any in-place stream replacement that changes the file length,
+// because all objects after the modified stream shift by the same amount.
+func shiftStartXRef(pdfBytes []byte, delta int64) []byte {
+	// Search the last 256 bytes where startxref always appears.
+	tail := pdfBytes
+	if len(tail) > 256 {
+		tail = tail[len(tail)-256:]
+	}
+	tailOffset := len(pdfBytes) - len(tail)
+
+	re := regexp.MustCompile(`startxref\s+(\d+)`)
+	loc := re.FindSubmatchIndex(tail)
+	if loc == nil {
+		return pdfBytes
+	}
+
+	oldVal, err := strconv.ParseInt(string(tail[loc[2]:loc[3]]), 10, 64)
+	if err != nil {
+		return pdfBytes
+	}
+	newVal := oldVal + delta
+
+	absStart := tailOffset + loc[0]
+	absEnd := tailOffset + loc[1]
+
+	out := make([]byte, 0, len(pdfBytes)+20)
+	out = append(out, pdfBytes[:absStart]...)
+	out = append(out, []byte(fmt.Sprintf("startxref\n%d", newVal))...)
+	out = append(out, pdfBytes[absEnd:]...)
+	return out
 }

@@ -508,17 +508,29 @@ func UpdateXFAValues(xfaXML string, formData types.FormData, verbose bool) (stri
 	return result, nil
 }
 
-// UpdateXFAFieldValues updates individual field values in XFA XML
+// UpdateXFAFieldValues updates individual field values in XFA XML.
+// It supports two dataset formats:
+//   - <field name="NAME"><value>V</value></field>  (synthetic / eSTAR forms)
+//   - <NAME>V</NAME> or <NAME/>                    (standard XFA element datasets, e.g. FDA Form 3881)
 func UpdateXFAFieldValues(xfaXML string, formData types.FormData, verbose bool) (string, error) {
 	resultXML := xfaXML
 
 	for fieldName, newValue := range formData {
-		// Find field in XFA XML
+		valueStr := fmt.Sprintf("%v", newValue)
+
+		// Try <field name="NAME"> format first.
 		fieldPattern := fmt.Sprintf(`<field name="%s"`, fieldName)
 		fieldIndex := strings.Index(resultXML, fieldPattern)
 
 		if fieldIndex == -1 {
-			if verbose {
+			// Fall back to element-based format: <NAME>value</NAME> or <NAME/>.
+			updated, ok := updateXFAElement(resultXML, fieldName, valueStr)
+			if ok {
+				resultXML = updated
+				if verbose {
+					log.Printf("Updated element '%s' = '%s'", fieldName, valueStr)
+				}
+			} else if verbose {
 				log.Printf("Warning: Field '%s' not found in XFA XML", fieldName)
 			}
 			continue
@@ -535,8 +547,6 @@ func UpdateXFAFieldValues(xfaXML string, formData types.FormData, verbose bool) 
 		// Check if value element exists
 		valueStart := strings.Index(fieldSection, "<value>")
 		valueEnd := strings.Index(fieldSection, "</value>")
-
-		valueStr := fmt.Sprintf("%v", newValue)
 
 		if valueStart != -1 && valueEnd != -1 {
 			// Replace existing value
@@ -556,4 +566,27 @@ func UpdateXFAFieldValues(xfaXML string, formData types.FormData, verbose bool) 
 	}
 
 	return resultXML, nil
+}
+
+// updateXFAElement updates a single field in element-based XFA datasets XML.
+// It handles self-closing elements (<NAME/> or <NAME\n/>) and elements with
+// existing content (<NAME>old</NAME>). Returns the updated XML and true if the
+// element was found and replaced.
+func updateXFAElement(xfaXML, fieldName, newValue string) (string, bool) {
+	qn := regexp.QuoteMeta(fieldName)
+	replacement := "<" + fieldName + ">" + newValue + "</" + fieldName + ">"
+
+	// Self-closing: <fieldName\s*/> (handles whitespace/newlines before />)
+	selfCloseRe := regexp.MustCompile(`<` + qn + `\s*/>`)
+	if selfCloseRe.MatchString(xfaXML) {
+		return selfCloseRe.ReplaceAllLiteralString(xfaXML, replacement), true
+	}
+
+	// With content: <fieldName\s*>…</fieldName\s*>
+	withContentRe := regexp.MustCompile(`<` + qn + `\s*>.*?</` + qn + `\s*>`)
+	if withContentRe.MatchString(xfaXML) {
+		return withContentRe.ReplaceAllLiteralString(xfaXML, replacement), true
+	}
+
+	return xfaXML, false
 }
