@@ -3,9 +3,21 @@ package types
 // FormSchema represents the complete form structure
 // that can be used to rebuild the form with questions, responses, and control flow
 type FormSchema struct {
-	Metadata  FormMetadata `json:"metadata"`
-	Questions []Question   `json:"questions"`
-	Rules     []Rule       `json:"rules"` // Control flow rules (dependencies, conditions)
+	Metadata  FormMetadata  `json:"metadata"`
+	Questions []Question    `json:"questions"`
+	Sections  []FormSection `json:"sections,omitempty"` // hierarchical section tree (XFA only)
+	Rules     []Rule        `json:"rules"`               // Control flow rules (dependencies, conditions)
+}
+
+// FormSection is a node in the XFA subform hierarchy.
+// Questions contains question IDs (not full Question objects) in document order;
+// the flat Questions slice on FormSchema is the canonical store.
+type FormSection struct {
+	Name        string        `json:"name"`
+	Path        string        `json:"path"`                  // dot-separated path from root, e.g. "form1.section2.sub"
+	Interactive bool          `json:"interactive"`           // true if the section contains any data-bound fields
+	Children    []FormSection `json:"children,omitempty"`
+	Questions   []string      `json:"questions,omitempty"` // question IDs in document order
 }
 
 // FormMetadata contains information about the form
@@ -32,6 +44,7 @@ type Question struct {
 	Hidden      bool                   `json:"hidden"`                // Is field initially hidden?
 	Properties  map[string]interface{} `json:"properties,omitempty"`  // Additional properties (position, size, etc.)
 	PageNumber  int                    `json:"page_number,omitempty"` // Which page the field appears on
+	Section     string                 `json:"section,omitempty"`     // Parent subform / section name
 }
 
 // ResponseType represents the type of response expected
@@ -48,6 +61,8 @@ const (
 	ResponseTypeEmail     ResponseType = "email"     // Email input
 	ResponseTypeButton    ResponseType = "button"    // Button (not a question, but action)
 	ResponseTypeSignature ResponseType = "signature" // Signature field
+	ResponseTypeDisplay   ResponseType = "display"   // Static display text (XFA draw / no-bind label)
+	ResponseTypeImage    ResponseType = "image"     // Embedded image (XFA draw with <image> content)
 	ResponseTypeUnknown   ResponseType = "unknown"   // Unknown type
 )
 

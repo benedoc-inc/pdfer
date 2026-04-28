@@ -1,6 +1,7 @@
 package xfa
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -41,6 +42,393 @@ func TestParseXFAForm(t *testing.T) {
 	}
 	if !question.Required {
 		t.Error("ParseXFAForm() question required = false, want true")
+	}
+}
+
+// TestToolTipLabel verifies that <toolTip> text is used as the field label
+// when no <caption> is present — the pattern used by FDA forms.
+func TestToolTipLabel(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <field name="number510" x="0mm" y="24.9mm" w="190mm" h="6.7mm">
+      <ui><textEdit/></ui>
+      <toolTip>5 10 (k) number</toolTip>
+      <assist><speak>Enter 5 10 (k) number.</speak></assist>
+      <bind match="none"/>
+    </field>
+    <field name="devicename" x="0mm" y="36.6mm" w="190mm" h="13.5mm">
+      <ui><textEdit multiLine="1"/></ui>
+      <toolTip>device name</toolTip>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+
+	byName := make(map[string]types.Question)
+	for _, q := range form.Questions {
+		byName[q.Name] = q
+	}
+
+	if q, ok := byName["devicename"]; !ok {
+		t.Error("devicename field missing")
+	} else if q.Label != "device name" {
+		t.Errorf("devicename label = %q, want %q", q.Label, "device name")
+	}
+}
+
+// TestAssistSpeakFallback verifies that <assist><speak> is used as the label
+// fallback when neither <caption> nor <toolTip> is present.
+func TestAssistSpeakFallback(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <field name="myField">
+      <ui><textEdit/></ui>
+      <assist><speak>My field label</speak></assist>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	if len(form.Questions) == 0 {
+		t.Fatal("no questions parsed")
+	}
+	q := form.Questions[0]
+	if q.Label != "My field label" {
+		t.Errorf("label = %q, want %q", q.Label, "My field label")
+	}
+}
+
+// TestExDataSuppression verifies that draw elements containing <exData>
+// (page-counter embeds and similar template machinery) are not emitted.
+func TestExDataSuppression(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <field name="realField">
+      <ui><textEdit/></ui>
+      <toolTip>Real field</toolTip>
+    </field>
+    <draw name="Pages">
+      <value>
+        <exData contentType="text/html">
+          <body><p>Page <span xfa:embed="#p"/> of <span xfa:embed="#n"/></p></body>
+        </exData>
+      </value>
+    </draw>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	for _, q := range form.Questions {
+		if q.Name == "Pages" {
+			t.Errorf("exData draw 'Pages' should have been suppressed, got type=%s label=%q", q.Type, q.Label)
+		}
+		if q.Type == types.ResponseTypeDisplay && strings.Contains(q.Label, "xfa:embed") {
+			t.Errorf("exData HTML leaked into display question: %q", q.Label)
+		}
+	}
+}
+
+// TestButtonWithBindNoneSkipped verifies that button fields with bind=none
+// (UI triggers like "Help Text", "Show Introduction") are not emitted as display items.
+func TestButtonWithBindNoneSkipped(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <field name="realField">
+      <ui><textEdit/></ui>
+      <toolTip>Real field</toolTip>
+    </field>
+    <field name="helpBtn" access="readOnly">
+      <ui><button/></ui>
+      <caption><value><text>Help Text</text></value></caption>
+      <bind match="none"/>
+    </field>
+    <field name="showIntro" access="readOnly">
+      <ui><button/></ui>
+      <caption><value><text>Show Application Introduction</text></value></caption>
+      <bind match="none"/>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	for _, q := range form.Questions {
+		if q.Name == "helpBtn" || q.Name == "showIntro" {
+			t.Errorf("button field %q should not appear in output, got type=%s label=%q", q.Name, q.Type, q.Label)
+		}
+	}
+}
+
+// TestDrawWithEventsSkipped verifies that draw elements with events (status indicators,
+// scripted show/hide toggles) are not emitted as display items.
+func TestDrawWithEventsSkipped(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <field name="realField">
+      <ui><textEdit/></ui>
+      <toolTip>Real field</toolTip>
+    </field>
+    <draw name="statusOk">
+      <value><text>Required Question Complete</text></value>
+      <event activity="initialize">
+        <script>this.presence = "hidden";</script>
+      </event>
+    </draw>
+    <draw name="statusBad">
+      <value><text>Required Question Incomplete</text></value>
+      <event activity="change">
+        <script>this.presence = "visible";</script>
+      </event>
+    </draw>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	for _, q := range form.Questions {
+		if q.Name == "statusOk" || q.Name == "statusBad" {
+			t.Errorf("draw with events %q should not appear in output", q.Name)
+		}
+	}
+}
+
+// TestExclGroupLabelFromPrecedingDraw verifies that an unlabeled exclGroup gets its
+// label from the nearest preceding draw in the same section.
+func TestExclGroupLabelFromPrecedingDraw(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <draw name="groupLabel">
+      <value><text>Application Type</text></value>
+    </draw>
+    <exclGroup name="appType">
+      <field name="traditional">
+        <caption><value><text>Traditional</text></value></caption>
+        <items><text>Traditional</text></items>
+      </field>
+      <field name="abbreviated">
+        <caption><value><text>Abbreviated</text></value></caption>
+        <items><text>Abbreviated</text></items>
+      </field>
+    </exclGroup>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	var radioQ *types.Question
+	for i := range form.Questions {
+		if form.Questions[i].Type == types.ResponseTypeRadio {
+			radioQ = &form.Questions[i]
+		}
+	}
+	if radioQ == nil {
+		t.Fatal("no radio question found")
+	}
+	if radioQ.Label != "Application Type" {
+		t.Errorf("radio group label = %q, want %q", radioQ.Label, "Application Type")
+	}
+	// The draw should be consumed — not a standalone display item
+	for _, q := range form.Questions {
+		if q.Name == "groupLabel" {
+			t.Errorf("draw 'groupLabel' should have been consumed as radio group label")
+		}
+	}
+}
+
+// TestPresenceManagedDrawsSkipped verifies that draw elements with an explicit
+// presence= attribute are filtered out. These are script-managed status indicators
+// (like "Required Question Complete/Incomplete") whose visibility is toggled by form
+// logic — not static labels. Static labels never need a presence attribute.
+func TestPresenceManagedDrawsSkipped(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <field name="realField">
+      <ui><textEdit/></ui>
+      <toolTip>Real field</toolTip>
+    </field>
+    <draw name="sectionHeader">
+      <value><text>Carcinogenicity</text></value>
+    </draw>
+    <draw name="statusComplete" presence="hidden">
+      <value><text>Required Question Complete</text></value>
+    </draw>
+    <draw name="statusIncomplete" presence="visible">
+      <value><text>Required Question Incomplete</text></value>
+    </draw>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+
+	found := make(map[string]bool)
+	for _, q := range form.Questions {
+		found[q.Name] = true
+	}
+
+	if found["statusComplete"] {
+		t.Error("statusComplete (presence=hidden) should be filtered")
+	}
+	if found["statusIncomplete"] {
+		t.Error("statusIncomplete (presence=visible) should be filtered — explicit presence marks it as dynamic")
+	}
+	if !found["sectionHeader"] {
+		t.Error("sectionHeader (no presence attr) should be kept")
+	}
+	if !found["realField"] {
+		t.Error("realField should be kept")
+	}
+}
+
+// TestSectionsTree verifies that the Sections field on FormSchema contains a
+// proper hierarchy with Interactive correctly set per section.
+func TestSectionsTree(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="form1">
+    <subform name="interactiveSection">
+      <field name="userInput">
+        <ui><textEdit/></ui>
+        <toolTip>Enter value</toolTip>
+      </field>
+      <draw name="label"><value><text>Some label</text></value></draw>
+    </subform>
+    <subform name="displayOnlySection">
+      <draw name="introText"><value><text>Introduction paragraph.</text></value></draw>
+    </subform>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+
+	if len(form.Sections) == 0 {
+		t.Fatal("expected non-empty Sections, got none")
+	}
+
+	// Navigate to form1
+	var form1 *types.FormSection
+	for i := range form.Sections {
+		if form.Sections[i].Name == "form1" {
+			form1 = &form.Sections[i]
+			break
+		}
+	}
+	if form1 == nil {
+		t.Fatalf("section 'form1' not found in %v", sectionNames(form.Sections))
+	}
+
+	byName := make(map[string]*types.FormSection)
+	for i := range form1.Children {
+		byName[form1.Children[i].Name] = &form1.Children[i]
+	}
+
+	interactive, ok := byName["interactiveSection"]
+	if !ok {
+		t.Fatalf("'interactiveSection' not found among form1's children: %v", sectionChildNames(form1))
+	}
+	if !interactive.Interactive {
+		t.Error("interactiveSection.Interactive should be true")
+	}
+
+	displayOnly, ok := byName["displayOnlySection"]
+	if !ok {
+		t.Fatalf("'displayOnlySection' not found among form1's children: %v", sectionChildNames(form1))
+	}
+	if displayOnly.Interactive {
+		t.Error("displayOnlySection.Interactive should be false")
+	}
+
+	// Draws in the display-only section must not appear in flat questions[].
+	for _, q := range form.Questions {
+		if q.Name == "introText" {
+			t.Error("draw in display-only section must not appear in questions[]")
+		}
+	}
+
+	// The label draw in the interactive section should appear in questions[].
+	found := false
+	for _, q := range form.Questions {
+		if q.Name == "label" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("draw 'label' in interactive section should appear in questions[]")
+	}
+}
+
+func sectionNames(ss []types.FormSection) []string {
+	var names []string
+	for _, s := range ss {
+		names = append(names, s.Name)
+	}
+	return names
+}
+
+func sectionChildNames(s *types.FormSection) []string {
+	return sectionNames(s.Children)
+}
+
+// TestFDA3881Template parses the real FDA 3881 template fixture and checks
+// that key fields have correct labels from <toolTip>/<assist>.
+func TestFDA3881Template(t *testing.T) {
+	data, err := os.ReadFile("testdata/fda_3881_template.xml")
+	if err != nil {
+		t.Skip("testdata/fda_3881_template.xml not found:", err)
+	}
+
+	form, err := ParseXFAForm(string(data), false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+
+	byName := make(map[string]types.Question)
+	for _, q := range form.Questions {
+		byName[q.Name] = q
+	}
+
+	cases := []struct{ name, wantLabel string }{
+		{"number510", "5 10 (k) number"},
+		{"devicename", "device name"},
+		{"indications", "indications for use"},
+	}
+	for _, c := range cases {
+		q, ok := byName[c.name]
+		if !ok {
+			t.Errorf("field %q not found in parsed form", c.name)
+			continue
+		}
+		if q.Label != c.wantLabel {
+			t.Errorf("field %q label = %q, want %q", c.name, q.Label, c.wantLabel)
+		}
+	}
+
+	// Verify no page-counter exData draw leaked through
+	for _, q := range form.Questions {
+		if q.Name == "Pages" {
+			t.Errorf("exData 'Pages' draw should be suppressed")
+		}
 	}
 }
 

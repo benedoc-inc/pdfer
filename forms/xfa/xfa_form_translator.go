@@ -11,61 +11,27 @@ import (
 	"github.com/benedoc-inc/pdfer/types"
 )
 
-// ParseXFAForm parses raw XFA XML and converts it to a strongly-typed FormSchema
+// ParseXFAForm parses raw XFA XML and converts it to a strongly-typed FormSchema.
 func ParseXFAForm(xfaXML string, verbose bool) (*types.FormSchema, error) {
 	if verbose {
 		log.Printf("Parsing XFA XML to FormSchema (length: %d bytes)", len(xfaXML))
 	}
-
-	// Parse XFA XML structure
-	xfaData, err := parseXFAStructure(xfaXML, verbose)
+	result, err := parseXFATemplate(xfaXML, verbose)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse XFA structure: %v", err)
 	}
-
-	// Convert to FormSchema
-	formSchema := &types.FormSchema{
-		Metadata: types.FormMetadata{
-			FormType:   "XFA",
-			TotalPages: extractPageCount(xfaXML),
-		},
-		Questions: make([]types.Question, 0),
-		Rules:     make([]types.Rule, 0),
+	schema := buildFormSchema(result, verbose)
+	schema.Metadata.TotalPages = extractPageCount(xfaXML)
+	rules, err := extractXFARules(result.Root, verbose)
+	if err != nil && verbose {
+		log.Printf("Warning: Failed to extract XFA rules: %v", err)
 	}
-
-	// Extract metadata
-	if xfaData.Title != "" {
-		formSchema.Metadata.Title = xfaData.Title
-	}
-	if xfaData.Description != "" {
-		formSchema.Metadata.Description = xfaData.Description
-	}
-	if xfaData.Version != "" {
-		formSchema.Metadata.Version = xfaData.Version
-	}
-
-	// Convert fields to questions
-	for i, field := range xfaData.Fields {
-		question := convertXFAFieldToQuestion(field, i+1, verbose)
-		formSchema.Questions = append(formSchema.Questions, question)
-	}
-
-	// Extract rules from XFA scripts and events
-	rules, err := extractXFARules(xfaXML, xfaData, verbose)
-	if err != nil {
-		if verbose {
-			log.Printf("Warning: Failed to extract XFA rules: %v", err)
-		}
-		// Continue without rules
-	} else {
-		formSchema.Rules = rules
-	}
-
+	schema.Rules = rules
 	if verbose {
-		log.Printf("Parsed XFA to FormSchema: %d questions, %d rules", len(formSchema.Questions), len(formSchema.Rules))
+		log.Printf("Parsed XFA to FormSchema: %d questions, %d sections, %d rules",
+			len(schema.Questions), len(schema.Sections), len(schema.Rules))
 	}
-
-	return formSchema, nil
+	return schema, nil
 }
 
 // FormToXFA converts a FormSchema to XFA XML
@@ -407,32 +373,63 @@ func mapResponseTypeToXFA(responseType types.ResponseType) string {
 	}
 }
 
-// XFAStructure represents the parsed XFA XML structure
-type XFAStructure struct {
+// ── Internal parse-tree types ─────────────────────────────────────────────────
+
+// xfaNodeKind identifies the XFA element type of a parse-tree node.
+type xfaNodeKind string
+
+const (
+	xfaKindSubform   xfaNodeKind = "subform"
+	xfaKindPageArea  xfaNodeKind = "pageArea"
+	xfaKindField     xfaNodeKind = "field"
+	xfaKindDraw      xfaNodeKind = "draw"
+	xfaKindExclGroup xfaNodeKind = "exclGroup"
+)
+
+// xfaNode is an internal parse-tree node for one XFA template element.
+// Container nodes (subform, pageArea, exclGroup) carry child nodes in document order.
+// Leaf nodes (field, draw) carry all parsed attributes.
+type xfaNode struct {
+	Kind     xfaNodeKind
+	Name     string
+	Children []*xfaNode // document order; populated for containers
+
+	// Label sources, resolved by resolveInteractiveLabel / resolveDrawText.
+	Caption    string // from <caption><value><text> or <label>
+	ToolTip    string // from <toolTip>
+	SpeakLabel string // from <assist><speak>
+
+	// Content
+	Value       string
+	Default     string
+	Description string
+	UIType      string // from <ui> child: textEdit | checkButton | radioButton | choiceList | …
+	Bind        string // "none" when <bind match="none">; "" means auto-bind
+
+	// Field interaction
+	Required     bool
+	ReadOnly     bool
+	Hidden       bool
+	Options      []XFAOption
+	OptionValues []string // data values from <items save="1">
+	Validation   *XFAValidation
+	Events       []XFAEvent
+
+	// Draw classification flags — set at parse time, used in emitDraw.
+	ImageData        string
+	ImageContentType string
+	HasPresenceAttr  bool // explicit presence= attr → script-managed status indicator, suppress
+	HasExData        bool // contains <exData>       → template machinery, suppress
+
+	PageNumber int
+}
+
+// xfaTemplateResult bundles the parse tree with top-level metadata.
+type xfaTemplateResult struct {
+	Root        *xfaNode
 	Title       string
 	Description string
 	Version     string
-	Fields      []XFAFieldData
-	Subforms    []XFASubformData
-}
-
-// XFAFieldData represents a field extracted from XFA XML
-type XFAFieldData struct {
-	Name        string
-	FullName    string
-	Type        string
-	Value       string
-	Default     string
-	Label       string
-	Description string
-	Required    bool
-	ReadOnly    bool
-	Hidden      bool
-	PageNumber  int
-	Options     []XFAOption
-	Validation  *XFAValidation
-	Properties  map[string]interface{}
-	Events      []XFAEvent
 }
 
 // XFAOption represents an option for choice fields
@@ -461,34 +458,72 @@ type XFAEvent struct {
 	Action string
 }
 
-// XFASubformData represents a subform in XFA
-type XFASubformData struct {
-	Name   string
-	Fields []XFAFieldData
+// ── Label resolution helpers ──────────────────────────────────────────────────
+
+// resolveInteractiveLabel returns the best label for an interactive field or exclGroup.
+// Priority: caption > toolTip > speak.
+func resolveInteractiveLabel(n *xfaNode) string {
+	return firstNonEmpty(n.Caption, n.ToolTip, n.SpeakLabel)
 }
 
-// parseXFAStructure parses the XFA XML and extracts the structure
-func parseXFAStructure(xfaXML string, verbose bool) (*XFAStructure, error) {
-	structure := &XFAStructure{
-		Fields:   make([]XFAFieldData, 0),
-		Subforms: make([]XFASubformData, 0),
+// resolveDrawText returns the best display text for a draw/display element.
+// Priority: caption > toolTip > default/value text > speak.
+func resolveDrawText(n *xfaNode) string {
+	return firstNonEmpty(n.Caption, n.ToolTip, n.Default, n.Value, n.SpeakLabel)
+}
+
+// isInteractiveSubtree reports whether node or any descendant is a data-bound field.
+func isInteractiveSubtree(n *xfaNode) bool {
+	switch n.Kind {
+	case xfaKindField:
+		return n.Bind != "none"
+	case xfaKindExclGroup:
+		return true
 	}
+	for _, child := range n.Children {
+		if isInteractiveSubtree(child) {
+			return true
+		}
+	}
+	return false
+}
+
+// ── XML parser ────────────────────────────────────────────────────────────────
+
+// parseXFATemplate parses XFA template XML and builds a typed xfaNode tree.
+func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
+	res := &xfaTemplateResult{}
+
+	// Synthetic root holds all top-level subforms.
+	root := &xfaNode{Kind: xfaKindSubform, Name: "_root"}
+	nodeStack := []*xfaNode{root}
+	topOfStack := func() *xfaNode { return nodeStack[len(nodeStack)-1] }
 
 	decoder := xml.NewDecoder(strings.NewReader(xfaXML))
-	decoder.Strict = false // Allow malformed XML
+	decoder.Strict = false
 
-	var currentField *XFAFieldData
-	var currentSubform *XFASubformData
-	var currentValue strings.Builder
-	var currentLabel strings.Builder
-	var currentDescription strings.Builder
-	var inField bool
-	var inSubform bool
-	var inValue bool
-	var inLabel bool
-	var inDescription bool
-	var inItems bool // For choice options
-	var fieldIndex int
+	var currentLeaf       *xfaNode
+	var currentValue      strings.Builder
+	var currentCaption    strings.Builder
+	var currentLabel      strings.Builder
+	var currentDesc       strings.Builder
+	var currentToolTip    strings.Builder
+	var currentSpeak      strings.Builder
+	var currentImageData  strings.Builder
+	var imageContentType  string
+
+	var inValue           bool
+	var inCaption         bool
+	var inExclGroupCaption bool // reading the exclGroup's own <caption>, not a child field's
+	var inLabel           bool
+	var inDescription     bool
+	var inItems           bool
+	var itemsIsSave       bool
+	var inImage           bool
+	var inToolTip         bool
+	var inAssist          bool
+	var inSpeak           bool
+	var inExData          bool
 
 	for {
 		token, err := decoder.Token()
@@ -499,142 +534,258 @@ func parseXFAStructure(xfaXML string, verbose bool) (*XFAStructure, error) {
 			if verbose {
 				log.Printf("XML parse error (continuing): %v", err)
 			}
-			// Continue on errors - XFA XML can be malformed
 			break
 		}
 
 		switch se := token.(type) {
 		case xml.StartElement:
 			localName := se.Name.Local
-
-			// Handle top-level elements
 			switch localName {
+
 			case "template":
-				// Extract title/description from template attributes or children
 				for _, attr := range se.Attr {
-					switch attr.Name.Local {
-					case "title":
-						structure.Title = attr.Value
+					if attr.Name.Local == "title" {
+						res.Title = attr.Value
 					}
-				}
-			case "subform":
-				inSubform = true
-				currentSubform = &XFASubformData{
-					Fields: make([]XFAFieldData, 0),
-				}
-				for _, attr := range se.Attr {
-					if attr.Name.Local == "name" {
-						currentSubform.Name = attr.Value
-					}
-				}
-			case "field":
-				inField = true
-				fieldIndex++
-				currentField = &XFAFieldData{
-					Properties: make(map[string]interface{}),
-					Options:    make([]XFAOption, 0),
-					Events:     make([]XFAEvent, 0),
-					PageNumber: 1, // Default
 				}
 
-				// Extract field attributes
+			case "subform", "pageArea":
+				kind := xfaKindSubform
+				if localName == "pageArea" {
+					kind = xfaKindPageArea
+				}
+				node := &xfaNode{Kind: kind}
 				for _, attr := range se.Attr {
 					switch attr.Name.Local {
 					case "name":
-						currentField.Name = attr.Value
-						currentField.FullName = attr.Value
-					case "type":
-						currentField.Type = attr.Value
-					case "required":
-						currentField.Required = parseBool(attr.Value)
-					case "access":
-						if attr.Value == "readOnly" {
-							currentField.ReadOnly = true
-						} else if attr.Value == "hidden" {
-							currentField.Hidden = true
-						}
-					case "h", "w", "x", "y":
-						// Store layout properties
-						if val, err := parseFloat(attr.Value); err == nil {
-							currentField.Properties[attr.Name.Local] = val
-						} else {
-							currentField.Properties[attr.Name.Local] = attr.Value
-						}
-					case "page":
-						if pageNum, err := strconv.Atoi(attr.Value); err == nil {
-							currentField.PageNumber = pageNum
+						node.Name = attr.Value
+					case "id":
+						if node.Name == "" {
+							node.Name = attr.Value
 						}
 					}
 				}
+				nodeStack = append(nodeStack, node)
+
+			case "exclGroup":
+				node := &xfaNode{
+					Kind:    xfaKindExclGroup,
+					Options: make([]XFAOption, 0),
+					Events:  make([]XFAEvent, 0),
+				}
+				for _, attr := range se.Attr {
+					if attr.Name.Local == "name" {
+						node.Name = attr.Value
+					}
+				}
+				nodeStack = append(nodeStack, node)
+
+			case "field", "draw":
+				kind := xfaKindField
+				if localName == "draw" {
+					kind = xfaKindDraw
+				}
+				leaf := &xfaNode{
+					Kind:         kind,
+					PageNumber:   1,
+					Options:      make([]XFAOption, 0),
+					OptionValues: make([]string, 0),
+					Events:       make([]XFAEvent, 0),
+				}
+				if kind == xfaKindDraw {
+					leaf.Bind = "none"
+				}
+				for _, attr := range se.Attr {
+					switch attr.Name.Local {
+					case "name":
+						leaf.Name = attr.Value
+					case "required":
+						leaf.Required = parseBool(attr.Value)
+					case "presence":
+						if kind == xfaKindDraw {
+							leaf.HasPresenceAttr = true
+						}
+					case "access":
+						if attr.Value == "readOnly" || attr.Value == "protected" {
+							leaf.ReadOnly = true
+						}
+					case "page":
+						if p, e := strconv.Atoi(attr.Value); e == nil {
+							leaf.PageNumber = p
+						}
+					}
+				}
+				currentLeaf = leaf
+
+			case "caption":
+				if currentLeaf != nil {
+					inCaption = true
+					currentCaption.Reset()
+				} else if topOfStack().Kind == xfaKindExclGroup {
+					inExclGroupCaption = true
+					currentCaption.Reset()
+				}
+
 			case "value":
-				if inField {
+				// Suppress inValue inside caption (caption has its own accumulator).
+				if currentLeaf != nil && !inCaption && !inExclGroupCaption {
 					inValue = true
 					currentValue.Reset()
 				}
+
 			case "label":
-				if inField {
+				if currentLeaf != nil {
 					inLabel = true
 					currentLabel.Reset()
 				}
+
 			case "desc", "description":
-				if inField {
+				if currentLeaf != nil {
 					inDescription = true
-					currentDescription.Reset()
+					currentDesc.Reset()
 				}
+
 			case "items":
-				if inField {
+				if currentLeaf != nil {
 					inItems = true
+					itemsIsSave = false
+					for _, attr := range se.Attr {
+						if attr.Name.Local == "save" && attr.Value == "1" {
+							itemsIsSave = true
+						}
+					}
 				}
+
 			case "text":
-				// Option text in items
-				if inItems && inField {
+				if inItems && currentLeaf != nil {
 					currentValue.Reset()
 				}
+
+			// UI element type detection
+			case "textEdit":
+				if currentLeaf != nil {
+					isML := false
+					for _, attr := range se.Attr {
+						if attr.Name.Local == "multiLine" && attr.Value == "1" {
+							isML = true
+						}
+					}
+					if isML {
+						currentLeaf.UIType = "textEditMultiLine"
+					} else if currentLeaf.UIType == "" {
+						currentLeaf.UIType = "textEdit"
+					}
+				}
+			case "checkButton":
+				if currentLeaf != nil {
+					currentLeaf.UIType = "checkButton"
+				}
+			case "choiceList":
+				if currentLeaf != nil {
+					currentLeaf.UIType = "choiceList"
+				}
+			case "radioButton":
+				if currentLeaf != nil {
+					currentLeaf.UIType = "radioButton"
+				}
+			case "dateTimeEdit":
+				if currentLeaf != nil {
+					currentLeaf.UIType = "dateTimeEdit"
+				}
+			case "numericEdit":
+				if currentLeaf != nil {
+					currentLeaf.UIType = "numericEdit"
+				}
+			case "passwordEdit":
+				if currentLeaf != nil {
+					currentLeaf.UIType = "passwordEdit"
+				}
+			case "signature":
+				if currentLeaf != nil {
+					currentLeaf.UIType = "signature"
+				}
+			case "button":
+				if currentLeaf != nil && currentLeaf.UIType == "" {
+					currentLeaf.UIType = "button"
+				}
+
 			case "event":
-				if inField {
-					event := XFAEvent{}
+				if currentLeaf != nil {
+					ev := XFAEvent{}
 					for _, attr := range se.Attr {
 						switch attr.Name.Local {
 						case "activity":
-							event.Type = attr.Value
+							ev.Type = attr.Value
 						case "name":
-							event.Action = attr.Value
+							ev.Action = attr.Value
 						}
 					}
-					currentField.Events = append(currentField.Events, event)
+					currentLeaf.Events = append(currentLeaf.Events, ev)
 				}
+
 			case "script":
-				if inField && len(currentField.Events) > 0 {
-					// Script content will be in CharData
+				if currentLeaf != nil && len(currentLeaf.Events) > 0 {
 					currentValue.Reset()
 				}
+
 			case "validate":
-				if inField {
-					if currentField.Validation == nil {
-						currentField.Validation = &XFAValidation{}
+				if currentLeaf != nil {
+					if currentLeaf.Validation == nil {
+						currentLeaf.Validation = &XFAValidation{}
 					}
 					for _, attr := range se.Attr {
 						switch attr.Name.Local {
 						case "scriptTest":
-							currentField.Validation.Script = attr.Value
+							currentLeaf.Validation.Script = attr.Value
 						case "messageText":
-							currentField.Validation.ErrorMessage = attr.Value
+							currentLeaf.Validation.ErrorMessage = attr.Value
 						}
 					}
 				}
+
 			case "pattern":
-				if inField && currentField.Validation != nil {
+				if currentLeaf != nil && currentLeaf.Validation != nil {
 					currentValue.Reset()
 				}
-			case "bind":
-				if inField {
+
+			case "image":
+				if currentLeaf != nil {
+					inImage = true
+					currentImageData.Reset()
+					imageContentType = "image/jpeg"
 					for _, attr := range se.Attr {
-						switch attr.Name.Local {
-						case "match":
-							// Can indicate required, etc.
-							if attr.Value == "none" {
-								currentField.Required = false
-							}
+						if attr.Name.Local == "contentType" || attr.Name.Local == "href" {
+							imageContentType = attr.Value
+						}
+					}
+				}
+
+			case "toolTip":
+				if currentLeaf != nil {
+					inToolTip = true
+					currentToolTip.Reset()
+				}
+			case "assist":
+				if currentLeaf != nil {
+					inAssist = true
+				}
+			case "speak":
+				if currentLeaf != nil && inAssist {
+					inSpeak = true
+					currentSpeak.Reset()
+				}
+
+			case "exData":
+				if currentLeaf != nil {
+					inExData = true
+					currentLeaf.HasExData = true
+				}
+
+			case "bind":
+				if currentLeaf != nil {
+					for _, attr := range se.Attr {
+						if attr.Name.Local == "match" && attr.Value == "none" {
+							currentLeaf.Bind = "none"
 						}
 					}
 				}
@@ -642,150 +793,493 @@ func parseXFAStructure(xfaXML string, verbose bool) (*XFAStructure, error) {
 
 		case xml.EndElement:
 			localName := se.Name.Local
-
 			switch localName {
-			case "field":
-				if currentField != nil {
-					// Finalize field
-					if currentValue.Len() > 0 {
-						currentField.Value = strings.TrimSpace(currentValue.String())
-						if currentField.Default == "" {
-							currentField.Default = currentField.Value
-						}
-					}
-					if currentLabel.Len() > 0 {
-						currentField.Label = strings.TrimSpace(currentLabel.String())
-					}
-					if currentDescription.Len() > 0 {
-						currentField.Description = strings.TrimSpace(currentDescription.String())
-					}
 
-					if inSubform && currentSubform != nil {
-						currentSubform.Fields = append(currentSubform.Fields, *currentField)
-					} else {
-						structure.Fields = append(structure.Fields, *currentField)
+			case "caption":
+				text := strings.TrimSpace(currentCaption.String())
+				if inExclGroupCaption {
+					if topOfStack().Kind == xfaKindExclGroup {
+						topOfStack().Caption = text
+					}
+				} else if currentLeaf != nil && text != "" && currentLeaf.Caption == "" {
+					currentLeaf.Caption = text
+				}
+				inCaption = false
+				inExclGroupCaption = false
+
+			case "label":
+				if currentLeaf != nil {
+					text := strings.TrimSpace(currentLabel.String())
+					if text != "" && currentLeaf.Caption == "" {
+						currentLeaf.Caption = text // treat <label> as caption
 					}
 				}
-				inField = false
-				currentField = nil
-				currentValue.Reset()
-				currentLabel.Reset()
-				currentDescription.Reset()
-			case "subform":
-				if currentSubform != nil {
-					structure.Subforms = append(structure.Subforms, *currentSubform)
-					// Also add subform fields to top-level fields
-					structure.Fields = append(structure.Fields, currentSubform.Fields...)
+				inLabel = false
+
+			case "field", "draw":
+				if currentLeaf != nil {
+					if inDescription && currentDesc.Len() > 0 {
+						currentLeaf.Description = strings.TrimSpace(currentDesc.String())
+					}
+					top := topOfStack()
+					if top.Kind == xfaKindExclGroup && localName == "field" {
+						// Radio option inside exclGroup → accumulate as XFAOption.
+						optLabel := firstNonEmpty(currentLeaf.Caption, currentLeaf.ToolTip, currentLeaf.Name)
+						optValue := ""
+						if len(currentLeaf.Options) > 0 {
+							optValue = currentLeaf.Options[0].Value
+						}
+						if optValue == "" {
+							optValue = currentLeaf.Name
+						}
+						top.Options = append(top.Options, XFAOption{Label: optLabel, Value: optValue})
+						// draws inside exclGroup are decorative labels — fall through and discard
+					} else if top.Kind != xfaKindExclGroup {
+						top.Children = append(top.Children, currentLeaf)
+					}
 				}
-				inSubform = false
-				currentSubform = nil
+				currentLeaf = nil
+				inCaption = false
+				inExclGroupCaption = false
+				inLabel = false
+				inDescription = false
+				inImage = false
+				inToolTip = false
+				inAssist = false
+				inSpeak = false
+				inExData = false
+				inValue = false
+				inItems = false
+				currentValue.Reset()
+				currentCaption.Reset()
+				currentLabel.Reset()
+				currentDesc.Reset()
+				currentToolTip.Reset()
+				currentSpeak.Reset()
+				currentImageData.Reset()
+
+			case "exclGroup":
+				if len(nodeStack) > 1 {
+					node := nodeStack[len(nodeStack)-1]
+					nodeStack = nodeStack[:len(nodeStack)-1]
+					topOfStack().Children = append(topOfStack().Children, node)
+				}
+
+			case "subform", "pageArea":
+				if len(nodeStack) > 1 {
+					node := nodeStack[len(nodeStack)-1]
+					nodeStack = nodeStack[:len(nodeStack)-1]
+					topOfStack().Children = append(topOfStack().Children, node)
+				}
+
 			case "value":
-				if inField && currentField != nil {
+				if currentLeaf != nil {
 					val := strings.TrimSpace(currentValue.String())
 					if val != "" {
-						currentField.Value = val
-						if currentField.Default == "" {
-							currentField.Default = val
+						currentLeaf.Value = val
+						if currentLeaf.Default == "" {
+							currentLeaf.Default = val
 						}
 					}
 				}
 				inValue = false
-			case "label":
-				if inField && currentField != nil {
-					currentField.Label = strings.TrimSpace(currentLabel.String())
+
+			case "image":
+				if currentLeaf != nil && currentImageData.Len() > 0 {
+					currentLeaf.ImageData = strings.TrimSpace(currentImageData.String())
+					currentLeaf.ImageContentType = imageContentType
 				}
-				inLabel = false
+				inImage = false
+				currentImageData.Reset()
+
+			case "items":
+				if itemsIsSave && currentLeaf != nil {
+					for i, sv := range currentLeaf.OptionValues {
+						if i < len(currentLeaf.Options) {
+							currentLeaf.Options[i].Value = sv
+						}
+					}
+				}
+				inItems = false
+				itemsIsSave = false
+
+			case "text":
+				if inItems && currentLeaf != nil {
+					text := strings.TrimSpace(currentValue.String())
+					currentValue.Reset()
+					if itemsIsSave {
+						currentLeaf.OptionValues = append(currentLeaf.OptionValues, text)
+					} else {
+						currentLeaf.Options = append(currentLeaf.Options, XFAOption{Value: text, Label: text})
+					}
+				}
+
+			case "script":
+				if currentLeaf != nil && len(currentLeaf.Events) > 0 {
+					last := &currentLeaf.Events[len(currentLeaf.Events)-1]
+					last.Script = strings.TrimSpace(currentValue.String())
+				}
+
+			case "pattern":
+				if currentLeaf != nil && currentLeaf.Validation != nil {
+					currentLeaf.Validation.Pattern = strings.TrimSpace(currentValue.String())
+				}
+
+			case "toolTip":
+				if currentLeaf != nil {
+					currentLeaf.ToolTip = strings.TrimSpace(currentToolTip.String())
+				}
+				inToolTip = false
+				currentToolTip.Reset()
+
+			case "speak":
+				if currentLeaf != nil && inAssist {
+					currentLeaf.SpeakLabel = strings.TrimSpace(currentSpeak.String())
+				}
+				inSpeak = false
+				currentSpeak.Reset()
+
+			case "assist":
+				inAssist = false
+
+			case "exData":
+				inExData = false
+
 			case "desc", "description":
-				if inField && currentField != nil {
-					currentField.Description = strings.TrimSpace(currentDescription.String())
+				if currentLeaf != nil {
+					currentLeaf.Description = strings.TrimSpace(currentDesc.String())
 				}
 				inDescription = false
-			case "items":
-				inItems = false
-			case "text":
-				if inItems && inField && currentField != nil {
-					// This is an option value
-					option := XFAOption{
-						Value: strings.TrimSpace(currentValue.String()),
-						Label: strings.TrimSpace(currentValue.String()),
-					}
-					currentField.Options = append(currentField.Options, option)
-				}
-			case "script":
-				if inField && len(currentField.Events) > 0 {
-					// Add script to last event
-					lastEvent := &currentField.Events[len(currentField.Events)-1]
-					lastEvent.Script = strings.TrimSpace(currentValue.String())
-				}
-			case "pattern":
-				if inField && currentField.Validation != nil {
-					currentField.Validation.Pattern = strings.TrimSpace(currentValue.String())
-				}
 			}
 
 		case xml.CharData:
 			data := string(se)
-			if inValue && inField {
-				currentValue.WriteString(data)
-			} else if inLabel && inField {
+			switch {
+			case inImage:
+				currentImageData.WriteString(data)
+			case inExData:
+				// HTML markup / embedded refs — suppress
+			case inCaption || inExclGroupCaption:
+				currentCaption.WriteString(data)
+			case inLabel:
 				currentLabel.WriteString(data)
-			} else if inDescription && inField {
-				currentDescription.WriteString(data)
+			case inToolTip:
+				currentToolTip.WriteString(data)
+			case inSpeak && inAssist:
+				currentSpeak.WriteString(data)
+			case inItems:
+				currentValue.WriteString(data)
+			case inValue:
+				currentValue.WriteString(data)
+			case inDescription:
+				currentDesc.WriteString(data)
 			}
 		}
 	}
 
-	return structure, nil
+	res.Root = root
+	return res, nil
 }
 
-// convertXFAFieldToQuestion converts an XFAFieldData to a Question
-func convertXFAFieldToQuestion(field XFAFieldData, index int, verbose bool) types.Question {
-	question := types.Question{
-		ID:          sanitizeFieldIDWithIndex(field.Name, index),
-		Name:        field.Name,
-		Label:       field.Label,
-		Description: field.Description,
-		Type:        mapXFATypeToResponseTypeEnum(field.Type),
-		Required:    field.Required,
-		ReadOnly:    field.ReadOnly,
-		Hidden:      field.Hidden,
-		PageNumber:  field.PageNumber,
-		Properties:  field.Properties,
+// ── Schema builder ────────────────────────────────────────────────────────────
+
+// buildFormSchema walks the xfaNode tree and builds a FormSchema with a flat
+// questions list and a hierarchical sections tree.
+func buildFormSchema(result *xfaTemplateResult, verbose bool) *types.FormSchema {
+	schema := &types.FormSchema{
+		Metadata: types.FormMetadata{
+			FormType:    "XFA",
+			Title:       result.Title,
+			Description: result.Description,
+			Version:     result.Version,
+		},
+		Questions: make([]types.Question, 0),
+		Rules:     make([]types.Rule, 0),
 	}
 
-	// Set default value
-	if field.Default != "" {
-		question.Default = field.Default
-	} else if field.Value != "" {
-		question.Default = field.Value
-	}
+	// Pre-pass: claim preceding draw nodes as labels for unlabeled exclGroups.
+	claimDrawLabels(result.Root)
 
-	// Convert options
-	if len(field.Options) > 0 {
-		question.Options = make([]types.Option, len(field.Options))
-		for i, opt := range field.Options {
-			question.Options[i] = types.Option{
-				Value:    opt.Value,
-				Label:    opt.Label,
-				Selected: opt.Selected,
+	var qIdx int
+	schema.Sections = walkSubformChildren(result.Root, nil, schema, &qIdx, verbose)
+	return schema
+}
+
+// claimDrawLabels performs a depth-first pre-pass over the tree. For each
+// exclGroup with no caption, it scans backwards through its sibling list for
+// the nearest eligible draw (no presence attr, no events) and claims its text
+// as the group caption, marking the draw consumed so it is not double-emitted.
+func claimDrawLabels(node *xfaNode) {
+	for i, child := range node.Children {
+		if child.Kind == xfaKindExclGroup && resolveInteractiveLabel(child) == "" {
+			for j := i - 1; j >= 0; j-- {
+				prev := node.Children[j]
+				// Stop at section boundaries.
+				if prev.Kind == xfaKindSubform || prev.Kind == xfaKindPageArea {
+					break
+				}
+				// Only consider draw nodes; skip interactive fields.
+				if prev.Kind != xfaKindDraw {
+					continue
+				}
+				// Skip dynamic draws.
+				if prev.HasPresenceAttr || len(prev.Events) > 0 {
+					continue
+				}
+				// Skip already-consumed draws.
+				if prev.Caption == "\x00consumed" {
+					continue
+				}
+				label := resolveDrawText(prev)
+				if label != "" {
+					child.Caption = label
+					prev.Caption = "\x00consumed"
+					break
+				}
+			}
+		}
+		// Recurse into subforms.
+		if child.Kind == xfaKindSubform {
+			claimDrawLabels(child)
+		}
+	}
+}
+
+// walkSubformChildren iterates node.Children, emits questions to schema, and
+// returns the FormSection slice for sections found at this level.
+func walkSubformChildren(node *xfaNode, path []string, schema *types.FormSchema, qIdx *int, verbose bool) []types.FormSection {
+	var sections []types.FormSection
+	for _, child := range node.Children {
+		switch child.Kind {
+		case xfaKindPageArea:
+			// Page templates — isolated from main form content.
+
+		case xfaKindSubform:
+			sec := buildSection(child, path, schema, qIdx, verbose)
+			sections = append(sections, sec)
+
+		case xfaKindExclGroup:
+			q := emitExclGroup(child, path, qIdx)
+			schema.Questions = append(schema.Questions, q)
+
+		case xfaKindField:
+			if q, ok := emitField(child, path, qIdx, verbose); ok {
+				schema.Questions = append(schema.Questions, q)
+			}
+
+		case xfaKindDraw:
+			if q, ok := emitDraw(child, path, node, qIdx); ok {
+				schema.Questions = append(schema.Questions, q)
 			}
 		}
 	}
+	return sections
+}
 
-	// Convert validation
-	if field.Validation != nil {
-		question.Validation = &types.ValidationRules{
-			MinLength:    field.Validation.MinLength,
-			MaxLength:    field.Validation.MaxLength,
-			MinValue:     field.Validation.MinValue,
-			MaxValue:     field.Validation.MaxValue,
-			Pattern:      field.Validation.Pattern,
-			CustomScript: field.Validation.Script,
-			ErrorMessage: field.Validation.ErrorMessage,
+// buildSection creates a FormSection for a subform node and recurses into its children.
+func buildSection(node *xfaNode, parentPath []string, schema *types.FormSchema, qIdx *int, verbose bool) types.FormSection {
+	path := make([]string, len(parentPath)+1)
+	copy(path, parentPath)
+	path[len(path)-1] = node.Name
+
+	startLen := len(schema.Questions)
+	sec := types.FormSection{
+		Name:        node.Name,
+		Path:        strings.Join(path, "."),
+		Interactive: isInteractiveSubtree(node),
+	}
+	sec.Children = walkSubformChildren(node, path, schema, qIdx, verbose)
+	// Record all question IDs added during this section's subtree walk.
+	if endLen := len(schema.Questions); endLen > startLen {
+		sec.Questions = make([]string, 0, endLen-startLen)
+		for _, q := range schema.Questions[startLen:endLen] {
+			sec.Questions = append(sec.Questions, q.ID)
 		}
 	}
+	return sec
+}
 
-	return question
+// emitExclGroup emits an XFA exclGroup as a radio-button question.
+func emitExclGroup(node *xfaNode, path []string, qIdx *int) types.Question {
+	*qIdx++
+	q := types.Question{
+		ID:         sanitizeFieldIDWithIndex(node.Name, *qIdx),
+		Name:       node.Name,
+		Label:      resolveInteractiveLabel(node),
+		Type:       types.ResponseTypeRadio,
+		Section:    sectionName(path),
+		PageNumber: node.PageNumber,
+	}
+	if len(node.Options) > 0 {
+		q.Options = make([]types.Option, len(node.Options))
+		for i, opt := range node.Options {
+			q.Options[i] = types.Option{Value: opt.Value, Label: opt.Label, Selected: opt.Selected}
+		}
+	}
+	return q
+}
+
+// emitField emits a <field> node as a Question. Returns (question, true) if the
+// field should appear in the output, (zero, false) if it should be skipped.
+func emitField(node *xfaNode, path []string, qIdx *int, verbose bool) (types.Question, bool) {
+	if node.Bind == "none" {
+		// Non-data-bound field — UI trigger or display label.
+		if node.UIType == "button" {
+			return types.Question{}, false // UI trigger (Help Text, Show Intro, etc.)
+		}
+		displayText := resolveDrawText(node)
+		if displayText == "" {
+			return types.Question{}, false
+		}
+		*qIdx++
+		return types.Question{
+			ID:         sanitizeFieldIDWithIndex(node.Name, *qIdx),
+			Name:       node.Name,
+			Label:      displayText,
+			Type:       types.ResponseTypeDisplay,
+			ReadOnly:   true,
+			Section:    sectionName(path),
+			PageNumber: node.PageNumber,
+		}, true
+	}
+	// Data-bound interactive field.
+	*qIdx++
+	return convertNodeToQuestion(node, *qIdx, sectionName(path), verbose), true
+}
+
+// emitDraw emits a <draw> node as a Question. Returns (question, true) if the
+// draw should be rendered, (zero, false) if it should be suppressed.
+// parent is the subform node that owns this draw.
+func emitDraw(node *xfaNode, path []string, parent *xfaNode, qIdx *int) (types.Question, bool) {
+	// Structural classification — each check corresponds to a distinct entity type.
+	if node.Caption == "\x00consumed" {
+		return types.Question{}, false // claimed as exclGroup label
+	}
+	if node.HasPresenceAttr {
+		return types.Question{}, false // script-managed status indicator
+	}
+	if node.HasExData {
+		return types.Question{}, false // page counter / embedded reference
+	}
+	if len(node.Events) > 0 {
+		return types.Question{}, false // has its own event handlers → dynamic
+	}
+
+	// Image draw.
+	if node.ImageData != "" {
+		*qIdx++
+		return types.Question{
+			ID:         sanitizeFieldIDWithIndex(node.Name, *qIdx),
+			Name:       node.Name,
+			Label:      resolveInteractiveLabel(node),
+			Type:       types.ResponseTypeImage,
+			ReadOnly:   true,
+			Section:    sectionName(path),
+			PageNumber: node.PageNumber,
+			Properties: map[string]interface{}{
+				"image_data":   node.ImageData,
+				"content_type": node.ImageContentType,
+			},
+		}, true
+	}
+
+	// Static display draw.
+	displayText := resolveDrawText(node)
+	if displayText == "" {
+		return types.Question{}, false
+	}
+	// Include static draws only when the parent section contains interactive fields.
+	// Draws in pure-display sections (intro text, FAQ, help banners) are structural
+	// content that the frontend renders via the Sections tree, not the flat list.
+	if !isInteractiveSubtree(parent) {
+		return types.Question{}, false
+	}
+	*qIdx++
+	return types.Question{
+		ID:         sanitizeFieldIDWithIndex(node.Name, *qIdx),
+		Name:       node.Name,
+		Label:      displayText,
+		Type:       types.ResponseTypeDisplay,
+		ReadOnly:   true,
+		Section:    sectionName(path),
+		PageNumber: node.PageNumber,
+	}, true
+}
+
+// sectionName returns the nearest parent section name from a path slice.
+func sectionName(path []string) string {
+	if len(path) == 0 {
+		return ""
+	}
+	return path[len(path)-1]
+}
+
+// convertNodeToQuestion converts a data-bound xfaNode (Kind == xfaKindField) to a Question.
+func convertNodeToQuestion(node *xfaNode, index int, section string, verbose bool) types.Question {
+	q := types.Question{
+		ID:          sanitizeFieldIDWithIndex(node.Name, index),
+		Name:        node.Name,
+		Label:       resolveInteractiveLabel(node),
+		Description: node.Description,
+		Type:        mapXFAUITypeToResponseType(node.UIType, ""),
+		Required:    node.Required,
+		ReadOnly:    node.ReadOnly,
+		Hidden:      node.Hidden,
+		PageNumber:  node.PageNumber,
+		Section:     section,
+	}
+	if node.Default != "" {
+		q.Default = node.Default
+	} else if node.Value != "" {
+		q.Default = node.Value
+	}
+	if len(node.Options) > 0 {
+		q.Options = make([]types.Option, len(node.Options))
+		for i, opt := range node.Options {
+			q.Options[i] = types.Option{Value: opt.Value, Label: opt.Label, Selected: opt.Selected}
+		}
+	}
+	if node.Validation != nil {
+		q.Validation = &types.ValidationRules{
+			MinLength:    node.Validation.MinLength,
+			MaxLength:    node.Validation.MaxLength,
+			MinValue:     node.Validation.MinValue,
+			MaxValue:     node.Validation.MaxValue,
+			Pattern:      node.Validation.Pattern,
+			CustomScript: node.Validation.Script,
+			ErrorMessage: node.Validation.ErrorMessage,
+		}
+	}
+	return q
+}
+
+// mapXFAUITypeToResponseType maps a UI element name (from <ui> children) to a ResponseType.
+// This is more reliable than the field's type attribute.
+func mapXFAUITypeToResponseType(uiType, fieldType string) types.ResponseType {
+	switch strings.ToLower(uiType) {
+	case "textedit":
+		return types.ResponseTypeText
+	case "textedit multiline", "texteditmultiline":
+		return types.ResponseTypeTextarea
+	case "checkbutton":
+		return types.ResponseTypeCheckbox
+	case "choicelist":
+		return types.ResponseTypeSelect
+	case "radiobutton":
+		return types.ResponseTypeRadio
+	case "datetimeedit":
+		return types.ResponseTypeDate
+	case "numericedit":
+		return types.ResponseTypeNumber
+	case "passwordedit":
+		return types.ResponseTypeText
+	case "button":
+		return types.ResponseTypeButton
+	case "signature":
+		return types.ResponseTypeSignature
+	default:
+		return mapXFATypeToResponseTypeEnum(fieldType)
+	}
 }
 
 // mapXFATypeToResponseTypeEnum maps XFA field types to ResponseType enum
@@ -816,15 +1310,28 @@ func mapXFATypeToResponseTypeEnum(xfaType string) types.ResponseType {
 	}
 }
 
-// extractXFARules extracts control flow rules from XFA events and scripts
-func extractXFARules(xfaXML string, xfaData *XFAStructure, verbose bool) ([]types.Rule, error) {
+// ── Rules extraction ──────────────────────────────────────────────────────────
+
+// collectFieldEvents collects all field/exclGroup nodes that have events.
+func collectFieldEvents(node *xfaNode, out *[]*xfaNode) {
+	if (node.Kind == xfaKindField || node.Kind == xfaKindExclGroup) && len(node.Events) > 0 {
+		*out = append(*out, node)
+	}
+	for _, child := range node.Children {
+		collectFieldEvents(child, out)
+	}
+}
+
+// extractXFARules extracts control flow rules from field events in the xfaNode tree.
+func extractXFARules(root *xfaNode, verbose bool) ([]types.Rule, error) {
+	var fieldNodes []*xfaNode
+	collectFieldEvents(root, &fieldNodes)
+
 	rules := make([]types.Rule, 0)
 	ruleIndex := 1
-
-	// Extract rules from field events
-	for _, field := range xfaData.Fields {
-		for _, event := range field.Events {
-			rule, err := convertXFAEventToRule(event, field.Name, ruleIndex)
+	for _, node := range fieldNodes {
+		for _, event := range node.Events {
+			rule, err := convertXFAEventToRule(event, node.Name, ruleIndex)
 			if err != nil {
 				if verbose {
 					log.Printf("Warning: Failed to convert event to rule: %v", err)
@@ -837,7 +1344,6 @@ func extractXFARules(xfaXML string, xfaData *XFAStructure, verbose bool) ([]type
 			}
 		}
 	}
-
 	return rules, nil
 }
 
@@ -845,9 +1351,10 @@ func extractXFARules(xfaXML string, xfaData *XFAStructure, verbose bool) ([]type
 // body to extract structured conditions and actions where possible.
 func convertXFAEventToRule(event XFAEvent, sourceField string, index int) (*types.Rule, error) {
 	rule := &types.Rule{
-		ID:     fmt.Sprintf("rule_%d", index),
-		Source: sourceField,
-		Type:   types.RuleTypeCalculate,
+		ID:      fmt.Sprintf("rule_%d", index),
+		Source:  sourceField,
+		Type:    types.RuleTypeCalculate,
+		Actions: []types.Action{},
 	}
 
 	// Map event activity to rule type.
@@ -876,7 +1383,9 @@ func convertXFAEventToRule(event XFAEvent, sourceField string, index int) (*type
 		rule.Description = parsed.description
 	}
 	rule.Condition = parsed.condition
-	rule.Actions = parsed.actions
+	if parsed.actions != nil {
+		rule.Actions = parsed.actions
+	}
 
 	return rule, nil
 }
@@ -943,12 +1452,14 @@ func detectScriptLanguage(s string) string {
 // tryParseVisibilityScript detects scripts that show or hide a field.
 //
 // FormCalc patterns:
-//   $.presence = "visible" / "hidden" / "invisible"
-//   if (cond) then $.presence = "hidden" else $.presence = "visible" endif
+//
+//	$.presence = "visible" / "hidden" / "invisible"
+//	if (cond) then $.presence = "hidden" else $.presence = "visible" endif
 //
 // JavaScript patterns:
-//   this.presence = "visible"
-//   xfa.resolveNode("fieldName").presence = "hidden"
+//
+//	this.presence = "visible"
+//	xfa.resolveNode("fieldName").presence = "hidden"
 func tryParseVisibilityScript(s, lang, sourceField, targetField string) (scriptParseResult, bool) {
 	lower := strings.ToLower(s)
 	if !strings.Contains(lower, "presence") {
@@ -1285,6 +1796,16 @@ func unquoteLiteral(s string) interface{} {
 }
 
 // Helper functions
+
+// firstNonEmpty returns the first non-blank string from vals.
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if t := strings.TrimSpace(v); t != "" {
+			return t
+		}
+	}
+	return ""
+}
 
 func parseBool(s string) bool {
 	s = strings.ToLower(strings.TrimSpace(s))

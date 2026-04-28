@@ -1,0 +1,898 @@
+
+<template xmlns="http://www.xfa.org/schema/xfa-template/3.3/"
+><?formServer defaultPDFRenderFormat acrobat10.0static?><?formServer allowRenderCaching 0?><?formServer formModel both?><subform name="topmostSubform" layout="tb" locale="en_US" restoreState="auto"
+><pageSet
+><pageArea id="PageArea1" name="PageArea1"
+><contentArea name="ContentArea1" x="12.808mm" y="7.881mm" w="191.763mm" h="255.171mm"
+/><draw name="T0" x="13.181mm" y="263.625mm" w="1.378in" minH="0.173in"
+><value
+><text
+>FORM FDA 3881 (6/20)</text
+></value
+><ui
+><textEdit
+/></ui
+><para vAlign="middle"
+/><font weight="bold" size="9pt" typeface="Arial"
+/><assist
+><speak
+>FORM FDA 38 81 (July 2017).</speak
+></assist
+><traversal
+><traverse ref="Pages[0]"
+/></traversal
+></draw
+><draw name="L1" x="12.81mm" y="263.101mm" w="540.001pt" h="0pt"
+><value
+><line
+><edge thickness="1.4pt" cap="butt"
+/></line
+></value
+></draw
+><draw name="L2" x="12.81mm" y="8.042mm" w="540.001pt" h="0pt"
+><value
+><line
+><edge thickness="1.4pt" cap="butt"
+/></line
+></value
+></draw
+><medium short="612pt" long="792pt" stock="custom"
+/><field h="7.5mm" name="CurrentPage" presence="hidden" w="55mm" x="85.702mm" y="264.663mm" access="readOnly" id="floatingField023733"
+><ui
+><numericEdit
+><border
+><edge stroke="lowered"
+/></border
+><margin
+/></numericEdit
+></ui
+><font typeface="Myriad Pro"
+/><margin bottomInset="1mm" leftInset="1mm" rightInset="1mm" topInset="1mm"
+/><para vAlign="middle"
+/><caption reserve="20mm"
+><para vAlign="middle"
+/><value
+><text
+>Text Field</text
+></value
+></caption
+><calculate override="error"
+/><event name="event__layout_ready" activity="ready" ref="$layout"
+><script contentType="application/x-javascript"
+>this.rawValue = xfa.layout.page(this);
+</script
+></event
+><?templateDesigner floatingFieldPlaceholder #?><bind match="none"
+/></field
+><field h="7.5mm" name="PageCount" presence="hidden" w="55mm" x="85.702mm" y="264.663mm" access="readOnly" id="floatingField010432"
+><ui
+><numericEdit
+><border
+><edge stroke="lowered"
+/></border
+><margin
+/></numericEdit
+></ui
+><font typeface="Myriad Pro"
+/><margin bottomInset="1mm" leftInset="1mm" rightInset="1mm" topInset="1mm"
+/><para vAlign="middle"
+/><caption reserve="20mm"
+><para vAlign="middle"
+/><value
+><text
+>Text Field</text
+></value
+></caption
+><calculate override="error"
+/><event name="event__layout_ready" activity="ready" ref="$layout"
+><script contentType="application/x-javascript"
+>this.rawValue = xfa.layout.pageCount();
+</script
+></event
+><?templateDesigner floatingFieldPlaceholder ##?><bind match="none"
+/></field
+><draw name="Pages" x="97.142mm" y="263.883mm"
+><ui
+><textEdit
+><margin
+/></textEdit
+></ui
+><value
+><exData contentType="text/html" maxLength="0"
+><body xmlns="http://www.w3.org/1999/xhtml" xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/"
+><p
+>Page<span style="xfa-spacerun:yes"
+> </span
+><span xfa:embedType="uri" xfa:embedMode="raw" xfa:embed="#floatingField023733"
+/> of<span style="xfa-spacerun:yes"
+> </span
+><span xfa:embedType="uri" xfa:embedMode="raw" xfa:embed="#floatingField010432"
+/></p
+></body
+></exData
+></value
+><font typeface="Myriad Pro"
+/><margin bottomInset="0mm" leftInset="0mm" rightInset="0mm" topInset="0mm"
+/><para vAlign="middle"
+/><traversal
+><traverse ref="T18[0]"
+/></traversal
+></draw
+><draw name="T18" y="265.965mm" w="1.377194in" h="0.109in" anchorType="middleRight" x="202.991mm"
+><value
+><exData contentType="text/html"
+><body xmlns="http://www.w3.org/1999/xhtml" xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/"
+><p
+>PSC Publishing Services (301) 443-6740<span style="xfa-spacerun:yes"
+> </span
+><span style="font-size:6pt"
+><span style="xfa-spacerun:yes"
+>      </span
+>EF</span
+></p
+></body
+></exData
+></value
+><ui
+><textEdit
+/></ui
+><para vAlign="middle"
+/><font size="5pt" typeface="Times New Roman"
+/><assist
+><speak
+>P S C Publishing Services (3 0 1) 4 4 3 - 67 40.</speak
+></assist
+><?renderCache.bounds 99158 7848 0 0 0 0 0 0?><?renderCache.textRun 39 PSC Publishing Services (301) 443-6740  0 0 5629 0 0 0 "Times New Roman" 0 0 5000 ISO-8859-1?><?renderCache.textRun 8       EF 0 83474 5629 0 0 0 "Times New Roman" 0 0 6000 ISO-8859-1?></draw
+><?templateDesigner expand 0?></pageArea
+><pageArea name="Page2" id="Page2_ID"
+><medium short="612pt" long="792pt" stock="custom"
+/><contentArea name="ContentArea2" x="12.808mm" y="8.204mm" w="191.763mm" h="255.503mm" id="ContentArea2_ID"
+/><draw name="T0" x="13.331mm" y="263.783mm" w="1.378in" minH="0.173in"
+><value
+><exData contentType="text/html"
+><body xmlns="http://www.w3.org/1999/xhtml" xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/"
+><p style="text-decoration:none;letter-spacing:0in"
+>FORM FDA 3881 (<span style="text-decoration:none"
+>6/20</span
+>)</p
+></body
+></exData
+></value
+><ui
+><textEdit
+/></ui
+><para vAlign="middle"
+/><font weight="bold" size="9pt" typeface="Arial"
+/><assist
+><speak
+>  </speak
+></assist
+><traversal
+><traverse ref="Pages[0]"
+/></traversal
+></draw
+><draw name="L1" x="12.809mm" y="263.259mm" w="540.001pt" h="0pt"
+><value
+><line
+><edge thickness="1.4pt" cap="butt"
+/></line
+></value
+></draw
+><draw name="L2" x="12.809mm" y="8.2mm" w="540.001pt" h="0pt"
+><value
+><line
+><edge thickness="1.4pt" cap="butt"
+/></line
+></value
+></draw
+><draw name="Pages" x="97.292mm" y="264.041mm"
+><ui
+><textEdit
+><margin
+/></textEdit
+></ui
+><value
+><exData contentType="text/html" maxLength="0"
+><body xmlns="http://www.w3.org/1999/xhtml" xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/"
+><p
+>Page<span style="xfa-spacerun:yes"
+> </span
+><span xfa:embedType="uri" xfa:embedMode="raw" xfa:embed="#floatingField001069"
+/> of<span style="xfa-spacerun:yes"
+> </span
+><span xfa:embedType="uri" xfa:embedMode="raw" xfa:embed="#floatingField030226"
+/></p
+></body
+></exData
+></value
+><font typeface="Myriad Pro"
+/><margin bottomInset="0mm" leftInset="0mm" rightInset="0mm" topInset="0mm"
+/><para vAlign="middle"
+/></draw
+><field h="7.5mm" name="CurrentPage" presence="hidden" w="55mm" x="111.102mm" y="284.086mm" access="readOnly" id="floatingField001069"
+><ui
+><numericEdit
+><border
+><edge stroke="lowered"
+/></border
+><margin
+/></numericEdit
+></ui
+><font typeface="Myriad Pro"
+/><margin bottomInset="1mm" leftInset="1mm" rightInset="1mm" topInset="1mm"
+/><para vAlign="middle"
+/><caption reserve="20mm"
+><para vAlign="middle"
+/><value
+><text
+>Text Field</text
+></value
+></caption
+><calculate override="error"
+/><event name="event__layout_ready" activity="ready" ref="$layout"
+><script contentType="application/x-javascript"
+>this.rawValue = xfa.layout.page(this);
+</script
+></event
+><?templateDesigner floatingFieldPlaceholder #?><bind match="none"
+/></field
+><field h="7.5mm" name="PageCount" presence="hidden" w="55mm" x="111.102mm" y="284.086mm" access="readOnly" id="floatingField030226"
+><ui
+><numericEdit
+><border
+><edge stroke="lowered"
+/></border
+><margin
+/></numericEdit
+></ui
+><font typeface="Myriad Pro"
+/><margin bottomInset="1mm" leftInset="1mm" rightInset="1mm" topInset="1mm"
+/><para vAlign="middle"
+/><caption reserve="20mm"
+><para vAlign="middle"
+/><value
+><text
+>Text Field</text
+></value
+></caption
+><calculate override="error"
+/><event name="event__layout_ready" activity="ready" ref="$layout"
+><script contentType="application/x-javascript"
+>this.rawValue = xfa.layout.pageCount();
+</script
+></event
+><?templateDesigner floatingFieldPlaceholder ##?><bind match="none"
+/></field
+><?templateDesigner expand 0?></pageArea
+><?templateDesigner expand 0?></pageSet
+><desc
+><text name="title"
+>FORM FDA 3881</text
+><text name="creator"
+>PSC Publishing Services</text
+><text name="department"
+>HHS/FDA</text
+><text name="description"
+>Indications for Use</text
+></desc
+><subform name="Page1" w="190.873mm" layout="tb"
+><breakBefore targetType="pageArea" target="PageArea1"
+/><bind match="none"
+/><subform w="190.5mm" h="50.632mm" name="Header"
+><draw name="T4" x="27.203mm" y="2.091mm" w="3.073in" h="0.33in"
+><value
+><text
+>DEPARTMENT OF HEALTH AND HUMAN SERVICES Food and Drug Administration</text
+></value
+><ui
+><textEdit
+/></ui
+><para vAlign="middle" hAlign="center"
+/><font size="9pt" typeface="Arial"
+/><traversal
+><traverse ref="T6[0]"
+/></traversal
+><?renderCache.bounds 221256 23760 0 0 0 0 0 0?><?renderCache.textRun 40 DEPARTMENT OF HEALTH AND HUMAN SERVICES  0 615 9086 0 0 0 "Arial" 0 0 9000 ISO-8859-1?><?renderCache.textRun 28 Food and Drug Administration 0 50847 19886 0 0 0 "Arial" 0 0 9000 ISO-8859-1?></draw
+><draw name="T6" x="43.383mm" y="11.134mm" w="1.8in" minH="0.269in"
+><value
+><text
+>Indications for Use</text
+></value
+><ui
+><textEdit
+/></ui
+><para vAlign="middle"
+/><font weight="bold" size="14pt" typeface="Arial"
+/><traversal
+><traverse ref="T36[0]"
+/></traversal
+><assist role="H1"
+/></draw
+><draw name="L35" x="131.234mm" y="0mm" w="0pt" h="54pt"
+><value
+><line slope="/"
+><edge thickness="0.7pt" cap="butt"
+/></line
+></value
+></draw
+><draw name="T36" x="133.68mm" y="2.396mm" w="2.12in" minH="0.166in"
+><value
+><text
+>Form Approved: OMB No. 0910-0120</text
+></value
+><ui
+><textEdit
+/></ui
+><para vAlign="middle"
+/><font size="9pt" typeface="Arial"
+/><traversal
+><traverse ref="T37[0]"
+/></traversal
+><assist
+><speak
+>Form Approved: O M B Number 0 9 1 0 - 0 1 2 0.</speak
+></assist
+></draw
+><draw name="T37" x="133.68mm" y="7.374mm" w="2.072in" minH="0.166in"
+><value
+><text
+>Expiration Date: 06/30/2023</text
+></value
+><ui
+><textEdit
+/></ui
+><para vAlign="middle"
+/><font size="9pt" typeface="Arial"
+/><traversal
+><traverse ref="T38[0]"
+/></traversal
+><assist
+><speak
+>Expiration Date: June 30, 20 20</speak
+></assist
+></draw
+><draw name="T38" x="133.68mm" y="12.353mm" w="1.914in" minH="0.165in"
+><value
+><text
+>See PRA Statement below.</text
+></value
+><ui
+><textEdit
+/></ui
+><para vAlign="middle"
+/><font posture="italic" size="9pt" typeface="Arial"
+/><traversal
+><traverse ref="T7[0]"
+/></traversal
+><assist
+><speak
+>See P R A Statement on last page.</speak
+></assist
+></draw
+><draw name="L28" x="0.001mm" y="19.05mm" w="540.001pt" h="0pt"
+><value
+><line
+><edge thickness="1pt" cap="butt"
+/></line
+></value
+></draw
+><draw name="L20" x="0.001mm" y="20.108mm" w="540.001pt" h="0pt"
+><value
+><line
+><edge cap="butt"
+/></line
+></value
+></draw
+><draw name="T7" x="0mm" y="20.303mm" w="1.459in" h="0.166in"
+><value
+><exData contentType="text/html"
+><body xmlns="http://www.w3.org/1999/xhtml" xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/"
+><p style="font-family:Arial;letter-spacing:0in"
+>510(k) Number<span style="xfa-spacerun:yes"
+> </span
+><span style="font-style:italic"
+>(if known)</span
+></p
+></body
+></exData
+></value
+><ui
+><textEdit
+/></ui
+><para vAlign="middle"
+/><font size="9pt" typeface="ArialMT"
+/><traversal
+><traverse ref="number510[0]"
+/></traversal
+><assist
+><speak
+>5 10 (k) Number (if known).</speak
+></assist
+></draw
+><field name="number510" w="190.496mm" h="6.768mm" x="0.004mm" y="24.936mm"
+><ui
+><textEdit hScrollPolicy="off"
+><border presence="hidden"
+><?templateDesigner StyleID aped0?></border
+><margin
+/></textEdit
+></ui
+><font typeface="Times New Roman"
+/><margin topInset="0mm" bottomInset="0.762mm" leftInset="0mm" rightInset="0mm"
+/><caption reserve="0in"
+/><assist
+><toolTip
+> 5 10 (k) number</toolTip
+><speak
+>Enter 5 10 (k) number.</speak
+></assist
+><?templateDesigner ScriptInitializers calculate::lang=FormCalc;?><validate scriptTest="warning"
+/><traversal
+><traverse ref="T11[0]"
+/></traversal
+></field
+><draw name="L29" x="0mm" y="32.103mm" w="540.001pt" h="0pt"
+><value
+><line
+><edge thickness="0.6pt" cap="butt"
+/></line
+></value
+></draw
+><draw name="T11" x="0mm" y="32.292mm" w="0.799in" minH="0.166in"
+><value
+><text
+>Device Name</text
+></value
+><ui
+><textEdit
+/></ui
+><para vAlign="middle"
+/><font size="9pt" typeface="Arial"
+/><traversal
+><traverse ref="devicename[0]"
+/></traversal
+></draw
+><field name="devicename" w="190.496mm" h="13.515mm" x="0.004mm" y="36.609mm"
+><ui
+><textEdit hScrollPolicy="off" multiLine="1" vScrollPolicy="off"
+><border presence="hidden"
+><?templateDesigner StyleID aped0?></border
+><margin
+/></textEdit
+></ui
+><font typeface="Times New Roman"
+/><margin topInset="0mm" bottomInset="0.762mm" leftInset="0mm" rightInset="0mm"
+/><caption reserve="0in"
+/><assist
+><toolTip
+>device name</toolTip
+><speak
+>Enter device name.</speak
+></assist
+><?templateDesigner ScriptInitializers calculate::lang=FormCalc;?><validate scriptTest="warning"
+/><traversal
+><traverse ref="Indications[0]"
+/></traversal
+></field
+><margin bottomInset="0.508mm"
+/><traversal
+><traverse operation="first" ref="T4[0]"
+/><traverse ref="Indications[0]"
+/></traversal
+><?templateDesigner expand 1?></subform
+><subform w="190.5mm" layout="tb" name="Indications"
+><draw name="L30" w="540.001pt" h="0pt"
+><value
+><line
+><edge thickness="0.6pt" cap="butt"
+/></line
+></value
+></draw
+><draw name="T12" w="1.695in" h="0.166in"
+><value
+><exData contentType="text/html"
+><body xmlns="http://www.w3.org/1999/xhtml" xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/"
+><p style="font-family:Arial;letter-spacing:0in"
+>Indications for Use<span style="xfa-spacerun:yes"
+> </span
+><span style="font-style:italic"
+>(Describe)</span
+></p
+></body
+></exData
+></value
+><ui
+><textEdit
+/></ui
+><para vAlign="middle"
+/><font size="9pt" typeface="ArialMT"
+/><traversal
+><traverse ref="indications[0]"
+/></traversal
+></draw
+><field name="indications" w="190.496mm" minH="115.203mm"
+><ui
+><textEdit multiLine="1"
+><border presence="hidden"
+><?templateDesigner StyleID aped0?></border
+><margin
+/></textEdit
+></ui
+><font typeface="Times New Roman" size="11pt"
+/><margin topInset="0mm" bottomInset="0.762mm" leftInset="0mm" rightInset="0mm"
+/><caption reserve="0in"
+><para spaceAbove="0pt"
+/></caption
+><assist
+><toolTip
+>indications for use</toolTip
+><speak
+>Enter description of indications for use.</speak
+></assist
+><?templateDesigner ScriptInitializers calculate::lang=FormCalc;?><validate scriptTest="warning"
+/><traversal
+><traverse ref="TypeOfUse[0]"
+/></traversal
+><para spaceAbove="0pt"
+/></field
+><overflow target="Page2.ContentArea2"
+/><traversal
+><traverse operation="first" ref="T12[0]"
+/><traverse ref="TypeOfUse[0]"
+/></traversal
+><?templateDesigner expand 0?></subform
+><subform w="190.5mm" name="TypeOfUse"
+><draw name="L21" x="0mm" y="0mm" w="540.001pt" h="0pt"
+><value
+><line
+><edge cap="butt"
+/></line
+></value
+></draw
+><draw name="T9" x="0mm" y="0.178mm" w="2.647in" h="0.166in"
+><value
+><exData contentType="text/html"
+><body xmlns="http://www.w3.org/1999/xhtml" xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/"
+><p style="font-family:Arial;letter-spacing:0in"
+>Type of Use<span style="xfa-spacerun:yes"
+> </span
+><span style="font-style:italic"
+>(Select one or both, as applicable)</span
+></p
+></body
+></exData
+></value
+><ui
+><textEdit
+/></ui
+><para vAlign="middle"
+/><font size="9pt" typeface="ArialMT"
+/><traversal
+><traverse ref="T39[0]"
+/></traversal
+></draw
+><draw name="T39" x="26.086mm" y="5.652mm" w="2.655in" minH="6.35mm"
+><value
+><text
+>Prescription Use (Part 21 CFR 801 Subpart D) </text
+></value
+><ui
+><textEdit
+/></ui
+><para vAlign="middle"
+/><font size="9pt" typeface="Arial"
+/><traversal
+><traverse ref="prescript[0]"
+/></traversal
+><assist
+><speak
+>Prescription Use (Part 21 C F R 8 01 Subpart D) .</speak
+></assist
+><margin bottomInset="0.635mm"
+/></draw
+><field name="prescript" w="3.579mm" h="3.452mm" x="21.237mm" y="6.351mm"
+><ui
+><checkButton
+><border presence="hidden"
+><?templateDesigner StyleID apcb0?><edge
+/></border
+><margin
+/></checkButton
+></ui
+><font typeface="Myriad Pro"
+/><margin leftInset="0mm" rightInset="0mm" bottomInset="0mm"
+/><para vAlign="middle"
+/><value
+><integer
+>0</integer
+></value
+><items
+><integer
+>1</integer
+><integer
+>0</integer
+><integer
+>2</integer
+></items
+><assist
+><toolTip
+>prescription use</toolTip
+><speak
+>If type of use is prescription use, please press Enter or the space bar.</speak
+></assist
+><traversal
+><traverse ref="T40[0]"
+/></traversal
+><border
+><edge thickness="0.1422mm"
+/><corner thickness="0.142mm"
+/></border
+></field
+><draw name="T40" x="108.636mm" y="5.652mm" w="2.745in" minH="6.35mm"
+><value
+><text
+>Over-The-Counter Use (21 CFR 801 Subpart C) </text
+></value
+><ui
+><textEdit
+/></ui
+><para vAlign="middle"
+/><font size="9pt" typeface="Arial"
+/><traversal
+><traverse ref="overthe[0]"
+/></traversal
+><assist
+><speak
+>Over The Counter Use (21 C F R 8 01 Subpart C).</speak
+></assist
+><margin bottomInset="0.635mm"
+/></draw
+><field name="overthe" w="3.449mm" h="3.453mm" x="103.787mm" y="6.35mm"
+><ui
+><checkButton
+><border presence="hidden"
+><?templateDesigner StyleID apcb0?><edge
+/></border
+><margin
+/></checkButton
+></ui
+><font typeface="Myriad Pro"
+/><margin leftInset="0mm" rightInset="0mm" bottomInset="0mm"
+/><para vAlign="middle"
+/><value
+><integer
+>0</integer
+></value
+><items
+><integer
+>1</integer
+><integer
+>0</integer
+><integer
+>2</integer
+></items
+><assist
+><toolTip
+>over the counter use</toolTip
+><speak
+>If type of use is over the counter use, please press Enter or the space bar.</speak
+></assist
+><traversal
+><traverse ref="Continue[0]"
+/></traversal
+><border
+><edge thickness="0.1422mm"
+/><corner thickness="0.142mm"
+/></border
+></field
+><draw name="L22" x="0.001mm" w="540.001pt" h="0pt" y="12.522mm"
+><value
+><line
+><edge cap="butt"
+/></line
+></value
+></draw
+><margin bottomInset="0mm"
+/><overflow target="Page2.ContentArea2"
+/><traversal
+><traverse operation="first" ref="T9[0]"
+/><traverse ref="Continue[0]"
+/></traversal
+><?templateDesigner expand 0?></subform
+><subform w="190.782mm" name="Continue"
+><draw name="L23" w="540.001pt" h="0pt" y="0.005mm"
+><value
+><line
+><edge thickness="0.424mm" cap="butt"
+/></line
+></value
+></draw
+><draw name="T41" w="190.901mm" minH="0.192in" y="0.265mm"
+><value
+><text
+>CONTINUE ON A SEPARATE PAGE IF NEEDED. </text
+></value
+><ui
+><textEdit
+/></ui
+><para vAlign="middle" hAlign="center"
+/><font weight="bold" typeface="Arial"
+/><traversal
+><traverse ref="PRA[0]"
+/></traversal
+><margin topInset="1.524mm" bottomInset="0mm"
+/></draw
+><draw name="L26" y="6.524mm" w="540.001pt" h="0pt"
+><value
+><line
+><edge cap="butt" thickness="0.4233mm"
+/></line
+></value
+></draw
+><margin bottomInset="0mm" topInset="1.016mm"
+/><overflow target="Page2.ContentArea2"
+/><traversal
+><traverse operation="first" ref="T41[0]"
+/><traverse ref="PRA[0]"
+/></traversal
+><?templateDesigner expand 1?></subform
+><subform w="190.5mm" name="PRA"
+><margin bottomInset="2.54mm"
+/><overflow target="Page2.ContentArea2"
+/><traversal
+><traverse operation="first" ref="T4[0]"
+/></traversal
+><draw name="T4" x="34.31mm" w="4.838in" minH="0.175in" y="2.071mm"
+><value
+><text
+>This section applies only to requirements of the Paperwork Reduction Act of 1995.</text
+></value
+><ui
+><textEdit
+/></ui
+><para vAlign="middle"
+/><font size="9.5pt" typeface="Arial"
+/><traversal
+><traverse ref="T5[0]"
+/></traversal
+><assist
+><speak
+>This section applies only to requirements of the Paperwork Reduction Act of 19 95.</speak
+></assist
+></draw
+><draw name="T5" x="22.956mm" y="7.507mm" w="5.733in" minH="0.182in"
+><value
+><text
+>*DO NOT SEND YOUR COMPLETED FORM TO THE PRA STAFF EMAIL ADDRESS BELOW.*</text
+></value
+><ui
+><textEdit
+/></ui
+><para vAlign="middle"
+/><font weight="bold" size="9.5pt" typeface="Arial"
+/><traversal
+><traverse ref="T6[0]"
+/></traversal
+><assist
+><speak
+>Asterisk. DO NOT SEND YOUR COMPLETED FORM TO THE P R A STAFF E MAIL ADDRESS BELOW. Asterisk.</speak
+></assist
+></draw
+><draw name="T6" y="12.942mm" w="6.422in" h="0.65in" x="14.701mm"
+><value
+><text
+>The burden time for this collection of information is estimated to average 79 hours per response, including the  time to review instructions, search existing data sources, gather and maintain the data needed and complete  and review the collection of information. Send comments regarding this burden estimate or any other aspect  of this information collection, including suggestions for reducing this burden, to:</text
+></value
+><ui
+><textEdit
+/></ui
+><para vAlign="middle"
+/><font size="9.5pt" typeface="Arial"
+/><traversal
+><traverse ref="T10[0]"
+/></traversal
+><?renderCache.bounds 462384 46800 0 0 0 0 0 0?><?renderCache.textRun 112 The burden time for this collection of information is estimated to average 79 hours per response, including the  0 0 9051 0 0 0 "Arial" 0 0 9500 ISO-8859-1?><?renderCache.textRun 109 time to review instructions, search existing data sources, gather and maintain the data needed and complete   0 0 20451 0 0 0 "Arial" 0 0 9500 ISO-8859-1?><?renderCache.textRun 108 and review the collection of information. Send comments regarding this burden estimate or any other aspect   0 0 31851 0 0 0 "Arial" 0 0 9500 ISO-8859-1?><?renderCache.textRun 83 of this information collection, including suggestions for reducing this burden, to: 0 0 43251 0 0 0 "Arial" 0 0 9500 ISO-8859-1?></draw
+><draw name="T10" x="67.609mm" y="30.087mm" w="2.564in" minH="0.175in"
+><value
+><text
+>Department of Health and Human Services</text
+></value
+><ui
+><textEdit
+/></ui
+><para vAlign="middle"
+/><font size="9.5pt" typeface="Arial"
+/><traversal
+><traverse ref="T11[0]"
+/></traversal
+></draw
+><draw name="T11" x="67.609mm" y="34.1mm" w="1.795in" minH="0.175in"
+><value
+><text
+>Food and Drug Administration</text
+></value
+><ui
+><textEdit
+/></ui
+><para vAlign="middle"
+/><font size="9.5pt" typeface="Arial"
+/><traversal
+><traverse ref="T12[0]"
+/></traversal
+></draw
+><draw name="T12" x="67.609mm" y="38.114mm" w="2.007in" minH="0.175in"
+><value
+><text
+>Office of Chief Information Officer</text
+></value
+><ui
+><textEdit
+/></ui
+><para vAlign="middle"
+/><font size="9.5pt" typeface="Arial"
+/><traversal
+><traverse ref="T13[0]"
+/></traversal
+></draw
+><draw name="T13" x="67.609mm" y="42.152mm" w="2.232in" minH="0.175in"
+><value
+><text
+>Paperwork Reduction Act (PRA) Staff</text
+></value
+><ui
+><textEdit
+/></ui
+><para vAlign="middle"
+/><font size="9.5pt" typeface="Arial"
+/><traversal
+><traverse ref="T14[0]"
+/></traversal
+><assist
+><speak
+>Paperwork Reduction Act (P R A) Staff.</speak
+></assist
+></draw
+><draw name="T14" x="67.609mm" y="46.165mm" w="1.408in" minH="0.174in"
+><value
+><text
+>PRAStaff@fda.hhs.gov</text
+></value
+><ui
+><textEdit
+/></ui
+><para vAlign="middle"
+/><font posture="italic" size="9.5pt" typeface="Arial"
+/><traversal
+><traverse ref="T15[0]"
+/></traversal
+><assist
+><speak
+>P R A Staff at f d a dot h h s dot gov.</speak
+></assist
+></draw
+><draw name="T15" x="22.372mm" y="51.601mm" w="5.778in" h="0.332in"
+><value
+><text
+>“An agency may not conduct or sponsor, and a person is not required to respond to, a collection of information unless it displays a currently valid OMB number.”</text
+></value
+><ui
+><textEdit
+/></ui
+><para vAlign="middle" hAlign="center"
+/><font posture="italic" size="9.5pt" typeface="Arial"
+/><assist
+><speak
+>An agency may not conduct or sponsor, and a person is not required to respond to, a collection of information unless it displays a currently valid O M B number.</speak
+></assist
+><?renderCache.bounds 416016 23904 0 0 0 0 0 0?><?renderCache.textRun 101 “An agency may not conduct or sponsor, and a person is not required to respond to, a collection of  0 1524 9031 0 0 0 "Arial" 0 1 9500 ISO-8859-1?><?renderCache.textRun 63 information unless it displays a currently valid OMB number.” 0 80236 20431 0 0 0 "Arial" 0 1 9500 ISO-8859-1?></draw
+><?templateDesigner expand 1?></subform
+><traversal
+><traverse ref="xfa[0].template[0].topmostSubform[0].#pageSet[0].PageArea1[0].T18[0]"
+/><traverse operation="first" ref="Header[0]"
+/></traversal
+><overflow target="Page2.ContentArea2"
+/><?templateDesigner expand 1?></subform
+><proto
+/><?templateDesigner Hyphenation excludeInitialCap:1, excludeAllCaps:1, wordCharCnt:7, remainCharCnt:3, pushCharCnt:3?><?templateDesigner expand 1?><?renderCache.subset "Arial" 0 0 ISO-8859-1 4 236 59 0003000B000C000F001000110012001300140015001600180019001A001B001C001D002400250026002700280029002B002C002F003000310032003300350036003700380039004400450046004700480049004A004B004C004E004F0050005100520053005400550056005700580059005A005B005C (),-./012356789:ABCDEFHILMNOPRSTUVabcdefghiklmnopqrstuvwxy?><?renderCache.subset "Arial" 1 0 ISO-8859-1 4 176 44 0003000B000C000D0011001200130014001500160019001A001B002400250026002700280029002A002B002C002F00300031003200330035003600370038003A003C00440046004700480049004C00510052005500560057 ()*./0123678ABCDEFGHILMNOPRSTUWYacdefinorst?><?renderCache.subset "Arial" 0 1 ISO-8859-1 4 156 43 0003000B000C000F0011002300240025002700300032003300350036004400450046004700480049004A004B004C004E004F0050005100520053005400550056005700580059005A005C00B300B4 (),.@ABDMOPRSabcdefghiklmnopqrstuvwy“”?><?renderCache.subset "Myriad Pro" 0 0 ISO-8859-1 4 60 15 0001000400270031003500420045004600470048004A004D005000550059 #FPTadefgilotx?><?renderCache.subset "Times New Roman" 0 0 ISO-8859-1 4 108 27 0003000B000C001000130014001600170019001A00260028002900330036004500460048004A004B004C004F00510055005600580059 ()-013467CEFPSbceghilnrsuv?></subform
+><?templateDesigner Grid show:0, snap:0, units:3, color:ff8080, origin:(0,0), interval:(18000,18000), objsnap:0, guidesnap:0, pagecentersnap:1364425797?><?templateDesigner Print-PrinterName Lexmark XM7100?><?templateDesigner Print-Copies 1?><?templateDesigner Print-Collate 0?><?templateDesigner Print-PageRange all?><?templateDesigner Print-ProductionPrint 0?><?templateDesigner Print-DuplexingOption simplex?><?originalXFAVersion http://www.xfa.org/schema/xfa-template/2.8/?><?templateDesigner Zoom 150?><?templateDesigner Rulers horizontal:1, vertical:1, guidelines:1, crosshairs:0?><?templateDesigner FormTargetVersion 33?><?templateDesigner DefaultLanguage JavaScript?><?templateDesigner DefaultRunAt client?><?acrobat JavaScript strictScoping?><?PDFPrintOptions embedViewerPrefs 0?><?PDFPrintOptions embedPrintOnFormOpen 0?><?PDFPrintOptions scalingPrefs 0?><?PDFPrintOptions enforceScalingPrefs 0?><?PDFPrintOptions paperSource 0?><?PDFPrintOptions duplexMode 0?><?templateDesigner DefaultPreviewType interactive?><?templateDesigner DefaultPreviewPagination simplex?><?templateDesigner XDPPreviewFormat 19?><?templateDesigner DefaultCaptionFontSettings face:Myriad Pro;size:10;weight:normal;style:normal?><?templateDesigner DefaultValueFontSettings face:Myriad Pro;size:10;weight:normal;style:normal?><?templateDesigner SaveTaggedPDF 1?><?templateDesigner SavePDFWithEmbeddedFonts 1?><?templateDesigner SavePDFWithLog 0?></template
+>

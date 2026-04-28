@@ -3,8 +3,12 @@
 package forms
 
 import (
+	"bytes"
 	"fmt"
+	"regexp"
 
+	"github.com/benedoc-inc/pdfer/core/parse"
+	"github.com/benedoc-inc/pdfer/core/write"
 	"github.com/benedoc-inc/pdfer/forms/acroform"
 	"github.com/benedoc-inc/pdfer/forms/xfa"
 	"github.com/benedoc-inc/pdfer/types"
@@ -136,8 +140,19 @@ func Extract(pdfBytes []byte, password []byte, verbose bool) (Form, error) {
 		}, nil
 	}
 
-	// Try XFA
-	streams, err := xfa.ExtractAllXFAStreams(pdfBytes, nil, verbose)
+	// Try XFA — decrypt first if the PDF is encrypted, since XFA stream
+	// extraction requires plaintext bytes (encryptInfo=nil path).
+	xfaBytes := pdfBytes
+	if bytes.Contains(pdfBytes, []byte("/Encrypt")) {
+		pwd := password
+		if len(pwd) == 0 {
+			pwd = []byte("")
+		}
+		if decrypted, decErr := decryptForXFA(pdfBytes, pwd, verbose); decErr == nil {
+			xfaBytes = decrypted
+		}
+	}
+	streams, err := xfa.ExtractAllXFAStreams(xfaBytes, nil, verbose)
 	if err == nil && streams.Template != nil && len(streams.Template.Data) > 0 {
 		// Parse XFA form
 		formSchema, err := xfa.ParseXFAForm(string(streams.Template.Data), verbose)
@@ -169,7 +184,17 @@ func ExtractAcroForm(pdfBytes []byte, password []byte, verbose bool) (*acroform.
 // ExtractXFA extracts XFA form data (type-specific)
 // Returns the FormSchema and Datasets separately
 func ExtractXFA(pdfBytes []byte, password []byte, verbose bool) (*types.FormSchema, *types.XFADatasets, error) {
-	streams, err := xfa.ExtractAllXFAStreams(pdfBytes, nil, verbose)
+	xfaBytes := pdfBytes
+	if bytes.Contains(pdfBytes, []byte("/Encrypt")) {
+		pwd := password
+		if len(pwd) == 0 {
+			pwd = []byte("")
+		}
+		if decrypted, decErr := decryptForXFA(pdfBytes, pwd, verbose); decErr == nil {
+			xfaBytes = decrypted
+		}
+	}
+	streams, err := xfa.ExtractAllXFAStreams(xfaBytes, nil, verbose)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -185,4 +210,78 @@ func ExtractXFA(pdfBytes []byte, password []byte, verbose bool) (*types.FormSche
 	}
 
 	return formSchema, datasets, nil
+}
+
+// decryptForXFA decrypts an encrypted PDF so that XFA stream extraction can
+// operate on plaintext bytes. Uses parse + write directly to avoid an import
+// cycle with core/manipulate (which imports forms via content/extract).
+func decryptForXFA(pdfBytes []byte, password []byte, verbose bool) ([]byte, error) {
+	pdf, err := parse.OpenWithOptions(pdfBytes, parse.ParseOptions{
+		Password: password,
+		Verbose:  verbose,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("decrypt: %w", err)
+	}
+	if !pdf.IsEncrypted() {
+		return pdfBytes, nil
+	}
+	trailer := pdf.Trailer()
+	if trailer == nil || trailer.RootRef == "" {
+		return nil, fmt.Errorf("decrypt: no document catalog in trailer")
+	}
+	var rootNum, encryptObjNum int
+	fmt.Sscanf(trailer.RootRef, "%d", &rootNum)
+	if trailer.EncryptRef != "" {
+		fmt.Sscanf(trailer.EncryptRef, "%d", &encryptObjNum)
+	}
+	w := write.NewPDFWriter()
+	for _, n := range pdf.Objects() {
+		if n == encryptObjNum {
+			continue
+		}
+		body, objErr := pdf.GetObjectContent(n)
+		if objErr != nil {
+			continue
+		}
+		if n == rootNum {
+			body = xfaRemoveEncryptRef(body)
+		}
+		dictBytes, streamBytes := xfaSplitContent(body)
+		if streamBytes != nil {
+			w.SetRawStreamObject(n, dictBytes, streamBytes)
+		} else {
+			w.SetObject(n, dictBytes)
+		}
+	}
+	w.SetRoot(rootNum)
+	if trailer.InfoRef != "" {
+		var infoNum int
+		fmt.Sscanf(trailer.InfoRef, "%d", &infoNum)
+		w.SetInfo(infoNum)
+	}
+	return w.Bytes()
+}
+
+var xfaEncryptRefRE = regexp.MustCompile(`/Encrypt\s+\d+\s+\d+\s+R`)
+
+func xfaRemoveEncryptRef(b []byte) []byte {
+	return xfaEncryptRefRE.ReplaceAll(b, nil)
+}
+
+func xfaSplitContent(content []byte) (dictBytes, streamBytes []byte) {
+	for _, sep := range [][]byte{[]byte("\nstream\r\n"), []byte("\nstream\n")} {
+		idx := bytes.Index(content, sep)
+		if idx < 0 {
+			continue
+		}
+		dict := content[:idx]
+		rest := content[idx+len(sep):]
+		for _, end := range [][]byte{[]byte("\nendstream"), []byte("endstream")} {
+			if j := bytes.Index(rest, end); j >= 0 {
+				return dict, rest[:j]
+			}
+		}
+	}
+	return content, nil
 }

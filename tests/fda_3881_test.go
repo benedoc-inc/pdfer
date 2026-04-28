@@ -37,18 +37,15 @@ func TestFDA3881_Schema(t *testing.T) {
 		t.Fatal("ExtractXFA returned nil schema")
 	}
 
-	// Form 3881 has exactly these fields.
+	// Form 3881's five interactive fields must all be present.
+	// Additional display elements from the same sections are also expected.
 	want := []string{"number510", "devicename", "indications", "prescript", "overthe"}
-	if len(schema.Questions) != len(want) {
-		t.Errorf("expected %d questions, got %d", len(want), len(schema.Questions))
-	}
-
-	byName := make(map[string]bool, len(schema.Questions))
+	byName := make(map[string]string, len(schema.Questions))
 	for _, q := range schema.Questions {
-		byName[q.Name] = true
+		byName[q.Name] = string(q.Type)
 	}
 	for _, name := range want {
-		if !byName[name] {
+		if _, ok := byName[name]; !ok {
 			t.Errorf("field %q missing from schema", name)
 		}
 	}
