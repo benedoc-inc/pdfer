@@ -38,6 +38,10 @@ func (fb *FormBuilder) AddTextField(name string, rect []float64, page int) *Fiel
 	return fb.fieldBuilder.AddTextField(name, rect, page)
 }
 
+func (fb *FormBuilder) AddUnderlineTextField(name string, rect []float64, page int) *FieldDef {
+	return fb.fieldBuilder.AddUnderlineTextField(name, rect, page)
+}
+
 func (fb *FormBuilder) AddCheckbox(name string, rect []float64, page int) *FieldDef {
 	return fb.fieldBuilder.AddCheckbox(name, rect, page)
 }

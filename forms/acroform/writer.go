@@ -28,6 +28,7 @@ type FieldDef struct {
 	Required     bool
 	ReadOnly     bool
 	FontSize     float64 // 0 = auto
+	BorderStyle  string  // PDF /BS /S value: "S" solid (default), "U" underline, "D" dashed, "B" beveled, "I" inset
 }
 
 // NewFieldBuilder creates a new field builder
@@ -41,6 +42,13 @@ func NewFieldBuilder(w *write.PDFWriter) *FieldBuilder {
 // AddTextField adds a text field to the form
 func (fb *FieldBuilder) AddTextField(name string, rect []float64, page int) *FieldDef {
 	field := &FieldDef{Name: name, Type: "Tx", Rect: rect, Page: page}
+	fb.fields = append(fb.fields, field)
+	return field
+}
+
+// AddUnderlineTextField adds a text field with only a bottom border (underline style).
+func (fb *FieldBuilder) AddUnderlineTextField(name string, rect []float64, page int) *FieldDef {
+	field := &FieldDef{Name: name, Type: "Tx", Rect: rect, Page: page, BorderStyle: "U"}
 	fb.fields = append(fb.fields, field)
 	return field
 }
@@ -141,6 +149,14 @@ func (fd *FieldDef) SetPassword(v bool) *FieldDef {
 	} else {
 		fd.Flags &^= 1 << 13
 	}
+	return fd
+}
+
+// SetBorderStyle sets the PDF border style for a text field.
+// Common values: "S" solid (default), "U" underline (bottom line only),
+// "D" dashed, "B" beveled, "I" inset.
+func (fd *FieldDef) SetBorderStyle(style string) *FieldDef {
+	fd.BorderStyle = style
 	return fd
 }
 
@@ -246,8 +262,11 @@ func (fb *FieldBuilder) writeTxKeys(b *strings.Builder, field *FieldDef) {
 	if field.MaxLen > 0 {
 		fmt.Fprintf(b, "/MaxLen %d", field.MaxLen)
 	}
-	// Solid 1pt border via /BS.
-	b.WriteString("/BS<</W 1/S/S>>")
+	bs := field.BorderStyle
+	if bs == "" {
+		bs = "S"
+	}
+	fmt.Fprintf(b, "/BS<</W 1/S/%s>>", bs)
 }
 
 func (fb *FieldBuilder) writeBtnKeys(b *strings.Builder, field *FieldDef) {

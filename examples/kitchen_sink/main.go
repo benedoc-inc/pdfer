@@ -510,6 +510,17 @@ func buildPage3WithForm(p *write.PageBuilder, fb *acroform.FormBuilder) {
 	fieldRow(lx, ly, lw, 17, "Max-length (10 chars)", false,
 		func(r []float64) { fb.AddTextField("text_maxlen", r, pg).SetMaxLength(10) })
 
+	ly = secDiv(lx, ly-28, lw, "Underline style")
+
+	fieldRow(lx, ly, lw, 17, "Underline — single line", false,
+		func(r []float64) { fb.AddUnderlineTextField("text_underline", r, pg) })
+
+	fieldRow(lx, ly-48, lw, 17, "Underline — pre-filled", false,
+		func(r []float64) {
+			fb.AddUnderlineTextField("text_underline_filled", r, pg).
+				SetDefault("Underlined entry")
+		})
+
 	// ── Right column ──────────────────────────────────────────────────────────
 	ry := secDiv(rx, 706, rw, "Checkboxes")
 
