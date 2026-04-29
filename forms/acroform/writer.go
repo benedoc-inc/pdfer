@@ -317,11 +317,12 @@ func (fb *FieldBuilder) writeChKeys(b *strings.Builder, field *FieldDef) {
 
 // boxAppearance draws a plain bordered box (unchecked checkbox state).
 func (fb *FieldBuilder) boxAppearance(w, h float64) int {
-	stream := fmt.Sprintf("q\n0.5 w\n0 G\n0 0 %.4f %.4f re\nS\nQ\n", w, h)
+	// Inset 0.25pt so the 0.5pt stroke is fully inside the BBox.
+	stream := fmt.Sprintf("q\n0.5 w\n0 G\n0.25 0.25 %.4f %.4f re\nS\nQ\n", w-0.5, h-0.5)
 	dict := write.Dictionary{
 		"/Type":    "/XObject",
 		"/Subtype": "/Form",
-		"/BBox":    fmt.Sprintf("[0 0 %.4f %.4f]", w, h),
+		"/BBox":    []interface{}{0.0, 0.0, w, h},
 	}
 	return fb.writer.AddStreamObject(dict, []byte(stream), false)
 }
@@ -329,10 +330,10 @@ func (fb *FieldBuilder) boxAppearance(w, h float64) int {
 // checkmarkAppearance draws a bordered box with a ✓ inside (checked checkbox state).
 func (fb *FieldBuilder) checkmarkAppearance(w, h float64) int {
 	stream := fmt.Sprintf("q\n"+
-		"0.5 w\n0 G\n0 0 %.4f %.4f re\nS\n"+ // box border
+		"0.5 w\n0 G\n0.25 0.25 %.4f %.4f re\nS\n"+ // box border (inset so stroke stays in BBox)
 		"0 g\n%.4f w\n"+ // checkmark stroke
 		"%.4f %.4f m\n%.4f %.4f l\n%.4f %.4f l\nS\nQ\n",
-		w, h,
+		w-0.5, h-0.5,
 		w*0.12,
 		w*0.15, h*0.50,
 		w*0.38, h*0.24,
@@ -341,41 +342,38 @@ func (fb *FieldBuilder) checkmarkAppearance(w, h float64) int {
 	dict := write.Dictionary{
 		"/Type":    "/XObject",
 		"/Subtype": "/Form",
-		"/BBox":    fmt.Sprintf("[0 0 %.4f %.4f]", w, h),
+		"/BBox":    []interface{}{0.0, 0.0, w, h},
 	}
 	return fb.writer.AddStreamObject(dict, []byte(stream), false)
 }
 
 // radioOffAppearance draws an empty circle (unchecked radio button state).
 func (fb *FieldBuilder) radioOffAppearance(w, h float64) int {
-	stream := circleStream(w, h, 0, false)
+	stream := circleStream(w, h, false)
 	dict := write.Dictionary{
 		"/Type":    "/XObject",
 		"/Subtype": "/Form",
-		"/BBox":    fmt.Sprintf("[0 0 %.4f %.4f]", w, h),
+		"/BBox":    []interface{}{0.0, 0.0, w, h},
 	}
 	return fb.writer.AddStreamObject(dict, []byte(stream), false)
 }
 
 // radioOnAppearance draws a circle with a filled dot inside (checked radio button state).
 func (fb *FieldBuilder) radioOnAppearance(w, h float64) int {
-	stream := circleStream(w, h, 0, true)
+	stream := circleStream(w, h, true)
 	dict := write.Dictionary{
 		"/Type":    "/XObject",
 		"/Subtype": "/Form",
-		"/BBox":    fmt.Sprintf("[0 0 %.4f %.4f]", w, h),
+		"/BBox":    []interface{}{0.0, 0.0, w, h},
 	}
 	return fb.writer.AddStreamObject(dict, []byte(stream), false)
 }
 
 // circleStream returns a PDF content stream that draws a circle centered in [0 0 w h].
-// If filled=true, a smaller filled circle (dot) is drawn inside.
-// inset is an additional inset from the bbox edge (0 = full size).
-func circleStream(w, h float64, inset float64, dot bool) string {
-	// Bezier approximation constant for a circle: 4*(sqrt(2)-1)/3 ≈ 0.5523
-	const k = 0.5523
+// If dot=true, a smaller filled circle is drawn inside to indicate the "on" state.
+func circleStream(w, h float64, dot bool) string {
 	cx, cy := w/2, h/2
-	r := (min64(w, h)/2 - 0.5) - inset // 0.5pt inset so stroke stays inside BBox
+	r := min64(w, h)/2 - 0.5 // 0.5pt inset keeps the 0.5pt stroke fully inside the BBox
 	var b strings.Builder
 	fmt.Fprintf(&b, "q\n0.5 w\n0 G\n")
 	writeCirclePath(&b, cx, cy, r)
