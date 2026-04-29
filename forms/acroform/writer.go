@@ -273,11 +273,18 @@ func (fb *FieldBuilder) writeBtnKeys(b *strings.Builder, field *FieldDef) {
 	}
 	fmt.Fprintf(b, "/V/%s/DV/Off/AS/%s", checkedState, checkedState)
 
-	// Appearance streams: Yes = checkmark, Off = empty.
 	w := field.Rect[2] - field.Rect[0]
 	h := field.Rect[3] - field.Rect[1]
-	yesNum := fb.checkmarkAppearance(w, h)
-	offNum := fb.emptyAppearance(w, h)
+
+	isRadio := field.Flags&(1<<15) != 0
+	var yesNum, offNum int
+	if isRadio {
+		yesNum = fb.radioOnAppearance(w, h)
+		offNum = fb.radioOffAppearance(w, h)
+	} else {
+		yesNum = fb.checkmarkAppearance(w, h)
+		offNum = fb.boxAppearance(w, h)
+	}
 	fmt.Fprintf(b, "/AP<</N<</Yes %d 0 R/Off %d 0 R>>>>", yesNum, offNum)
 }
 
@@ -308,20 +315,28 @@ func (fb *FieldBuilder) writeChKeys(b *strings.Builder, field *FieldDef) {
 	}
 }
 
-// checkmarkAppearance returns the object number of a simple checkmark XObject.
+// boxAppearance draws a plain bordered box (unchecked checkbox state).
+func (fb *FieldBuilder) boxAppearance(w, h float64) int {
+	stream := fmt.Sprintf("q\n0.5 w\n0 G\n0 0 %.4f %.4f re\nS\nQ\n", w, h)
+	dict := write.Dictionary{
+		"/Type":    "/XObject",
+		"/Subtype": "/Form",
+		"/BBox":    fmt.Sprintf("[0 0 %.4f %.4f]", w, h),
+	}
+	return fb.writer.AddStreamObject(dict, []byte(stream), false)
+}
+
+// checkmarkAppearance draws a bordered box with a ✓ inside (checked checkbox state).
 func (fb *FieldBuilder) checkmarkAppearance(w, h float64) int {
-	// Draw a simple ✓ using two line segments scaled to BBox [0 0 w h].
 	stream := fmt.Sprintf("q\n"+
-		"0 g\n"+
-		"%.4f w\n"+
-		"%.4f %.4f m\n"+
-		"%.4f %.4f l\n"+
-		"%.4f %.4f l\n"+
-		"S\nQ\n",
-		w*0.1,          // line width
-		w*0.15, h*0.50, // start
-		w*0.38, h*0.24, // middle dip
-		w*0.82, h*0.70, // end
+		"0.5 w\n0 G\n0 0 %.4f %.4f re\nS\n"+ // box border
+		"0 g\n%.4f w\n"+ // checkmark stroke
+		"%.4f %.4f m\n%.4f %.4f l\n%.4f %.4f l\nS\nQ\n",
+		w, h,
+		w*0.12,
+		w*0.15, h*0.50,
+		w*0.38, h*0.24,
+		w*0.82, h*0.70,
 	)
 	dict := write.Dictionary{
 		"/Type":    "/XObject",
@@ -331,14 +346,65 @@ func (fb *FieldBuilder) checkmarkAppearance(w, h float64) int {
 	return fb.writer.AddStreamObject(dict, []byte(stream), false)
 }
 
-// emptyAppearance returns an empty form XObject (for unchecked state).
-func (fb *FieldBuilder) emptyAppearance(w, h float64) int {
+// radioOffAppearance draws an empty circle (unchecked radio button state).
+func (fb *FieldBuilder) radioOffAppearance(w, h float64) int {
+	stream := circleStream(w, h, 0, false)
 	dict := write.Dictionary{
 		"/Type":    "/XObject",
 		"/Subtype": "/Form",
 		"/BBox":    fmt.Sprintf("[0 0 %.4f %.4f]", w, h),
 	}
-	return fb.writer.AddStreamObject(dict, []byte(" "), false)
+	return fb.writer.AddStreamObject(dict, []byte(stream), false)
+}
+
+// radioOnAppearance draws a circle with a filled dot inside (checked radio button state).
+func (fb *FieldBuilder) radioOnAppearance(w, h float64) int {
+	stream := circleStream(w, h, 0, true)
+	dict := write.Dictionary{
+		"/Type":    "/XObject",
+		"/Subtype": "/Form",
+		"/BBox":    fmt.Sprintf("[0 0 %.4f %.4f]", w, h),
+	}
+	return fb.writer.AddStreamObject(dict, []byte(stream), false)
+}
+
+// circleStream returns a PDF content stream that draws a circle centered in [0 0 w h].
+// If filled=true, a smaller filled circle (dot) is drawn inside.
+// inset is an additional inset from the bbox edge (0 = full size).
+func circleStream(w, h float64, inset float64, dot bool) string {
+	// Bezier approximation constant for a circle: 4*(sqrt(2)-1)/3 ≈ 0.5523
+	const k = 0.5523
+	cx, cy := w/2, h/2
+	r := (min64(w, h)/2 - 0.5) - inset // 0.5pt inset so stroke stays inside BBox
+	var b strings.Builder
+	fmt.Fprintf(&b, "q\n0.5 w\n0 G\n")
+	writeCirclePath(&b, cx, cy, r)
+	fmt.Fprintf(&b, "S\n")
+	if dot {
+		dr := r * 0.4
+		fmt.Fprintf(&b, "0 g\n")
+		writeCirclePath(&b, cx, cy, dr)
+		fmt.Fprintf(&b, "f\n")
+	}
+	fmt.Fprintf(&b, "Q\n")
+	return b.String()
+}
+
+func writeCirclePath(b *strings.Builder, cx, cy, r float64) {
+	const k = 0.5523
+	fmt.Fprintf(b, "%.4f %.4f m\n", cx, cy+r)
+	fmt.Fprintf(b, "%.4f %.4f %.4f %.4f %.4f %.4f c\n", cx+k*r, cy+r, cx+r, cy+k*r, cx+r, cy)
+	fmt.Fprintf(b, "%.4f %.4f %.4f %.4f %.4f %.4f c\n", cx+r, cy-k*r, cx+k*r, cy-r, cx, cy-r)
+	fmt.Fprintf(b, "%.4f %.4f %.4f %.4f %.4f %.4f c\n", cx-k*r, cy-r, cx-r, cy-k*r, cx-r, cy)
+	fmt.Fprintf(b, "%.4f %.4f %.4f %.4f %.4f %.4f c\n", cx-r, cy+k*r, cx-k*r, cy+r, cx, cy+r)
+	fmt.Fprintf(b, "h\n")
+}
+
+func min64(a, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // escapeFieldStr escapes a string for use inside PDF parenthesised string literals.
