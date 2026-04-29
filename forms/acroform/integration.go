@@ -54,6 +54,12 @@ func (fb *FormBuilder) AddButton(name string, rect []float64, page int) *FieldDe
 	return fb.fieldBuilder.AddButton(name, rect, page)
 }
 
+// AddListBox adds a list box (scrollable multi-option selection, always visible).
+// Unlike AddChoiceField (combo/dropdown), a list box shows multiple options at once.
+func (fb *FormBuilder) AddListBox(name string, rect []float64, page int, options []string) *FieldDef {
+	return fb.fieldBuilder.AddListBox(name, rect, page, options)
+}
+
 // BuildForm writes all field+widget objects, wires them into the correct page
 // /Annots arrays, builds the /AcroForm dict, and registers it with the
 // SimplePDFBuilder so Bytes() includes /AcroForm in the catalog.

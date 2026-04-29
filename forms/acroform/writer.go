@@ -66,6 +66,15 @@ func (fb *FieldBuilder) AddChoiceField(name string, rect []float64, page int, op
 	return field
 }
 
+// AddListBox adds a list box (scrollable selection, always visible).
+// Unlike a combo box, a list box displays multiple options simultaneously.
+func (fb *FieldBuilder) AddListBox(name string, rect []float64, page int, options []string) *FieldDef {
+	// Ch type without the Combo flag (1<<17)
+	field := &FieldDef{Name: name, Type: "Ch", Rect: rect, Page: page, Options: options}
+	fb.fields = append(fb.fields, field)
+	return field
+}
+
 // AddButton adds a push button
 func (fb *FieldBuilder) AddButton(name string, rect []float64, page int) *FieldDef {
 	field := &FieldDef{Name: name, Type: "Btn", Rect: rect, Page: page, Flags: 1 << 16}
@@ -112,6 +121,26 @@ func (fd *FieldDef) SetMaxLength(maxLen int) *FieldDef {
 
 func (fd *FieldDef) SetFontSize(pt float64) *FieldDef {
 	fd.FontSize = pt
+	return fd
+}
+
+// SetMultiline makes a text field multi-line (wraps text, shows scrollbar).
+func (fd *FieldDef) SetMultiline(v bool) *FieldDef {
+	if v {
+		fd.Flags |= 1 << 12
+	} else {
+		fd.Flags &^= 1 << 12
+	}
+	return fd
+}
+
+// SetPassword makes a text field a password field (input is obscured with •).
+func (fd *FieldDef) SetPassword(v bool) *FieldDef {
+	if v {
+		fd.Flags |= 1 << 13
+	} else {
+		fd.Flags &^= 1 << 13
+	}
 	return fd
 }
 
