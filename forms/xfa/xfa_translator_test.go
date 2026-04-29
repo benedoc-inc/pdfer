@@ -432,6 +432,198 @@ func TestFDA3881Template(t *testing.T) {
 	}
 }
 
+// TestImageEditDrawsSuppressed verifies that draws with <ui><imageEdit/></ui>
+// and no embedded image data (colored status blocks) are not emitted as
+// questions and are not claimed as labels by adjacent exclGroups.
+func TestImageEditDrawsSuppressed(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <draw name="YesIndicator">
+      <ui><imageEdit/></ui>
+      <assist><toolTip>Required Question Incomplete</toolTip></assist>
+    </draw>
+    <exclGroup name="LanguageGroup">
+      <field name="English">
+        <ui><checkButton shape="round"/></ui>
+        <caption><value><text>English</text></value></caption>
+        <value><text>1</text></value>
+      </field>
+    </exclGroup>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+
+	found := make(map[string]types.Question)
+	for _, q := range form.Questions {
+		found[q.Name] = q
+	}
+
+	if _, ok := found["YesIndicator"]; ok {
+		t.Error("imageEdit draw 'YesIndicator' should be suppressed, not emitted as a question")
+	}
+	if q, ok := found["LanguageGroup"]; ok {
+		if q.Label == "Required Question Incomplete" {
+			t.Error("exclGroup 'LanguageGroup' should not inherit label from imageEdit draw")
+		}
+	} else {
+		t.Error("exclGroup 'LanguageGroup' should be present in questions")
+	}
+}
+
+// TestLabelScanStopsAtField verifies that the backward label scan stops when
+// it encounters an interactive field, preventing cross-cluster label stealing.
+func TestLabelScanStopsAtField(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <draw name="labelA"><value><text>Group A Label</text></value></draw>
+    <exclGroup name="GroupA">
+      <field name="optA1">
+        <ui><checkButton shape="round"/></ui>
+        <caption><value><text>Option 1</text></value></caption>
+        <value><text>1</text></value>
+      </field>
+    </exclGroup>
+    <field name="helpButton">
+      <ui><button/></ui>
+      <bind match="none"/>
+    </field>
+    <exclGroup name="GroupB">
+      <field name="optB1">
+        <ui><checkButton shape="round"/></ui>
+        <caption><value><text>Option A</text></value></caption>
+        <value><text>1</text></value>
+      </field>
+    </exclGroup>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+
+	byName := make(map[string]types.Question)
+	for _, q := range form.Questions {
+		byName[q.Name] = q
+	}
+
+	// GroupA should claim labelA (it's directly before GroupA with no boundary).
+	if q, ok := byName["GroupA"]; ok {
+		if q.Label != "Group A Label" {
+			t.Errorf("GroupA label = %q, want %q", q.Label, "Group A Label")
+		}
+	} else {
+		t.Error("GroupA should be present")
+	}
+
+	// GroupB scan hits helpButton (field boundary) before reaching labelA.
+	// It must NOT claim "Group A Label" (wrong cluster). With the Name fallback it
+	// will have label "GroupB" — the important invariant is ≠ "Group A Label".
+	if q, ok := byName["GroupB"]; ok {
+		if q.Label == "Group A Label" {
+			t.Errorf("GroupB incorrectly claimed 'Group A Label' across field boundary")
+		}
+	} else {
+		t.Error("GroupB should be present")
+	}
+}
+
+// TestPresenceDrawClaimedAsLabel verifies that a presence-attributed textEdit
+// draw is claimed as a label by an adjacent unlabeled exclGroup, but is NOT
+// emitted as a standalone question.
+func TestPresenceDrawClaimedAsLabel(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <field name="someField">
+      <ui><textEdit/></ui>
+      <toolTip>Other field</toolTip>
+    </field>
+    <draw name="languageLabel" presence="hidden">
+      <ui><textEdit/></ui>
+      <value><text>Choose your language</text></value>
+    </draw>
+    <exclGroup name="LanguageGroup">
+      <field name="English">
+        <ui><checkButton shape="round"/></ui>
+        <caption><value><text>English</text></value></caption>
+        <value><text>1</text></value>
+      </field>
+    </exclGroup>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+
+	byName := make(map[string]types.Question)
+	for _, q := range form.Questions {
+		byName[q.Name] = q
+	}
+
+	if _, ok := byName["languageLabel"]; ok {
+		t.Error("presence-hidden draw 'languageLabel' should not appear as a standalone question")
+	}
+	if q, ok := byName["LanguageGroup"]; ok {
+		if q.Label != "Choose your language" {
+			t.Errorf("LanguageGroup label = %q, want %q", q.Label, "Choose your language")
+		}
+	} else {
+		t.Error("LanguageGroup should be present in questions")
+	}
+}
+
+// TestPlaceholderCaptionOverridden verifies that an Adobe LiveCycle
+// "The caption is in the textbox to the left" placeholder caption is replaced
+// by the text from the immediately preceding sibling draw.
+func TestPlaceholderCaptionOverridden(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <draw name="questionLabel">
+      <ui><textEdit/></ui>
+      <value><text>What does this rely on?</text></value>
+    </draw>
+    <field name="dropdown">
+      <ui><choiceList/></ui>
+      <caption><value><text>  The caption is in the textbox to the left of this dropdown</text></value></caption>
+      <assist><toolTip>Abbreviated Type</toolTip></assist>
+      <items><text>Option A</text><text>Option B</text></items>
+      <items save="1"><text>a</text><text>b</text></items>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+
+	byName := make(map[string]types.Question)
+	for _, q := range form.Questions {
+		byName[q.Name] = q
+	}
+
+	if _, ok := byName["questionLabel"]; ok {
+		t.Error("draw 'questionLabel' should be consumed and not emitted as a standalone question")
+	}
+	q, ok := byName["dropdown"]
+	if !ok {
+		t.Fatal("field 'dropdown' should be present in questions")
+	}
+	if q.Label == "  The caption is in the textbox to the left of this dropdown" ||
+		q.Label == "The caption is in the textbox to the left of this dropdown" {
+		t.Errorf("dropdown label is still the placeholder; want the sibling draw text")
+	}
+	if q.Label != "What does this rely on?" {
+		t.Errorf("dropdown label = %q, want %q", q.Label, "What does this rely on?")
+	}
+}
+
 func TestFormToXFA(t *testing.T) {
 	form := &types.FormSchema{
 		Metadata: types.FormMetadata{
@@ -976,5 +1168,144 @@ func TestStylesheetRoundTrip(t *testing.T) {
 
 	if len(stylesheet2.Styles) != len(stylesheet.Styles) {
 		t.Errorf("Round-trip styles count = %d, want %d", len(stylesheet2.Styles), len(stylesheet.Styles))
+	}
+}
+
+func TestPresenceHiddenField(t *testing.T) {
+	xfaXML := `<?xml version="1.0"?>
+<template>
+  <subform name="root">
+    <field name="visibleField">
+      <ui><textEdit/></ui>
+      <caption><value><text>Visible</text></value></caption>
+    </field>
+    <field name="hiddenField" presence="hidden">
+      <ui><textEdit/></ui>
+      <caption><value><text>Hidden</text></value></caption>
+    </field>
+    <field name="invisibleField" presence="invisible">
+      <ui><textEdit/></ui>
+      <caption><value><text>Invisible</text></value></caption>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+
+	byName := map[string]*types.Question{}
+	for i := range form.Questions {
+		byName[form.Questions[i].Name] = &form.Questions[i]
+	}
+
+	if q := byName["visibleField"]; q == nil {
+		t.Fatal("visibleField not found")
+	} else if q.Hidden {
+		t.Error("visibleField should not be hidden")
+	}
+
+	if q := byName["hiddenField"]; q == nil {
+		t.Fatal("hiddenField not found")
+	} else if !q.Hidden {
+		t.Error("hiddenField with presence='hidden' should have q.Hidden=true")
+	}
+
+	if q := byName["invisibleField"]; q == nil {
+		t.Fatal("invisibleField not found")
+	} else if !q.Hidden {
+		t.Error("invisibleField with presence='invisible' should have q.Hidden=true")
+	}
+}
+
+func TestPresenceVisibleField(t *testing.T) {
+	xfaXML := `<?xml version="1.0"?>
+<template>
+  <subform name="root">
+    <field name="explicitVisible" presence="visible">
+      <ui><textEdit/></ui>
+      <caption><value><text>Explicit Visible</text></value></caption>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	if len(form.Questions) == 0 {
+		t.Fatal("expected at least 1 question")
+	}
+	q := form.Questions[0]
+	if q.Hidden {
+		t.Errorf("field with presence='visible' should not be hidden, got Hidden=%v", q.Hidden)
+	}
+}
+
+func TestMultiTargetVisibilityScript(t *testing.T) {
+	script := `if (this.rawValue == "1") {
+	IMDRF.presence = "visible";
+	USA.presence = "hidden";
+	CDN.presence = "hidden";
+}`
+	results, ok := tryParseVisibilityScript(script, "javascript", "AppType", "")
+	if !ok {
+		t.Fatal("tryParseVisibilityScript should have matched")
+	}
+	result := results[0]
+	if result.ruleType != types.RuleTypeVisibility {
+		t.Errorf("ruleType = %q, want visibility", result.ruleType)
+	}
+	if len(result.actions) != 3 {
+		t.Fatalf("actions count = %d, want 3; got %+v", len(result.actions), result.actions)
+	}
+
+	byTarget := map[string]types.ActionType{}
+	for _, a := range result.actions {
+		byTarget[a.Target] = a.Type
+	}
+	if byTarget["IMDRF"] != types.ActionTypeShow {
+		t.Errorf("IMDRF action = %q, want show", byTarget["IMDRF"])
+	}
+	if byTarget["USA"] != types.ActionTypeHide {
+		t.Errorf("USA action = %q, want hide", byTarget["USA"])
+	}
+	if byTarget["CDN"] != types.ActionTypeHide {
+		t.Errorf("CDN action = %q, want hide", byTarget["CDN"])
+	}
+}
+
+func TestThisPresenceFallback(t *testing.T) {
+	// Script only uses "this.presence" — no named external targets.
+	// Should fall back to sourceField.
+	script := `this.presence = "hidden";`
+	results, ok := tryParseVisibilityScript(script, "javascript", "myField", "")
+	if !ok {
+		t.Fatal("tryParseVisibilityScript should have matched")
+	}
+	result := results[0]
+	if len(result.actions) != 1 {
+		t.Fatalf("actions count = %d, want 1", len(result.actions))
+	}
+	if result.actions[0].Target != "myField" {
+		t.Errorf("action target = %q, want myField", result.actions[0].Target)
+	}
+	if result.actions[0].Type != types.ActionTypeHide {
+		t.Errorf("action type = %q, want hide", result.actions[0].Type)
+	}
+}
+
+func TestPerTargetActionType(t *testing.T) {
+	script := `IMDRF.presence = "visible"; USA.presence = "hidden";`
+	if got := perTargetActionType(script, "IMDRF", types.ActionTypeHide); got != types.ActionTypeShow {
+		t.Errorf("IMDRF: got %q, want show", got)
+	}
+	if got := perTargetActionType(script, "USA", types.ActionTypeShow); got != types.ActionTypeHide {
+		t.Errorf("USA: got %q, want hide", got)
+	}
+	// Unknown target falls back to the provided default.
+	if got := perTargetActionType(script, "OTHER", types.ActionTypeShow); got != types.ActionTypeShow {
+		t.Errorf("OTHER: got %q, want show (fallback)", got)
 	}
 }

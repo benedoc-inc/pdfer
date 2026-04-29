@@ -5,11 +5,15 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/benedoc-inc/pdfer/types"
 )
+
+// presenceTargetRe matches "Name.presence =" in XFA JavaScript scripts.
+var presenceTargetRe = regexp.MustCompile(`\b([A-Za-z_]\w*)\.presence\s*=`)
 
 // ParseXFAForm parses raw XFA XML and converts it to a strongly-typed FormSchema.
 func ParseXFAForm(xfaXML string, verbose bool) (*types.FormSchema, error) {
@@ -454,6 +458,7 @@ type XFAValidation struct {
 type XFAEvent struct {
 	Type   string // "initialize", "change", "enter", "exit", etc.
 	Script string
+	Lang   string // "formcalc" | "javascript" | "" (auto-detect)
 	Target string
 	Action string
 }
@@ -461,9 +466,23 @@ type XFAEvent struct {
 // ── Label resolution helpers ──────────────────────────────────────────────────
 
 // resolveInteractiveLabel returns the best label for an interactive field or exclGroup.
-// Priority: caption > toolTip > speak.
+// Priority: non-placeholder caption > toolTip > speak.
+// Placeholder captions (e.g. "The caption is in the textbox to the left…") are
+// treated as absent so the toolTip can surface.
 func resolveInteractiveLabel(n *xfaNode) string {
-	return firstNonEmpty(n.Caption, n.ToolTip, n.SpeakLabel)
+	caption := n.Caption
+	if isPlaceholderCaption(caption) {
+		caption = ""
+	}
+	return firstNonEmpty(caption, n.ToolTip, n.SpeakLabel)
+}
+
+// resolveDisplayLabel extends resolveInteractiveLabel with a Name fallback so no
+// question is emitted with a blank label. NOT used inside claimDrawLabels — that
+// check must remain Name-free so fields with no caption/tooltip still trigger the
+// sibling-draw scan.
+func resolveDisplayLabel(n *xfaNode) string {
+	return firstNonEmpty(resolveInteractiveLabel(n), n.Name)
 }
 
 // resolveDrawText returns the best display text for a draw/display element.
@@ -524,6 +543,7 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 	var inAssist          bool
 	var inSpeak           bool
 	var inExData          bool
+	var inScript          bool
 
 	for {
 		token, err := decoder.Token()
@@ -554,7 +574,7 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 				if localName == "pageArea" {
 					kind = xfaKindPageArea
 				}
-				node := &xfaNode{Kind: kind}
+				node := &xfaNode{Kind: kind, Events: make([]XFAEvent, 0)}
 				for _, attr := range se.Attr {
 					switch attr.Name.Local {
 					case "name":
@@ -562,6 +582,14 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 					case "id":
 						if node.Name == "" {
 							node.Name = attr.Value
+						}
+					case "presence":
+						if attr.Value != "visible" {
+							node.Hidden = true
+						}
+					case "access":
+						if attr.Value == "readOnly" || attr.Value == "protected" || attr.Value == "nonInteractive" {
+							node.ReadOnly = true
 						}
 					}
 				}
@@ -601,12 +629,18 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 						leaf.Name = attr.Value
 					case "required":
 						leaf.Required = parseBool(attr.Value)
+					case "mandatory":
+						if attr.Value == "error" || attr.Value == "warning" || parseBool(attr.Value) {
+							leaf.Required = true
+						}
 					case "presence":
 						if kind == xfaKindDraw {
 							leaf.HasPresenceAttr = true
+						} else if kind == xfaKindField || kind == xfaKindExclGroup {
+							leaf.Hidden = attr.Value != "visible"
 						}
 					case "access":
-						if attr.Value == "readOnly" || attr.Value == "protected" {
+						if attr.Value == "readOnly" || attr.Value == "protected" || attr.Value == "nonInteractive" {
 							leaf.ReadOnly = true
 						}
 					case "page":
@@ -704,6 +738,10 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 				if currentLeaf != nil {
 					currentLeaf.UIType = "signature"
 				}
+			case "imageEdit":
+				if currentLeaf != nil {
+					currentLeaf.UIType = "imageEdit"
+				}
 			case "button":
 				if currentLeaf != nil && currentLeaf.UIType == "" {
 					currentLeaf.UIType = "button"
@@ -721,11 +759,38 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 						}
 					}
 					currentLeaf.Events = append(currentLeaf.Events, ev)
+				} else if top := topOfStack(); top.Kind == xfaKindSubform {
+					ev := XFAEvent{}
+					for _, attr := range se.Attr {
+						switch attr.Name.Local {
+						case "activity":
+							ev.Type = attr.Value
+						case "name":
+							ev.Action = attr.Value
+						}
+					}
+					top.Events = append(top.Events, ev)
 				}
 
 			case "script":
 				if currentLeaf != nil && len(currentLeaf.Events) > 0 {
+					inScript = true
 					currentValue.Reset()
+					for _, attr := range se.Attr {
+						if attr.Name.Local == "contentType" {
+							last := &currentLeaf.Events[len(currentLeaf.Events)-1]
+							last.Lang = contentTypeToLang(attr.Value)
+						}
+					}
+				} else if top := topOfStack(); top.Kind == xfaKindSubform && len(top.Events) > 0 {
+					inScript = true
+					currentValue.Reset()
+					for _, attr := range se.Attr {
+						if attr.Name.Local == "contentType" {
+							last := &top.Events[len(top.Events)-1]
+							last.Lang = contentTypeToLang(attr.Value)
+						}
+					}
 				}
 
 			case "validate":
@@ -850,6 +915,7 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 				inExData = false
 				inValue = false
 				inItems = false
+				inScript = false
 				currentValue.Reset()
 				currentCaption.Reset()
 				currentLabel.Reset()
@@ -918,7 +984,12 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 				if currentLeaf != nil && len(currentLeaf.Events) > 0 {
 					last := &currentLeaf.Events[len(currentLeaf.Events)-1]
 					last.Script = strings.TrimSpace(currentValue.String())
+				} else if top := topOfStack(); top.Kind == xfaKindSubform && len(top.Events) > 0 {
+					last := &top.Events[len(top.Events)-1]
+					last.Script = strings.TrimSpace(currentValue.String())
 				}
+				inScript = false
+				currentValue.Reset()
 
 			case "pattern":
 				if currentLeaf != nil && currentLeaf.Validation != nil {
@@ -967,6 +1038,8 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 				currentToolTip.WriteString(data)
 			case inSpeak && inAssist:
 				currentSpeak.WriteString(data)
+			case inScript:
+				currentValue.WriteString(data)
 			case inItems:
 				currentValue.WriteString(data)
 			case inValue:
@@ -1001,32 +1074,47 @@ func buildFormSchema(result *xfaTemplateResult, verbose bool) *types.FormSchema 
 	claimDrawLabels(result.Root)
 
 	var qIdx int
-	schema.Sections = walkSubformChildren(result.Root, nil, schema, &qIdx, verbose)
+	schema.Sections = walkSubformChildren(result.Root, nil, schema, &qIdx, false, verbose)
 	return schema
 }
 
 // claimDrawLabels performs a depth-first pre-pass over the tree. For each
-// exclGroup with no caption, it scans backwards through its sibling list for
-// the nearest eligible draw (no presence attr, no events) and claims its text
-// as the group caption, marking the draw consumed so it is not double-emitted.
+// unlabeled exclGroup or data-bound field, it scans backwards through its
+// sibling list for the nearest eligible draw and claims its text as the
+// node's caption, marking the draw consumed so it is not double-emitted.
+//
+// Scan rules:
+//   - Stops at subform, pageArea, field, or exclGroup boundaries — a label
+//     draw is always in the same visual cluster as its field.
+//   - Skips imageEdit draws (colored indicator blocks, not text labels).
+//   - Skips event-bearing draws (dynamic).
+//   - Presence-attributed text draws ARE eligible — they are valid static
+//     labels whose visibility is toggled by scripts.
 func claimDrawLabels(node *xfaNode) {
 	for i, child := range node.Children {
-		if child.Kind == xfaKindExclGroup && resolveInteractiveLabel(child) == "" {
+		needsLabel := resolveInteractiveLabel(child) == "" || isPlaceholderCaption(child.Caption)
+		shouldClaim := false
+		switch child.Kind {
+		case xfaKindExclGroup:
+			shouldClaim = needsLabel
+		case xfaKindField:
+			shouldClaim = child.Bind != "none" && needsLabel
+		}
+		if shouldClaim {
 			for j := i - 1; j >= 0; j-- {
 				prev := node.Children[j]
-				// Stop at section boundaries.
-				if prev.Kind == xfaKindSubform || prev.Kind == xfaKindPageArea {
+				// Stop at any structural or interactive boundary.
+				if prev.Kind == xfaKindSubform || prev.Kind == xfaKindPageArea ||
+					prev.Kind == xfaKindField || prev.Kind == xfaKindExclGroup {
 					break
 				}
-				// Only consider draw nodes; skip interactive fields.
 				if prev.Kind != xfaKindDraw {
 					continue
 				}
-				// Skip dynamic draws.
-				if prev.HasPresenceAttr || len(prev.Events) > 0 {
+				// Skip colored indicator blocks and event-driven draws.
+				if prev.UIType == "imageEdit" || len(prev.Events) > 0 {
 					continue
 				}
-				// Skip already-consumed draws.
 				if prev.Caption == "\x00consumed" {
 					continue
 				}
@@ -1045,9 +1133,16 @@ func claimDrawLabels(node *xfaNode) {
 	}
 }
 
+// isPlaceholderCaption returns true for captions that are Adobe LiveCycle
+// placeholder messages pointing to an adjacent draw for the real label.
+func isPlaceholderCaption(s string) bool {
+	return strings.HasPrefix(strings.TrimSpace(strings.ToLower(s)), "the caption is in the textbox")
+}
+
 // walkSubformChildren iterates node.Children, emits questions to schema, and
 // returns the FormSection slice for sections found at this level.
-func walkSubformChildren(node *xfaNode, path []string, schema *types.FormSchema, qIdx *int, verbose bool) []types.FormSection {
+// parentHidden=true propagates hidden state from ancestor subforms.
+func walkSubformChildren(node *xfaNode, path []string, schema *types.FormSchema, qIdx *int, parentHidden bool, verbose bool) []types.FormSection {
 	var sections []types.FormSection
 	for _, child := range node.Children {
 		switch child.Kind {
@@ -1055,7 +1150,7 @@ func walkSubformChildren(node *xfaNode, path []string, schema *types.FormSchema,
 			// Page templates — isolated from main form content.
 
 		case xfaKindSubform:
-			sec := buildSection(child, path, schema, qIdx, verbose)
+			sec := buildSection(child, path, schema, qIdx, parentHidden, verbose)
 			sections = append(sections, sec)
 
 		case xfaKindExclGroup:
@@ -1077,18 +1172,26 @@ func walkSubformChildren(node *xfaNode, path []string, schema *types.FormSchema,
 }
 
 // buildSection creates a FormSection for a subform node and recurses into its children.
-func buildSection(node *xfaNode, parentPath []string, schema *types.FormSchema, qIdx *int, verbose bool) types.FormSection {
+func buildSection(node *xfaNode, parentPath []string, schema *types.FormSchema, qIdx *int, parentHidden bool, verbose bool) types.FormSection {
 	path := make([]string, len(parentPath)+1)
 	copy(path, parentPath)
 	path[len(path)-1] = node.Name
 
+	// Collect any events on the subform node itself as rules.
+	for _, event := range node.Events {
+		if newRules, err := convertXFAEventToRules(event, node.Name, len(schema.Rules)+1); err == nil {
+			schema.Rules = append(schema.Rules, newRules...)
+		}
+	}
+
 	startLen := len(schema.Questions)
+	nodeHidden := parentHidden || node.Hidden
 	sec := types.FormSection{
 		Name:        node.Name,
 		Path:        strings.Join(path, "."),
 		Interactive: isInteractiveSubtree(node),
 	}
-	sec.Children = walkSubformChildren(node, path, schema, qIdx, verbose)
+	sec.Children = walkSubformChildren(node, path, schema, qIdx, nodeHidden, verbose)
 	// Record all question IDs added during this section's subtree walk.
 	if endLen := len(schema.Questions); endLen > startLen {
 		sec.Questions = make([]string, 0, endLen-startLen)
@@ -1105,7 +1208,7 @@ func emitExclGroup(node *xfaNode, path []string, qIdx *int) types.Question {
 	q := types.Question{
 		ID:         sanitizeFieldIDWithIndex(node.Name, *qIdx),
 		Name:       node.Name,
-		Label:      resolveInteractiveLabel(node),
+		Label:      resolveDisplayLabel(node),
 		Type:       types.ResponseTypeRadio,
 		Section:    sectionName(path),
 		PageNumber: node.PageNumber,
@@ -1125,6 +1228,23 @@ func emitField(node *xfaNode, path []string, qIdx *int, verbose bool) (types.Que
 	if node.Bind == "none" {
 		// Non-data-bound field — UI trigger or display label.
 		if node.UIType == "button" {
+			// Attachment upload buttons — render as file inputs.
+			if strings.Contains(node.Name, "AddAttachment") {
+				*qIdx++
+				label := node.Caption
+				if label == "" {
+					label = "Add Attachment"
+				}
+				return types.Question{
+					ID:         sanitizeFieldIDWithIndex(node.Name, *qIdx),
+					Name:       node.Name,
+					Label:      label,
+					Type:       types.ResponseTypeFile,
+					Section:    sectionName(path),
+					PageNumber: node.PageNumber,
+					Hidden:     node.Hidden,
+				}, true
+			}
 			return types.Question{}, false // UI trigger (Help Text, Show Intro, etc.)
 		}
 		displayText := resolveDrawText(node)
@@ -1163,6 +1283,9 @@ func emitDraw(node *xfaNode, path []string, parent *xfaNode, qIdx *int) (types.Q
 	}
 	if len(node.Events) > 0 {
 		return types.Question{}, false // has its own event handlers → dynamic
+	}
+	if node.UIType == "imageEdit" && node.ImageData == "" {
+		return types.Question{}, false // colored status block (YesIndicator / NoIndicator)
 	}
 
 	// Image draw.
@@ -1219,7 +1342,7 @@ func convertNodeToQuestion(node *xfaNode, index int, section string, verbose boo
 	q := types.Question{
 		ID:          sanitizeFieldIDWithIndex(node.Name, index),
 		Name:        node.Name,
-		Label:       resolveInteractiveLabel(node),
+		Label:       resolveDisplayLabel(node),
 		Description: node.Description,
 		Type:        mapXFAUITypeToResponseType(node.UIType, ""),
 		Required:    node.Required,
@@ -1331,63 +1454,63 @@ func extractXFARules(root *xfaNode, verbose bool) ([]types.Rule, error) {
 	ruleIndex := 1
 	for _, node := range fieldNodes {
 		for _, event := range node.Events {
-			rule, err := convertXFAEventToRule(event, node.Name, ruleIndex)
+			newRules, err := convertXFAEventToRules(event, node.Name, ruleIndex)
 			if err != nil {
 				if verbose {
 					log.Printf("Warning: Failed to convert event to rule: %v", err)
 				}
 				continue
 			}
-			if rule != nil {
-				rules = append(rules, *rule)
-				ruleIndex++
-			}
+			rules = append(rules, newRules...)
+			ruleIndex += len(newRules)
 		}
 	}
 	return rules, nil
 }
 
-// convertXFAEventToRule converts an XFA event to a Rule, parsing the script
-// body to extract structured conditions and actions where possible.
-func convertXFAEventToRule(event XFAEvent, sourceField string, index int) (*types.Rule, error) {
-	rule := &types.Rule{
-		ID:      fmt.Sprintf("rule_%d", index),
-		Source:  sourceField,
-		Type:    types.RuleTypeCalculate,
-		Actions: []types.Action{},
-	}
-
-	// Map event activity to rule type.
+// convertXFAEventToRules converts an XFA event to one or more Rules.
+// Visibility scripts with if/else branches generate two rules (if-branch + else-branch).
+func convertXFAEventToRules(event XFAEvent, sourceField string, index int) ([]types.Rule, error) {
+	defaultType := types.RuleTypeCalculate
 	switch strings.ToLower(event.Type) {
 	case "validate":
-		rule.Type = types.RuleTypeValidate
+		defaultType = types.RuleTypeValidate
 	case "calculate":
-		rule.Type = types.RuleTypeCalculate
-	case "initialize", "docReady":
-		rule.Type = types.RuleTypeSetValue
-	case "change", "exit", "enter":
-		rule.Type = types.RuleTypeCalculate
+		defaultType = types.RuleTypeCalculate
+	case "initialize", "docready":
+		defaultType = types.RuleTypeSetValue
 	}
 
 	if event.Script == "" {
-		return rule, nil
+		return []types.Rule{{
+			ID:      fmt.Sprintf("rule_%d", index),
+			Source:  sourceField,
+			Type:    defaultType,
+			Actions: []types.Action{},
+		}}, nil
 	}
 
-	parsed := parseXFAScript(event.Script, sourceField, event.Target)
-
-	// Use parsed rule type if more specific than the event-derived default.
-	if parsed.ruleType != "" {
-		rule.Type = parsed.ruleType
+	results := parseXFAScript(event.Script, sourceField, event.Target, event.Lang)
+	out := make([]types.Rule, 0, len(results))
+	for i, parsed := range results {
+		ruleType := defaultType
+		if parsed.ruleType != "" {
+			ruleType = parsed.ruleType
+		}
+		rule := types.Rule{
+			ID:          fmt.Sprintf("rule_%d", index+i),
+			Source:      sourceField,
+			Type:        ruleType,
+			Description: parsed.description,
+			Condition:   parsed.condition,
+			Actions:     parsed.actions,
+		}
+		if rule.Actions == nil {
+			rule.Actions = []types.Action{}
+		}
+		out = append(out, rule)
 	}
-	if parsed.description != "" {
-		rule.Description = parsed.description
-	}
-	rule.Condition = parsed.condition
-	if parsed.actions != nil {
-		rule.Actions = parsed.actions
-	}
-
-	return rule, nil
+	return out, nil
 }
 
 // scriptParseResult holds the structured result of parsing an XFA script body.
@@ -1399,42 +1522,58 @@ type scriptParseResult struct {
 }
 
 // parseXFAScript analyses an XFA script (FormCalc or JavaScript) and returns
-// whatever structured information can be extracted. It always succeeds — for
-// scripts it cannot understand it returns a single ActionTypeExecute action.
-func parseXFAScript(script, sourceField, targetField string) scriptParseResult {
+// one or more structured results. Visibility scripts with if/else produce two.
+// It always succeeds — unknown scripts return a single ActionTypeExecute action.
+// langHint is from the script element's contentType attribute ("formcalc" | "javascript" | "").
+func parseXFAScript(script, sourceField, targetField, langHint string) []scriptParseResult {
 	s := strings.TrimSpace(script)
-	lang := detectScriptLanguage(s)
+	lang := detectScriptLanguage(s, langHint)
 
 	// Try each pattern family in order of specificity.
 	// Validation is tried before set-value so that scripts containing both
 	// a rawValue reference and return true/false are classified as validation.
-	if r, ok := tryParseVisibilityScript(s, lang, sourceField, targetField); ok {
-		return r
+	if rs, ok := tryParseVisibilityScript(s, lang, sourceField, targetField); ok {
+		return rs
 	}
 	if r, ok := tryParseValidationScript(s, lang, sourceField); ok {
-		return r
+		return []scriptParseResult{r}
 	}
 	if r, ok := tryParseSetValueScript(s, lang, sourceField, targetField); ok {
-		return r
+		return []scriptParseResult{r}
 	}
 	if r, ok := tryParseCalculateScript(s, lang, sourceField); ok {
-		return r
+		return []scriptParseResult{r}
 	}
 
 	// Fallback: wrap raw script in an execute action.
-	return scriptParseResult{
+	return []scriptParseResult{{
 		actions: []types.Action{{
 			Type:       types.ActionTypeExecute,
 			Target:     targetField,
 			Script:     script,
 			Expression: script,
 		}},
+	}}
+}
+
+// contentTypeToLang maps a <script contentType="..."> value to "formcalc" or "javascript".
+func contentTypeToLang(ct string) string {
+	switch strings.ToLower(ct) {
+	case "application/x-formcalc":
+		return "formcalc"
+	case "application/x-javascript", "text/javascript":
+		return "javascript"
 	}
+	return ""
 }
 
 // detectScriptLanguage returns "formcalc" or "javascript".
+// hint is from the script element's contentType attribute; if non-empty it wins.
 // FormCalc uses `then`/`endif` keywords; JavaScript uses `{`/`}` blocks.
-func detectScriptLanguage(s string) string {
+func detectScriptLanguage(s, hint string) string {
+	if hint == "formcalc" || hint == "javascript" {
+		return hint
+	}
 	lower := strings.ToLower(s)
 	if strings.Contains(lower, "then") && (strings.Contains(lower, "endif") || strings.Contains(lower, "end if")) {
 		return "formcalc"
@@ -1449,7 +1588,8 @@ func detectScriptLanguage(s string) string {
 	return "javascript"
 }
 
-// tryParseVisibilityScript detects scripts that show or hide a field.
+// tryParseVisibilityScript detects scripts that show or hide one or more fields.
+// Returns 1 result for plain visibility scripts, 2 for if/else (one per branch).
 //
 // FormCalc patterns:
 //
@@ -1460,42 +1600,158 @@ func detectScriptLanguage(s string) string {
 //
 //	this.presence = "visible"
 //	xfa.resolveNode("fieldName").presence = "hidden"
-func tryParseVisibilityScript(s, lang, sourceField, targetField string) (scriptParseResult, bool) {
+//	Name.presence = "hidden"  (dotted-path, eSTAR style)
+func tryParseVisibilityScript(s, lang, sourceField, targetField string) ([]scriptParseResult, bool) {
 	lower := strings.ToLower(s)
 	if !strings.Contains(lower, "presence") {
-		return scriptParseResult{}, false
+		return nil, false
 	}
 
-	// Determine which visibility action is being set.
-	actionType := types.ActionTypeShow
-	if strings.Contains(lower, `"hidden"`) || strings.Contains(lower, `"invisible"`) ||
-		strings.Contains(lower, "'hidden'") || strings.Contains(lower, "'invisible'") {
-		actionType = types.ActionTypeHide
-	}
-
-	// Extract target field name.
-	target := extractResolveNodeTarget(s)
-	if target == "" {
-		target = targetField
-	}
-	if target == "" {
-		target = sourceField
-	}
-
-	// Check if the assignment is conditional.
 	cond := extractSimpleCondition(s, lang, sourceField)
 
-	action := types.Action{
-		Type:   actionType,
-		Target: target,
+	// Attempt if/else split for accurate bidirectional visibility.
+	if cond != nil {
+		if ifBody, elseBody, ok := splitIfElse(s, lang); ok {
+			return buildIfElseVisibilityRules(ifBody, elseBody, cond, sourceField, targetField), true
+		}
 	}
 
-	return scriptParseResult{
-		ruleType:    types.RuleTypeVisibility,
-		condition:   cond,
-		actions:     []types.Action{action},
-		description: fmt.Sprintf("%s field %q", actionType, target),
-	}, true
+	// Single-branch: extract all targets from the full script.
+	targets := extractAllPresenceTargets(s)
+	if len(targets) == 0 {
+		if targetField != "" {
+			targets = []string{targetField}
+		} else {
+			targets = []string{sourceField}
+		}
+	}
+
+	dominant := dominantActionType(lower)
+	actions := presenceActionsForTargets(s, targets, dominant)
+
+	return []scriptParseResult{{
+		ruleType:  types.RuleTypeVisibility,
+		condition: cond,
+		actions:   actions,
+	}}, true
+}
+
+// buildIfElseVisibilityRules creates two visibility rules from an if/else script.
+func buildIfElseVisibilityRules(ifBody, elseBody string, cond *types.Condition, sourceField, targetField string) []scriptParseResult {
+	ifTargets := extractAllPresenceTargets(ifBody)
+	elseTargets := extractAllPresenceTargets(elseBody)
+
+	if len(ifTargets) == 0 {
+		if targetField != "" {
+			ifTargets = []string{targetField}
+		} else {
+			ifTargets = []string{sourceField}
+		}
+	}
+	if len(elseTargets) == 0 {
+		// Mirror the if-branch targets with inverted action types.
+		elseTargets = ifTargets
+	}
+
+	ifActions := presenceActionsForTargets(ifBody, ifTargets, dominantActionType(strings.ToLower(ifBody)))
+	elseActions := presenceActionsForTargets(elseBody, elseTargets, dominantActionType(strings.ToLower(elseBody)))
+
+	return []scriptParseResult{
+		{ruleType: types.RuleTypeVisibility, condition: cond, actions: ifActions},
+		{ruleType: types.RuleTypeVisibility, condition: invertCondition(cond), actions: elseActions},
+	}
+}
+
+// dominantActionType returns ActionTypeHide if "hidden"/"invisible" appears, else ActionTypeShow.
+func dominantActionType(lower string) types.ActionType {
+	if strings.Contains(lower, `"hidden"`) || strings.Contains(lower, `"invisible"`) ||
+		strings.Contains(lower, "'hidden'") || strings.Contains(lower, "'invisible'") {
+		return types.ActionTypeHide
+	}
+	return types.ActionTypeShow
+}
+
+// presenceActionsForTargets builds an Action slice with per-target show/hide.
+func presenceActionsForTargets(s string, targets []string, dominant types.ActionType) []types.Action {
+	actions := make([]types.Action, 0, len(targets))
+	for _, t := range targets {
+		actions = append(actions, types.Action{
+			Type:   perTargetActionType(s, t, dominant),
+			Target: t,
+		})
+	}
+	return actions
+}
+
+// splitIfElse extracts the if-body and else-body from a conditional script.
+// Returns (ifBody, elseBody, true) if a parseable if/else is found.
+func splitIfElse(s, lang string) (ifBody, elseBody string, ok bool) {
+	lower := strings.ToLower(s)
+	if lang == "formcalc" {
+		thenIdx := strings.Index(lower, " then")
+		if thenIdx < 0 {
+			thenIdx = strings.Index(lower, "\tthen")
+		}
+		endIdx := strings.LastIndex(lower, "endif")
+		if thenIdx < 0 || endIdx < 0 {
+			return
+		}
+		body := s[thenIdx+5 : endIdx]
+		bodyLower := strings.ToLower(body)
+		elseIdx := strings.Index(bodyLower, "\nelse")
+		if elseIdx < 0 {
+			elseIdx = strings.Index(bodyLower, "\r\nelse")
+		}
+		if elseIdx < 0 {
+			return
+		}
+		return strings.TrimSpace(body[:elseIdx]), strings.TrimSpace(body[elseIdx+5:]), true
+	}
+	// JavaScript: find the end of the first { } block then look for "else {"
+	braceOpen := strings.Index(s, "{")
+	if braceOpen < 0 {
+		return
+	}
+	depth := 0
+	for i := braceOpen; i < len(s); i++ {
+		switch s[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				rest := strings.TrimSpace(s[i+1:])
+				if strings.HasPrefix(strings.ToLower(rest), "else") {
+					// Find { and } of the else block.
+					elseOpen := strings.Index(rest, "{")
+					elseClose := strings.LastIndex(rest, "}")
+					if elseOpen >= 0 && elseClose > elseOpen {
+						return s[braceOpen+1 : i], rest[elseOpen+1 : elseClose], true
+					}
+				}
+				return
+			}
+		}
+	}
+	return
+}
+
+// invertCondition returns the logical inverse of a Condition.
+func invertCondition(c *types.Condition) *types.Condition {
+	if c == nil {
+		return nil
+	}
+	switch c.Operator {
+	case types.OperatorEquals:
+		return &types.Condition{Operator: types.OperatorNotEquals, Expression: c.Expression, Value: c.Value, Children: c.Children}
+	case types.OperatorNotEquals:
+		return &types.Condition{Operator: types.OperatorEquals, Expression: c.Expression, Value: c.Value, Children: c.Children}
+	case types.OperatorGreaterThan:
+		return &types.Condition{Operator: types.OperatorLessOrEqual, Expression: c.Expression, Value: c.Value, Children: c.Children}
+	case types.OperatorLessThan:
+		return &types.Condition{Operator: types.OperatorGreaterOrEqual, Expression: c.Expression, Value: c.Value, Children: c.Children}
+	}
+	return &types.Condition{Logic: types.LogicOpNot, Children: []types.Condition{*c}}
 }
 
 // tryParseSetValueScript detects scripts that assign a value to a field.
@@ -1739,19 +1995,99 @@ func extractFieldRef(token, currentField string) string {
 	return t
 }
 
+// extractAllPresenceTargets collects every field name that a script assigns
+// .presence to, handling both xfa.resolveNode("name") and Name.presence= patterns.
+func extractAllPresenceTargets(s string) []string {
+	seen := map[string]bool{}
+	var out []string
+
+	// resolveNode("name").presence pattern — only static string arguments.
+	lower := strings.ToLower(s)
+	for offset := 0; ; {
+		idx := strings.Index(lower[offset:], "resolvenode(")
+		if idx == -1 {
+			break
+		}
+		abs := offset + idx
+		rest := strings.TrimSpace(s[abs+12:])
+		// Skip dynamic expressions — argument must start with a quote.
+		if len(rest) == 0 || (rest[0] != '"' && rest[0] != '\'') {
+			offset = abs + 12
+			continue
+		}
+		quote := rest[0]
+		rest = rest[1:]
+		end := strings.IndexByte(rest, quote)
+		if end == -1 {
+			offset = abs + 12
+			continue
+		}
+		name := rest[:end]
+		// Strip leading SOM path (e.g. "xfa.form.root.Section.field" → "field").
+		if dot := strings.LastIndex(name, "."); dot >= 0 {
+			name = name[dot+1:]
+		}
+		if name != "" && !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+		offset = abs + 12
+	}
+
+	// Name.presence = pattern (identifier followed by .presence)
+	for _, m := range presenceTargetRe.FindAllStringSubmatch(s, -1) {
+		name := m[1]
+		// Exclude XFA built-ins that are never field names.
+		if name == "this" || name == "xfa" || name == "event" || name == "xfaForm" {
+			continue
+		}
+		if !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// perTargetActionType determines whether a script shows or hides a specific
+// named target by looking for "target.presence = '...'" nearby.
+func perTargetActionType(s, target string, fallback types.ActionType) types.ActionType {
+	re := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(target) + `\.presence\s*=\s*["'](\w+)["']`)
+	m := re.FindStringSubmatch(s)
+	if m == nil {
+		return fallback
+	}
+	v := strings.ToLower(m[1])
+	if v == "hidden" || v == "invisible" || v == "inactive" {
+		return types.ActionTypeHide
+	}
+	return types.ActionTypeShow
+}
+
 // extractResolveNodeTarget parses `xfa.resolveNode("fieldName")` and returns fieldName.
+// Only handles static string arguments; returns "" for dynamic expressions.
 func extractResolveNodeTarget(s string) string {
 	lower := strings.ToLower(s)
 	idx := strings.Index(lower, "resolvenode(")
 	if idx == -1 {
 		return ""
 	}
-	rest := s[idx+12:]
-	end := strings.IndexByte(rest, ')')
+	rest := strings.TrimSpace(s[idx+12:])
+	if len(rest) == 0 || (rest[0] != '"' && rest[0] != '\'') {
+		return ""
+	}
+	quote := rest[0]
+	rest = rest[1:]
+	end := strings.IndexByte(rest, quote)
 	if end == -1 {
 		return ""
 	}
-	return strings.Trim(strings.TrimSpace(rest[:end]), `"'`)
+	name := rest[:end]
+	// Strip leading SOM path.
+	if dot := strings.LastIndex(name, "."); dot >= 0 {
+		name = name[dot+1:]
+	}
+	return name
 }
 
 // extractReturnExpression finds the last `return <expr>` in a script and

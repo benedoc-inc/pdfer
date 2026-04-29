@@ -43,20 +43,22 @@ type TextItem struct {
 
 // TableCell represents a single cell in a detected table
 type TableCell struct {
-	Text    string `json:"text"`
-	Row     int    `json:"row"`
-	Col     int    `json:"col"`
-	RowSpan int    `json:"row_span,omitempty"`
-	ColSpan int    `json:"col_span,omitempty"`
+	Text     string `json:"text"`
+	Row      int    `json:"row"`
+	Col      int    `json:"col"`
+	RowSpan  int    `json:"row_span,omitempty"`
+	ColSpan  int    `json:"col_span,omitempty"`
+	IsHeader bool   `json:"is_header,omitempty"`
 }
 
 // TableItem represents a detected table with its cells
 type TableItem struct {
-	Cells   []TableCell   `json:"cells"`
-	NumRows int           `json:"num_rows"`
-	NumCols int           `json:"num_cols"`
-	BBox    *SemanticBBox `json:"bbox,omitempty"`
-	Caption string        `json:"caption,omitempty"`
+	Cells      []TableCell   `json:"cells"`
+	NumRows    int           `json:"num_rows"`
+	NumCols    int           `json:"num_cols"`
+	HeaderRows int           `json:"header_rows,omitempty"`
+	BBox       *SemanticBBox `json:"bbox,omitempty"`
+	Caption    string        `json:"caption,omitempty"`
 }
 
 // PictureItem represents a detected image/figure region

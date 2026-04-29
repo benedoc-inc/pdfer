@@ -70,6 +70,12 @@ parts, err := pdfer.SplitPDFByPageCount(pdfBytes, 10, nil, false)
 out, err := pdfer.Redact(pdfBytes, []pdfer.RedactBox{{Page: 1, Rect: [4]float64{50, 680, 200, 720}}}, nil)
 out, err := pdfer.Repair(pdfBytes, nil)
 out, err := pdfer.Linearize(pdfBytes, nil) // Fast Web View
+
+// Embed file attachments (PDF Portfolio / eCTD)
+out, err := pdfer.EmbedAttachments(pdfBytes, []pdfer.FileAttachment{
+    {Name: "report.xlsx", Data: xlsxBytes, MimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+    {Name: "photo.jpg",   Data: jpegBytes, MimeType: "image/jpeg"},
+})
 ```
 
 ### Stamping
@@ -247,6 +253,43 @@ builder.FinalizePage(page)
 pdfBytes, err := builder.Bytes()
 ```
 
+### Word-wrapped text boxes
+
+```go
+style := write.TextBoxStyle{FontName: font, FontSize: 11, Align: write.TextAlignLeft}
+height := page.DrawTextBox(72, 700, 468, "Long paragraph text that wraps automatically...", style)
+```
+
+### Tables
+
+```go
+tbl := write.NewTableBuilder([]float64{150, 200, 118}, write.TableStyle{
+    FontName: font, FontSize: 10,
+})
+hdr := tbl.AddRow(true)
+hdr.AddCell("Field").WithAlign(write.TextAlignCenter)
+hdr.AddCell("Value").WithAlign(write.TextAlignCenter)
+hdr.AddCell("Notes").WithAlign(write.TextAlignCenter)
+
+row := tbl.AddRow(false)
+row.AddCell("Device Name")
+row.AddCell("MyDevice 3000")
+row.AddCell("")
+
+height = page.DrawTable(72, 680, tbl)
+```
+
+### Multi-column layout
+
+```go
+layout := page.NewColumnLayout(72, 720, 468, 2, 12) // 2 columns, 12pt gutter
+
+layout.DrawTextBox(0, "Left column content...", style, 6)
+layout.DrawTextBox(1, "Right column content...", style, 6)
+
+layout.BalanceColumns() // align cursors to the lowest column
+```
+
 ## Parsing PDFs directly
 
 ```go
@@ -308,11 +351,12 @@ pdfer/
 | | Visible signature field appearance | ❌ |
 | | RFC 3161 timestamp (TSA) | ❌ |
 | | Long-term validation (LTV / OCSP / CRL) | ❌ |
+| **File attachments** | Embed files via `/EmbeddedFiles` name tree | ✅ |
 | **Forms** | AcroForm parse, fill, flatten | ✅ |
 | | XFA extract, fill, rebuild | ✅ |
 | **Extraction** | Text, graphics, images, fonts | ✅ |
 | | Annotations, bookmarks, metadata | ✅ |
-| | Table detection from graphic grid lines | ✅ |
+| | Table detection (grid lines + rect-based, merged cells, header rows) | ✅ |
 | | JSON serialization, directory dump | ✅ |
 | | Text search / find-and-highlight | ❌ |
 | | JPEG2000 (JPXDecode) decode | ❌ |
@@ -321,6 +365,9 @@ pdfer/
 | **PDF/A** | Conformance validation (heuristic, parts 1–3) | ✅ |
 | | Conversion of arbitrary PDFs | ✅ |
 | **Images** | Replace image XObject (JPEG/PNG/raw) | ✅ |
+| **Write / layout** | Word-wrapped text boxes | ✅ |
+| | Tables (header rows, col/row span, per-cell bg) | ✅ |
+| | Multi-column layout helper | ✅ |
 | **Parsing** | xref tables + streams (PDF 1.5+) | ✅ |
 | | Object streams + Type-2 xref entries | ✅ |
 | | Incremental updates | ✅ |
@@ -348,9 +395,9 @@ See [GAPS.md](GAPS.md) for the full history and detailed file pointers.
 
 **Other**
 - Linearize does not emit a `/H` hint stream — object ordering is correct but byte-serving is not optimised.
-- `StampText` emits a single `Tj` operator; text is not wrapped across lines.
+- `StampText` emits a single `Tj` operator; text is not wrapped. Use `PageBuilder.DrawTextBox` for multi-line text in generated PDFs.
 - Optional Content Groups (PDF layers) are not accessible via the API.
-- Named destinations and embedded file attachments are not exposed.
+- Named destinations are not exposed.
 - PDF/A validation is heuristic — it misses font subset tags, transparency groups, overprint settings, and annotation appearance requirements.
 
 ## Testing

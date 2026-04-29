@@ -35,8 +35,9 @@ func detectTablesOnPage(page *types.Page) []types.TableItem {
 	hClusters := clusterValues(extractPositions(hLines, false), 2.0)
 	vClusters := clusterValues(extractPositions(vLines, true), 2.0)
 
-	if len(hClusters) < 2 || len(vClusters) < 2 {
-		return nil
+	if len(hClusters) < 3 || len(vClusters) < 3 {
+		// Need at least 3 boundaries to form a 2×2 table
+		return detectTablesFromRects(page)
 	}
 
 	// Sort clusters
@@ -46,12 +47,15 @@ func detectTablesOnPage(page *types.Page) []types.TableItem {
 	numRows := len(hClusters) - 1
 	numCols := len(vClusters) - 1
 
-	if numRows < 1 || numCols < 1 {
+	if numRows < 2 || numCols < 2 {
 		return nil
 	}
 
 	// Map text into cells
 	cells := mapTextToCells(page.Text, hClusters, vClusters, page.PageNumber)
+
+	// Detect merged cells from graphic rectangles that span multiple grid positions
+	cells = detectMergedCells(cells, page.Graphics, hClusters, vClusters)
 
 	// Calculate bounding box
 	bbox := &types.SemanticBBox{
@@ -67,6 +71,16 @@ func detectTablesOnPage(page *types.Page) []types.TableItem {
 		NumRows: numRows,
 		NumCols: numCols,
 		BBox:    bbox,
+	}
+
+	// Detect header rows from filled background rectangles
+	table.HeaderRows = detectHeaderRows(page.Graphics, hClusters, vClusters)
+	if table.HeaderRows > 0 {
+		for i := range table.Cells {
+			if table.Cells[i].Row < table.HeaderRows {
+				table.Cells[i].IsHeader = true
+			}
+		}
 	}
 
 	// Look for caption
@@ -89,15 +103,26 @@ func (l gridLine) isVertical(tolerance float64) bool {
 	return math.Abs(l.x1-l.x2) < tolerance
 }
 
-// extractGridLines pulls out horizontal and vertical lines from graphics
+func (l gridLine) length() float64 {
+	dx := l.x2 - l.x1
+	dy := l.y2 - l.y1
+	return math.Sqrt(dx*dx + dy*dy)
+}
+
+// extractGridLines pulls out horizontal and vertical lines from graphics.
+// Lines shorter than minLineLen are ignored to reduce false positives.
 func extractGridLines(graphics []types.Graphic, pageHeight float64) (hLines, vLines []gridLine) {
-	tolerance := 1.5 // points
+	const tolerance = 1.5
+	const minLineLen = 10.0
 
 	for _, g := range graphics {
 		// Direct line graphics
 		if g.Type == types.GraphicTypeLine && g.Path != nil {
 			lines := pathToLines(g.Path.Operations)
 			for _, line := range lines {
+				if line.length() < minLineLen {
+					continue
+				}
 				if line.isHorizontal(tolerance) {
 					hLines = append(hLines, line)
 				} else if line.isVertical(tolerance) {
@@ -111,6 +136,9 @@ func extractGridLines(graphics []types.Graphic, pageHeight float64) (hLines, vLi
 		if g.Path != nil {
 			lines := pathToLines(g.Path.Operations)
 			for _, line := range lines {
+				if line.length() < minLineLen {
+					continue
+				}
 				if line.isHorizontal(tolerance) {
 					hLines = append(hLines, line)
 				} else if line.isVertical(tolerance) {
@@ -127,15 +155,13 @@ func extractGridLines(graphics []types.Graphic, pageHeight float64) (hLines, vLi
 			h := bb.UpperY - bb.LowerY
 
 			// Thin rectangles act as lines
-			if h < 3 && w > 10 {
-				// Horizontal line
+			if h < 3 && w > minLineLen {
 				y := (bb.LowerY + bb.UpperY) / 2
 				hLines = append(hLines, gridLine{bb.LowerX, y, bb.UpperX, y})
-			} else if w < 3 && h > 10 {
-				// Vertical line
+			} else if w < 3 && h > minLineLen {
 				x := (bb.LowerX + bb.UpperX) / 2
 				vLines = append(vLines, gridLine{x, bb.LowerY, x, bb.UpperY})
-			} else if w > 10 && h > 10 {
+			} else if w > minLineLen && h > minLineLen {
 				// Full rectangle — decompose into 4 lines
 				hLines = append(hLines,
 					gridLine{bb.LowerX, bb.LowerY, bb.UpperX, bb.LowerY}, // bottom
@@ -295,6 +321,134 @@ func mapTextToCells(textElements []types.TextElement, hClusters, vClusters []flo
 	return cells
 }
 
+// ---- Merged cell detection ----
+
+// detectMergedCells examines filled rectangles that span multiple grid positions
+// and sets ColSpan/RowSpan on affected cells accordingly.
+func detectMergedCells(cells []types.TableCell, graphics []types.Graphic, hClusters, vClusters []float64) []types.TableCell {
+	numRows := len(hClusters) - 1
+	numCols := len(vClusters) - 1
+	if numRows < 2 || numCols < 2 {
+		return cells
+	}
+
+	// Build cell lookup for quick updates
+	type cellKey struct{ row, col int }
+	index := make(map[cellKey]int, len(cells))
+	for i, c := range cells {
+		index[cellKey{c.Row, c.Col}] = i
+	}
+
+	for _, g := range graphics {
+		if g.BoundingBox == nil {
+			continue
+		}
+		bb := g.BoundingBox
+		w := bb.UpperX - bb.LowerX
+		h := bb.UpperY - bb.LowerY
+		if w < 5 || h < 5 {
+			continue
+		}
+
+		// Determine which grid columns this rect spans
+		colStart, colEnd := -1, -1
+		for c := 0; c < numCols; c++ {
+			if bb.LowerX <= vClusters[c]+3 && colStart < 0 {
+				colStart = c
+			}
+			if bb.UpperX >= vClusters[c+1]-3 {
+				colEnd = c
+			}
+		}
+
+		// Determine which grid rows this rect spans (PDF Y increases upward)
+		rowStart, rowEnd := -1, -1
+		for r := 0; r < numRows; r++ {
+			top := hClusters[numRows-r]
+			bottom := hClusters[numRows-r-1]
+			if bb.UpperY >= top-3 && rowStart < 0 {
+				rowStart = r
+			}
+			if bb.LowerY <= bottom+3 {
+				rowEnd = r
+			}
+		}
+
+		if colStart < 0 || colEnd < colStart || rowStart < 0 || rowEnd < rowStart {
+			continue
+		}
+
+		colSpan := colEnd - colStart + 1
+		rowSpan := rowEnd - rowStart + 1
+		if colSpan <= 1 && rowSpan <= 1 {
+			continue
+		}
+
+		// Apply span to the top-left cell of the merged region
+		key := cellKey{rowStart, colStart}
+		if idx, ok := index[key]; ok {
+			if colSpan > 1 {
+				cells[idx].ColSpan = colSpan
+			}
+			if rowSpan > 1 {
+				cells[idx].RowSpan = rowSpan
+			}
+		}
+	}
+
+	return cells
+}
+
+// ---- Header row detection ----
+
+// detectHeaderRows returns the number of leading rows that appear to be header rows.
+// It looks for filled (non-white) rectangles that cover the top rows of the grid.
+func detectHeaderRows(graphics []types.Graphic, hClusters, vClusters []float64) int {
+	numRows := len(hClusters) - 1
+	if numRows < 2 {
+		return 0
+	}
+
+	tableLeft := vClusters[0]
+	tableRight := vClusters[len(vClusters)-1]
+	tableWidth := tableRight - tableLeft
+
+	for r := 0; r < numRows && r < 3; r++ {
+		rowTop := hClusters[numRows-r]
+		rowBottom := hClusters[numRows-r-1]
+		rowHeight := rowTop - rowBottom
+
+		for _, g := range graphics {
+			if g.FillColor == nil || isWhiteOrNone(g.FillColor) {
+				continue
+			}
+			if g.BoundingBox == nil {
+				continue
+			}
+			bb := g.BoundingBox
+			// Check if the filled rect covers this row substantially
+			if bb.LowerY <= rowBottom+2 && bb.UpperY >= rowTop-2 &&
+				bb.LowerX <= tableLeft+5 && bb.UpperX >= tableRight-5 {
+				// This filled rect spans the full row width — it's a header background
+				_ = rowHeight
+				_ = tableWidth
+				return r + 1
+			}
+		}
+	}
+
+	return 0
+}
+
+// isWhiteOrNone returns true if the color is white or near-white (not a real fill).
+func isWhiteOrNone(c *types.Color) bool {
+	if c == nil {
+		return true
+	}
+	// Treat near-white as transparent background
+	return c.R > 0.95 && c.G > 0.95 && c.B > 0.95
+}
+
 // ---- Rectangle-based table detection ----
 
 // detectTablesFromRects tries to detect tables from aligned rectangles
@@ -342,7 +496,7 @@ func detectTablesFromRects(page *types.Page) []types.TableItem {
 	hClusters := clusterValues(hBounds, 2.0)
 	vClusters := clusterValues(vBounds, 2.0)
 
-	if len(hClusters) < 2 || len(vClusters) < 2 {
+	if len(hClusters) < 3 || len(vClusters) < 3 {
 		return nil
 	}
 
@@ -352,7 +506,12 @@ func detectTablesFromRects(page *types.Page) []types.TableItem {
 	numRows := len(hClusters) - 1
 	numCols := len(vClusters) - 1
 
+	if numRows < 2 || numCols < 2 {
+		return nil
+	}
+
 	cells := mapTextToCells(page.Text, hClusters, vClusters, page.PageNumber)
+	cells = detectMergedCells(cells, page.Graphics, hClusters, vClusters)
 
 	bbox := &types.SemanticBBox{
 		Left:   vClusters[0],
@@ -368,6 +527,16 @@ func detectTablesFromRects(page *types.Page) []types.TableItem {
 		NumCols: numCols,
 		BBox:    bbox,
 	}
+
+	table.HeaderRows = detectHeaderRows(page.Graphics, hClusters, vClusters)
+	if table.HeaderRows > 0 {
+		for i := range table.Cells {
+			if table.Cells[i].Row < table.HeaderRows {
+				table.Cells[i].IsHeader = true
+			}
+		}
+	}
+
 	table.Caption = findTableCaption(page, bbox)
 
 	return []types.TableItem{table}

@@ -218,12 +218,14 @@ strings, and there is no `GetNamedDestinations()` API.
 
 **File**: `content/extract/bookmarks.go`, `api.go`
 
-#### Embedded file attachments not supported
-PDFs can carry file attachments via `/EmbeddedFiles` in the catalog names tree.
-There is no API to list, extract, add, or remove attached files (useful for
-PDF Portfolios and FDA eCTD submissions).
+#### ~~Embedded file attachments not supported~~ ✅ Fixed
+`pdfer.EmbedAttachments(pdfBytes, []pdfer.FileAttachment{...})` writes each
+attachment as an incremental update: an `EmbeddedFile` stream object per file,
+a Filespec dict per file, and a `/Names` object that extends (or creates) the
+catalog's `/EmbeddedFiles` name tree. The original PDF bytes are never
+modified — only appended to.
 
-**File**: new `core/manipulate/attachments.go` + `api.go`
+**File**: `attach.go`
 
 #### JPEG2000 (JPXDecode) images not decoded
 `images.go` identifies `JPXDecode`-filtered streams and reports the format, but
@@ -254,11 +256,13 @@ ordering but not from byte-serving optimisation.
 
 **File**: `core/manipulate/linearize.go:20`
 
-#### `StampText` does not support multi-line text
-`StampText` emits a single `Tj` PDF operator. Text longer than the page width
-or text containing explicit newlines is not wrapped or split across lines.
+#### ~~`StampText` does not support multi-line text~~ ✅ Addressed via `DrawTextBox`
+`PageBuilder.DrawTextBox(x, y, width, text, TextBoxStyle)` in `core/write/textbox.go`
+provides word-wrapped, per-line text rendering for generated PDFs. `StampText`
+(which modifies existing PDFs via incremental update) still emits a single `Tj`
+and is not wrapped — use `DrawTextBox` in generated content instead.
 
-**File**: `core/manipulate/stamp.go`
+**File**: `core/write/textbox.go`
 
 #### No text search / find-and-highlight API
 There is no `FindText(pdfBytes, query string)` function that returns match

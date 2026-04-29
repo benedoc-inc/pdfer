@@ -62,7 +62,8 @@ const (
 	ResponseTypeButton    ResponseType = "button"    // Button (not a question, but action)
 	ResponseTypeSignature ResponseType = "signature" // Signature field
 	ResponseTypeDisplay   ResponseType = "display"   // Static display text (XFA draw / no-bind label)
-	ResponseTypeImage    ResponseType = "image"     // Embedded image (XFA draw with <image> content)
+	ResponseTypeImage     ResponseType = "image"     // Embedded image (XFA draw with <image> content)
+	ResponseTypeFile      ResponseType = "file"      // File attachment upload
 	ResponseTypeUnknown   ResponseType = "unknown"   // Unknown type
 )
 

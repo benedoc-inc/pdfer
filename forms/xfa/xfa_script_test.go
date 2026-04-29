@@ -11,33 +11,41 @@ import (
 
 func TestDetectScriptLanguage_FormCalc_ThenEndif(t *testing.T) {
 	s := `if ($.rawValue == "yes") then $.presence = "hidden" endif`
-	if got := detectScriptLanguage(s); got != "formcalc" {
+	if got := detectScriptLanguage(s, ""); got != "formcalc" {
 		t.Errorf("expected formcalc, got %q", got)
 	}
 }
 
 func TestDetectScriptLanguage_FormCalc_DollarRef(t *testing.T) {
-	if got := detectScriptLanguage(`$.rawValue = "hello"`); got != "formcalc" {
+	if got := detectScriptLanguage(`$.rawValue = "hello"`, ""); got != "formcalc" {
 		t.Errorf("expected formcalc, got %q", got)
 	}
 }
 
 func TestDetectScriptLanguage_JavaScript_Braces(t *testing.T) {
-	if got := detectScriptLanguage(`if (this.rawValue == "yes") { this.presence = "hidden"; }`); got != "javascript" {
+	if got := detectScriptLanguage(`if (this.rawValue == "yes") { this.presence = "hidden"; }`, ""); got != "javascript" {
 		t.Errorf("expected javascript, got %q", got)
 	}
 }
 
 func TestDetectScriptLanguage_JavaScript_Return(t *testing.T) {
-	if got := detectScriptLanguage(`return this.rawValue.length > 0;`); got != "javascript" {
+	if got := detectScriptLanguage(`return this.rawValue.length > 0;`, ""); got != "javascript" {
 		t.Errorf("expected javascript, got %q", got)
+	}
+}
+
+func TestDetectScriptLanguage_HintWins(t *testing.T) {
+	// Hint should override heuristic.
+	if got := detectScriptLanguage(`$.rawValue = "x"`, "javascript"); got != "javascript" {
+		t.Errorf("expected javascript (from hint), got %q", got)
 	}
 }
 
 // --- visibility -------------------------------------------------------------
 
 func TestParseXFAScript_Visibility_Hide_FormCalc(t *testing.T) {
-	r := parseXFAScript(`$.presence = "hidden"`, "myField", "")
+	rs := parseXFAScript(`$.presence = "hidden"`, "myField", "", "")
+	r := rs[0]
 	if r.ruleType != types.RuleTypeVisibility {
 		t.Fatalf("expected RuleTypeVisibility, got %q", r.ruleType)
 	}
@@ -50,7 +58,8 @@ func TestParseXFAScript_Visibility_Hide_FormCalc(t *testing.T) {
 }
 
 func TestParseXFAScript_Visibility_Show_FormCalc(t *testing.T) {
-	r := parseXFAScript(`$.presence = "visible"`, "f", "")
+	rs := parseXFAScript(`$.presence = "visible"`, "f", "", "")
+	r := rs[0]
 	if r.ruleType != types.RuleTypeVisibility {
 		t.Fatalf("expected RuleTypeVisibility, got %q", r.ruleType)
 	}
@@ -60,7 +69,8 @@ func TestParseXFAScript_Visibility_Show_FormCalc(t *testing.T) {
 }
 
 func TestParseXFAScript_Visibility_Invisible(t *testing.T) {
-	r := parseXFAScript(`$.presence = "invisible"`, "f", "")
+	rs := parseXFAScript(`$.presence = "invisible"`, "f", "", "")
+	r := rs[0]
 	if r.actions[0].Type != types.ActionTypeHide {
 		t.Errorf("expected ActionTypeHide for 'invisible', got %q", r.actions[0].Type)
 	}
@@ -68,7 +78,8 @@ func TestParseXFAScript_Visibility_Invisible(t *testing.T) {
 
 func TestParseXFAScript_Visibility_WithCondition_FormCalc(t *testing.T) {
 	s := `if ($.rawValue == "yes") then $.presence = "hidden" endif`
-	r := parseXFAScript(s, "trigger", "target")
+	rs := parseXFAScript(s, "trigger", "target", "")
+	r := rs[0]
 	if r.ruleType != types.RuleTypeVisibility {
 		t.Fatalf("expected RuleTypeVisibility, got %q", r.ruleType)
 	}
@@ -82,7 +93,8 @@ func TestParseXFAScript_Visibility_WithCondition_FormCalc(t *testing.T) {
 
 func TestParseXFAScript_Visibility_WithCondition_JavaScript(t *testing.T) {
 	s := `if (this.rawValue == "yes") { xfa.resolveNode("otherField").presence = "hidden"; }`
-	r := parseXFAScript(s, "trigger", "")
+	rs := parseXFAScript(s, "trigger", "", "")
+	r := rs[0]
 	if r.ruleType != types.RuleTypeVisibility {
 		t.Fatalf("expected RuleTypeVisibility, got %q", r.ruleType)
 	}
@@ -97,16 +109,47 @@ func TestParseXFAScript_Visibility_WithCondition_JavaScript(t *testing.T) {
 
 func TestParseXFAScript_Visibility_ResolveNode_Target(t *testing.T) {
 	s := `xfa.resolveNode("sectionB").presence = "hidden"`
-	r := parseXFAScript(s, "checkboxField", "")
+	rs := parseXFAScript(s, "checkboxField", "", "")
+	r := rs[0]
 	if r.actions[0].Target != "sectionB" {
 		t.Errorf("expected target 'sectionB', got %q", r.actions[0].Target)
+	}
+}
+
+// --- if/else rule splitting --------------------------------------------------
+
+func TestParseXFAScript_IfElse_TwoRules(t *testing.T) {
+	s := `if ($.rawValue == "1") then
+    IMDRF.presence = "visible"
+    USA.presence = "hidden"
+else
+    IMDRF.presence = "hidden"
+    USA.presence = "visible"
+endif`
+	rs := parseXFAScript(s, "AppType", "", "formcalc")
+	if len(rs) != 2 {
+		t.Fatalf("expected 2 rules (if+else), got %d", len(rs))
+	}
+	// Both rules should be visibility type.
+	for i, r := range rs {
+		if r.ruleType != types.RuleTypeVisibility {
+			t.Errorf("rule[%d]: expected RuleTypeVisibility, got %q", i, r.ruleType)
+		}
+	}
+	// First rule condition: equals "1"; second rule: inverted (not equals "1").
+	if rs[0].condition == nil || rs[0].condition.Operator != types.OperatorEquals {
+		t.Errorf("if-rule condition should be OperatorEquals")
+	}
+	if rs[1].condition == nil {
+		t.Errorf("else-rule should have a condition")
 	}
 }
 
 // --- set value --------------------------------------------------------------
 
 func TestParseXFAScript_SetValue_LiteralString_FormCalc(t *testing.T) {
-	r := parseXFAScript(`$.rawValue = "hello"`, "f", "")
+	rs := parseXFAScript(`$.rawValue = "hello"`, "f", "", "")
+	r := rs[0]
 	if r.ruleType != types.RuleTypeSetValue {
 		t.Fatalf("expected RuleTypeSetValue, got %q", r.ruleType)
 	}
@@ -123,7 +166,8 @@ func TestParseXFAScript_SetValue_LiteralString_FormCalc(t *testing.T) {
 }
 
 func TestParseXFAScript_SetValue_FieldRef_FormCalc(t *testing.T) {
-	r := parseXFAScript(`$.rawValue = otherField.rawValue`, "f", "")
+	rs := parseXFAScript(`$.rawValue = otherField.rawValue`, "f", "", "")
+	r := rs[0]
 	if r.ruleType != types.RuleTypeSetValue {
 		t.Fatalf("expected RuleTypeSetValue, got %q", r.ruleType)
 	}
@@ -133,7 +177,8 @@ func TestParseXFAScript_SetValue_FieldRef_FormCalc(t *testing.T) {
 }
 
 func TestParseXFAScript_SetValue_JavaScript_ThisRawValue(t *testing.T) {
-	r := parseXFAScript(`this.rawValue = "default";`, "f", "")
+	rs := parseXFAScript(`this.rawValue = "default";`, "f", "", "")
+	r := rs[0]
 	if r.ruleType != types.RuleTypeSetValue {
 		t.Fatalf("expected RuleTypeSetValue, got %q", r.ruleType)
 	}
@@ -141,7 +186,8 @@ func TestParseXFAScript_SetValue_JavaScript_ThisRawValue(t *testing.T) {
 
 func TestParseXFAScript_SetValue_WithCondition(t *testing.T) {
 	s := `if (trigger.rawValue != "") then $.rawValue = trigger.rawValue endif`
-	r := parseXFAScript(s, "f", "")
+	rs := parseXFAScript(s, "f", "", "")
+	r := rs[0]
 	if r.ruleType != types.RuleTypeSetValue {
 		t.Fatalf("expected RuleTypeSetValue, got %q", r.ruleType)
 	}
@@ -157,7 +203,8 @@ func TestParseXFAScript_SetValue_WithCondition(t *testing.T) {
 
 func TestParseXFAScript_Validate_ReturnFalse(t *testing.T) {
 	s := `if ($.rawValue == "") then return false endif`
-	r := parseXFAScript(s, "f", "")
+	rs := parseXFAScript(s, "f", "", "")
+	r := rs[0]
 	if r.ruleType != types.RuleTypeValidate {
 		t.Fatalf("expected RuleTypeValidate, got %q", r.ruleType)
 	}
@@ -174,7 +221,8 @@ func TestParseXFAScript_Validate_JavaScript_ReturnBool(t *testing.T) {
 var v = this.rawValue;
 if (v.length < 5) { return false; }
 return true;`
-	r := parseXFAScript(s, "zipCode", "")
+	rs := parseXFAScript(s, "zipCode", "", "")
+	r := rs[0]
 	if r.ruleType != types.RuleTypeValidate {
 		t.Fatalf("expected RuleTypeValidate, got %q", r.ruleType)
 	}
@@ -182,7 +230,8 @@ return true;`
 
 func TestParseXFAScript_Validate_MessageBox(t *testing.T) {
 	s := `if ($.rawValue == "") then xfa.host.messageBox("Required field") return false endif`
-	r := parseXFAScript(s, "f", "")
+	rs := parseXFAScript(s, "f", "", "")
+	r := rs[0]
 	if r.ruleType != types.RuleTypeValidate {
 		t.Fatalf("expected RuleTypeValidate, got %q", r.ruleType)
 	}
@@ -192,7 +241,8 @@ func TestParseXFAScript_Validate_MessageBox(t *testing.T) {
 
 func TestParseXFAScript_Calculate_Sum_FormCalc(t *testing.T) {
 	s := `$.rawValue = Sum(a.rawValue, b.rawValue, c.rawValue)`
-	r := parseXFAScript(s, "total", "")
+	rs := parseXFAScript(s, "total", "", "")
+	r := rs[0]
 	// Contains Sum() — triggers calculate path before set-value since it
 	// matches calculate earlier if we check set-value first. Either
 	// RuleTypeCalculate or RuleTypeSetValue is acceptable here; the key check
@@ -204,7 +254,8 @@ func TestParseXFAScript_Calculate_Sum_FormCalc(t *testing.T) {
 
 func TestParseXFAScript_Calculate_FormCalcBuiltin(t *testing.T) {
 	s := `Concat(firstName.rawValue, " ", lastName.rawValue)`
-	r := parseXFAScript(s, "fullName", "")
+	rs := parseXFAScript(s, "fullName", "", "")
+	r := rs[0]
 	if r.ruleType != types.RuleTypeCalculate {
 		t.Fatalf("expected RuleTypeCalculate, got %q", r.ruleType)
 	}
@@ -212,7 +263,8 @@ func TestParseXFAScript_Calculate_FormCalcBuiltin(t *testing.T) {
 
 func TestParseXFAScript_Calculate_JavaScript_Return(t *testing.T) {
 	s := `return parseFloat(qty.rawValue) * parseFloat(price.rawValue);`
-	r := parseXFAScript(s, "total", "")
+	rs := parseXFAScript(s, "total", "", "")
+	r := rs[0]
 	if r.ruleType != types.RuleTypeCalculate {
 		t.Fatalf("expected RuleTypeCalculate, got %q", r.ruleType)
 	}
@@ -225,7 +277,8 @@ func TestParseXFAScript_Calculate_JavaScript_Return(t *testing.T) {
 
 func TestParseXFAScript_Fallback_Unknown(t *testing.T) {
 	s := `someComplexCustomFunction(arg1, arg2)`
-	r := parseXFAScript(s, "f", "")
+	rs := parseXFAScript(s, "f", "", "")
+	r := rs[0]
 	if len(r.actions) != 1 {
 		t.Fatalf("expected 1 action, got %d", len(r.actions))
 	}
@@ -238,10 +291,10 @@ func TestParseXFAScript_Fallback_Unknown(t *testing.T) {
 }
 
 func TestParseXFAScript_Empty(t *testing.T) {
-	r := parseXFAScript("", "f", "")
+	rs := parseXFAScript("", "f", "", "")
 	// Empty script: single execute action with empty script or no actions.
 	// Either is fine; the important thing is no panic.
-	_ = r
+	_ = rs
 }
 
 // --- condition parsing ------------------------------------------------------
@@ -369,9 +422,72 @@ func TestFindAssignmentOp(t *testing.T) {
 	}
 }
 
-// --- convertXFAEventToRule integration -------------------------------------
+// --- splitIfElse ------------------------------------------------------------
 
-func TestConvertXFAEventToRule_EventTypeMapping(t *testing.T) {
+func TestSplitIfElse_FormCalc(t *testing.T) {
+	s := `if ($.rawValue == "1") then
+    A.presence = "visible"
+else
+    A.presence = "hidden"
+endif`
+	ifBody, elseBody, ok := splitIfElse(s, "formcalc")
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if !strings.Contains(ifBody, `"visible"`) {
+		t.Errorf("ifBody should contain visible: %q", ifBody)
+	}
+	if !strings.Contains(elseBody, `"hidden"`) {
+		t.Errorf("elseBody should contain hidden: %q", elseBody)
+	}
+}
+
+func TestSplitIfElse_NoElse(t *testing.T) {
+	s := `if ($.rawValue == "1") then A.presence = "visible" endif`
+	_, _, ok := splitIfElse(s, "formcalc")
+	if ok {
+		t.Error("expected ok=false for script with no else branch")
+	}
+}
+
+// --- invertCondition --------------------------------------------------------
+
+func TestInvertCondition_Equals(t *testing.T) {
+	c := &types.Condition{Operator: types.OperatorEquals, Value: "yes"}
+	inv := invertCondition(c)
+	if inv.Operator != types.OperatorNotEquals {
+		t.Errorf("expected OperatorNotEquals, got %q", inv.Operator)
+	}
+}
+
+func TestInvertCondition_NotEquals(t *testing.T) {
+	c := &types.Condition{Operator: types.OperatorNotEquals, Value: ""}
+	inv := invertCondition(c)
+	if inv.Operator != types.OperatorEquals {
+		t.Errorf("expected OperatorEquals, got %q", inv.Operator)
+	}
+}
+
+func TestInvertCondition_GreaterThan(t *testing.T) {
+	c := &types.Condition{Operator: types.OperatorGreaterThan, Value: "5"}
+	inv := invertCondition(c)
+	if inv.Operator != types.OperatorLessOrEqual {
+		t.Errorf("expected OperatorLessOrEqual, got op=%q", inv.Operator)
+	}
+}
+
+func TestInvertCondition_Fallback_Not(t *testing.T) {
+	// An operator with no explicit inverse mapping falls back to LogicOpNot wrapper.
+	c := &types.Condition{Operator: types.OperatorContains, Value: "x"}
+	inv := invertCondition(c)
+	if inv.Logic != types.LogicOpNot {
+		t.Errorf("expected LogicOpNot fallback, got logic=%q op=%q", inv.Logic, inv.Operator)
+	}
+}
+
+// --- convertXFAEventToRules integration -------------------------------------
+
+func TestConvertXFAEventToRules_EventTypeMapping(t *testing.T) {
 	cases := []struct {
 		eventType string
 		want      types.RuleType
@@ -382,38 +498,70 @@ func TestConvertXFAEventToRule_EventTypeMapping(t *testing.T) {
 	}
 	for _, tc := range cases {
 		event := XFAEvent{Type: tc.eventType}
-		rule, err := convertXFAEventToRule(event, "f", 1)
+		rules, err := convertXFAEventToRules(event, "f", 1)
 		if err != nil {
 			t.Errorf("%q: unexpected error: %v", tc.eventType, err)
 		}
-		if rule.Type != tc.want {
-			t.Errorf("event type %q: expected rule type %q, got %q", tc.eventType, tc.want, rule.Type)
+		if len(rules) == 0 {
+			t.Errorf("%q: expected at least one rule", tc.eventType)
+			continue
+		}
+		if rules[0].Type != tc.want {
+			t.Errorf("event type %q: expected rule type %q, got %q", tc.eventType, tc.want, rules[0].Type)
 		}
 	}
 }
 
-func TestConvertXFAEventToRule_ScriptOverridesEventType(t *testing.T) {
+func TestConvertXFAEventToRules_ScriptOverridesEventType(t *testing.T) {
 	// A "change" event whose script is actually a visibility toggle.
 	event := XFAEvent{
 		Type:   "change",
 		Script: `$.presence = "hidden"`,
 	}
-	rule, err := convertXFAEventToRule(event, "f", 1)
+	rules, err := convertXFAEventToRules(event, "f", 1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if rule.Type != types.RuleTypeVisibility {
-		t.Errorf("expected RuleTypeVisibility (from script), got %q", rule.Type)
+	if len(rules) == 0 {
+		t.Fatal("expected at least one rule")
+	}
+	if rules[0].Type != types.RuleTypeVisibility {
+		t.Errorf("expected RuleTypeVisibility (from script), got %q", rules[0].Type)
 	}
 }
 
-func TestConvertXFAEventToRule_PreservesSourceAndID(t *testing.T) {
+func TestConvertXFAEventToRules_PreservesSourceAndID(t *testing.T) {
 	event := XFAEvent{Type: "validate", Script: `return false`}
-	rule, _ := convertXFAEventToRule(event, "emailField", 7)
+	rules, _ := convertXFAEventToRules(event, "emailField", 7)
+	if len(rules) == 0 {
+		t.Fatal("expected at least one rule")
+	}
+	rule := rules[0]
 	if rule.Source != "emailField" {
 		t.Errorf("expected source 'emailField', got %q", rule.Source)
 	}
 	if rule.ID != "rule_7" {
 		t.Errorf("expected ID 'rule_7', got %q", rule.ID)
+	}
+}
+
+func TestConvertXFAEventToRules_IfElse_TwoRules(t *testing.T) {
+	event := XFAEvent{
+		Type: "change",
+		Script: `if ($.rawValue == "yes") then
+    sectionA.presence = "visible"
+    sectionB.presence = "hidden"
+else
+    sectionA.presence = "hidden"
+    sectionB.presence = "visible"
+endif`,
+		Lang: "formcalc",
+	}
+	rules, err := convertXFAEventToRules(event, "toggle", 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rules) != 2 {
+		t.Fatalf("expected 2 rules for if/else script, got %d", len(rules))
 	}
 }
