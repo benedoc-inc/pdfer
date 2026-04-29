@@ -119,22 +119,19 @@ func build(encrypt bool) ([]byte, error) {
 	buildPage2(p2)
 	b.FinalizePage(p2)
 
-	// ── Page 3: AcroForm fields ───────────────────────────────────────────────
+	// ── Page 3: AcroForm field catalog — page content + widgets in one pass ────
 	p3 := b.AddPage(write.PageSizeLetter)
-	buildPage3(p3)
+	fb := acroform.NewFormBuilder(b)
+	buildPage3WithForm(p3, fb)
 	b.FinalizePage(p3)
+	if _, err := fb.BuildForm(); err != nil {
+		return nil, fmt.Errorf("BuildForm: %w", err)
+	}
 
 	// ── Page 4: TextBox, Table, ColumnLayout ─────────────────────────────────
 	p4 := b.AddPage(write.PageSizeLetter)
 	buildPage4(p4)
 	b.FinalizePage(p4)
-
-	// ── AcroForm — one widget per field type, all on page 3 (index 2) ─────────
-	fb := acroform.NewFormBuilder(b)
-	addFormFields(fb)
-	if _, err := fb.BuildForm(); err != nil {
-		return nil, fmt.Errorf("BuildForm: %w", err)
-	}
 
 	// ── Bookmarks ─────────────────────────────────────────────────────────────
 	if err := b.SetBookmarks([]types.Bookmark{
@@ -427,261 +424,136 @@ func buildPage2(p *write.PageBuilder) {
 
 // buildPage3 draws all the labels and chrome for the form field catalog.
 // The actual widget annotations are added separately via addFormFields.
-func buildPage3(p *write.PageBuilder) {
-	cs := p.Content()
-	font := p.AddStandardFont("Helvetica")
-	bold := p.AddStandardFont("Helvetica-Bold")
-	italic := p.AddStandardFont("Helvetica-Oblique")
-
-	// Title
-	cs.BeginText().SetFont(bold, 18).SetFillColorRGB(0.1, 0.2, 0.6).
-		SetTextPosition(72, 750).ShowText("AcroForm Field Type Catalog").EndText()
-	cs.BeginText().SetFont(italic, 9).SetFillColorRGB(0.4, 0.4, 0.4).
-		SetTextPosition(72, 733).
-		ShowText("One example of every supported AcroForm field type. Open in a PDF viewer to interact.").
-		EndText()
-	cs.SetFillColorRGB(0.1, 0.2, 0.6).Rectangle(72, 725, 468, 2).Fill()
-
-	const lx = 72.0   // left column x
-	const rx = 318.0  // right column x
-	const fw = 222.0  // field width
-
-	// fieldLabel draws a small bold label above a field.
-	fieldLabel := func(x, top float64, text string, required bool) {
-		cs.BeginText().SetFont(bold, 8.5).SetFillColorRGB(0.2, 0.2, 0.2).
-			SetTextPosition(x, top).ShowText(text).EndText()
-		if required {
-			cs.BeginText().SetFont(bold, 9).SetFillColorRGB(0.85, 0.15, 0.15).
-				SetTextPosition(x+approxLabelWidth(text, 8.5), top).ShowText(" *").EndText()
-		}
-	}
-	// hint draws a small grey note to the right of / below a field.
-	hint := func(x, y float64, text string) {
-		cs.BeginText().SetFont(italic, 7.5).SetFillColorRGB(0.55, 0.55, 0.55).
-			SetTextPosition(x, y).ShowText(text).EndText()
-	}
-	// sectionRule draws a thin grey rule with a section title.
-	sectionRule := func(y float64, text string) {
-		cs.SetFillColorRGB(0.85, 0.85, 0.85).Rectangle(lx, y+3, 468, 1).Fill()
-		cs.BeginText().SetFont(bold, 7.5).SetFillColorRGB(0.5, 0.5, 0.5).
-			SetTextPosition(lx, y).ShowText(strings.ToUpper(text)).EndText()
-	}
-
-	// ── Left column ──────────────────────────────────────────────────────────
-	y := 712.0
-
-	sectionRule(y, "Text fields")
-	y -= 14
-
-	fieldLabel(lx, y, "Single-line text (empty)", false)
-	y -= 20
-	hint(lx, y-10, "No default value set")
-	y -= 18
-
-	fieldLabel(lx, y, "Single-line text (pre-filled)", false)
-	y -= 20
-	hint(lx, y-10, "Default: \"Alice Smith\"")
-	y -= 18
-
-	fieldLabel(lx, y, "Multi-line text area", false)
-	y -= 62
-	hint(lx, y-10, "Wraps and scrolls vertically")
-	y -= 16
-
-	fieldLabel(lx, y, "Password field", false)
-	y -= 20
-	hint(lx, y-10, "Input obscured with bullets")
-	y -= 18
-
-	fieldLabel(lx, y, "Required text field", true)
-	y -= 20
-	hint(lx, y-10, "Marked required; * shown above")
-	y -= 18
-
-	fieldLabel(lx, y, "Read-only field", false)
-	y -= 20
-	hint(lx, y-10, "Cannot be edited")
-	y -= 18
-
-	fieldLabel(lx, y, "Max-length field (10 chars)", false)
-	y -= 20
-	hint(lx, y-10, "MaxLen=10; viewer enforces limit")
-	y -= 26
-
-	// ── Right column ─────────────────────────────────────────────────────────
-	y2 := 712.0
-
-	sectionRule(y2, "Selection fields")
-	y2 -= 14
-
-	fieldLabel(rx, y2, "Checkbox (unchecked)", false)
-	y2 -= 20
-	hint(rx+22, y2-10, "Default off")
-	y2 -= 18
-
-	fieldLabel(rx, y2, "Checkbox (pre-checked)", false)
-	y2 -= 20
-	hint(rx+22, y2-10, "Default on — Value = \"Yes\"")
-	y2 -= 18
-
-	sectionRule(y2, "Radio buttons")
-	y2 -= 14
-
-	fieldLabel(rx, y2, "Radio group (pick one)", false)
-	for _, opt := range []string{"Option A", "Option B", "Option C"} {
-		y2 -= 20
-		cs.BeginText().SetFont(font, 9).SetFillColorRGB(0, 0, 0).
-			SetTextPosition(rx+22, y2+1).ShowText(opt).EndText()
-	}
-	y2 -= 14
-
-	sectionRule(y2, "Choice fields")
-	y2 -= 14
-
-	fieldLabel(rx, y2, "Dropdown (combo box)", false)
-	y2 -= 20
-	hint(rx, y2-10, "Selected: \"Canada\"")
-	y2 -= 18
-
-	fieldLabel(rx, y2, "List box (always visible)", false)
-	y2 -= 62
-	hint(rx, y2-10, "Shows multiple rows; scroll to see more")
-	y2 -= 16
-
-	sectionRule(y2, "Buttons")
-	y2 -= 14
-
-	fieldLabel(rx, y2, "Push button", false)
-	y2 -= 28
-	hint(rx, y2-10, "No value; triggers actions")
-	y2 -= 16
-
-	// Footer
-	minY := y
-	if y2 < minY {
-		minY = y2
-	}
-	cs.SetFillColorRGB(0.85, 0.85, 0.85).Rectangle(lx, minY-12, 468, 1).Fill()
-	cs.BeginText().SetFont(italic, 7.5).SetFillColorRGB(0.6, 0.6, 0.6).
-		SetTextPosition(lx, minY-24).
-		ShowText("* Required field. All fields generated with pdfer — pure-Go zero-dependency PDF library.").
-		EndText()
-}
-
-// addFormFields adds the actual AcroForm widget annotations to page 3 (index 2).
-// Y positions must mirror the labels drawn in buildPage3 exactly.
-func addFormFields(fb *acroform.FormBuilder) {
+// buildPage3WithForm draws the field-type catalog labels AND places the AcroForm
+// widget annotations in a single pass so positions can never drift apart.
+func buildPage3WithForm(p *write.PageBuilder, fb *acroform.FormBuilder) {
+	const pg = 2   // 0-based page index
 	const lx = 72.0
-	const rx = 318.0
-	const fw = 222.0
-	const pg = 2 // 0-based page index
+	const rx = 316.0
+	const lw = 222.0
+	const rw = 224.0
 
-	// ── Left column: text fields ──────────────────────────────────────────────
-	y := 712.0 - 14 // below section rule
+	bold := p.AddStandardFont("Helvetica-Bold")
+	font := p.AddStandardFont("Helvetica")
+	italic := p.AddStandardFont("Helvetica-Oblique")
+	cs := p.Content()
 
-	// 1. Single-line text (empty)
-	y -= 20
-	fb.AddTextField("text_empty", rect(lx, y, fw, 16), pg)
-	y -= 18 + 10
+	// secDiv draws a thin rule + small-caps section header; returns next label Y.
+	secDiv := func(x, y, colW float64, title string) float64 {
+		cs.SetFillColorRGB(0.72, 0.72, 0.72).Rectangle(x, y, colW, 0.5).Fill()
+		cs.BeginText().SetFont(bold, 7.5).SetFillColorRGB(0.42, 0.42, 0.42).
+			SetTextPosition(x, y-11).ShowText(strings.ToUpper(title)).EndText()
+		return y - 22
+	}
 
-	// 2. Single-line text (pre-filled)
-	y -= 20
-	fb.AddTextField("text_prefilled", rect(lx, y, fw, 16), pg).
-		SetDefault("Alice Smith")
-	y -= 18 + 10
+	// fieldRow draws label + places widget; returns Y for the next label.
+	// labelY is the label baseline. fieldH is the widget height.
+	fieldRow := func(x, labelY, colW, fieldH float64, text string, required bool,
+		addWidget func([]float64)) float64 {
+		cs.BeginText().SetFont(bold, 9).SetFillColorRGB(0.15, 0.15, 0.15).
+			SetTextPosition(x, labelY).ShowText(text).EndText()
+		if required {
+			starX := x + float64(len(text))*0.46*9
+			cs.BeginText().SetFont(bold, 9).SetFillColorRGB(0.75, 0.1, 0.1).
+				SetTextPosition(starX, labelY).ShowText(" *").EndText()
+		}
+		fieldTop := labelY - 10
+		addWidget([]float64{x, fieldTop - fieldH, x + colW, fieldTop})
+		return fieldTop - fieldH - 14 // 14pt gap before next label
+	}
 
-	// 3. Multi-line textarea
-	y -= 62
-	fb.AddTextField("text_multiline", rect(lx, y, fw, 58), pg).
-		SetDefault("pdfer supports multi-line text areas.\nThis field wraps automatically.").
-		SetMultiline(true)
-	y -= 16 + 10
+	// inlineRow draws widget + label on the same line (checkbox / radio style).
+	inlineRow := func(x, y float64, text string, addWidget func([]float64)) float64 {
+		wTop, wBot := y, y-16
+		addWidget([]float64{x, wBot, x + 16, wTop})
+		cs.BeginText().SetFont(font, 9).SetFillColorRGB(0.1, 0.1, 0.1).
+			SetTextPosition(x+21, wBot+4).ShowText(text).EndText()
+		return wBot - 12
+	}
 
-	// 4. Password
-	y -= 20
-	fb.AddTextField("text_password", rect(lx, y, fw, 16), pg).
-		SetPassword(true)
-	y -= 18 + 10
+	// ── Page title ────────────────────────────────────────────────────────────
+	cs.BeginText().SetFont(bold, 18).SetFillColorRGB(0.1, 0.2, 0.6).
+		SetTextPosition(lx, 750).ShowText("AcroForm Field Type Catalog").EndText()
+	cs.BeginText().SetFont(italic, 9).SetFillColorRGB(0.4, 0.4, 0.4).
+		SetTextPosition(lx, 733).
+		ShowText("Every supported AcroForm field type — open in Acrobat or Preview to interact.").
+		EndText()
+	cs.SetFillColorRGB(0.1, 0.2, 0.6).Rectangle(lx, 725, 468, 2).Fill()
 
-	// 5. Required
-	y -= 20
-	fb.AddTextField("text_required", rect(lx, y, fw, 16), pg).
-		SetRequired(true)
-	y -= 18 + 10
+	// ── Left column: text field variants ─────────────────────────────────────
+	ly := secDiv(lx, 706, lw, "Text fields")
 
-	// 6. Read-only
-	y -= 20
-	fb.AddTextField("text_readonly", rect(lx, y, fw, 16), pg).
-		SetDefault("This value is fixed").
-		SetReadOnly(true)
-	y -= 18 + 10
+	ly = fieldRow(lx, ly, lw, 17, "Single-line text (empty)", false,
+		func(r []float64) { fb.AddTextField("text_empty", r, pg) })
 
-	// 7. Max-length
-	y -= 20
-	fb.AddTextField("text_maxlen", rect(lx, y, fw, 16), pg).
-		SetMaxLength(10)
-	_ = y
+	ly = fieldRow(lx, ly, lw, 17, `Single-line text — pre-filled`, false,
+		func(r []float64) { fb.AddTextField("text_prefilled", r, pg).SetDefault("Alice Smith") })
+
+	ly = fieldRow(lx, ly, lw, 52, "Multi-line text area", false,
+		func(r []float64) {
+			fb.AddTextField("text_multiline", r, pg).
+				SetMultiline(true).SetDefault("Line one.\nLine two.\nLine three.")
+		})
+
+	ly = fieldRow(lx, ly, lw, 17, "Password (input obscured)", false,
+		func(r []float64) { fb.AddTextField("text_password", r, pg).SetPassword(true) })
+
+	ly = fieldRow(lx, ly, lw, 17, "Required field", true,
+		func(r []float64) { fb.AddTextField("text_required", r, pg).SetRequired(true) })
+
+	ly = fieldRow(lx, ly, lw, 17, "Read-only (value locked)", false,
+		func(r []float64) {
+			fb.AddTextField("text_readonly", r, pg).
+				SetDefault("Cannot be changed").SetReadOnly(true)
+		})
+
+	fieldRow(lx, ly, lw, 17, "Max-length (10 chars)", false,
+		func(r []float64) { fb.AddTextField("text_maxlen", r, pg).SetMaxLength(10) })
 
 	// ── Right column ──────────────────────────────────────────────────────────
-	y2 := 712.0 - 14
+	ry := secDiv(rx, 706, rw, "Checkboxes")
 
-	// 8. Checkbox unchecked
-	y2 -= 20
-	fb.AddCheckbox("chk_off", rect(rx, y2, 16, 16), pg)
-	y2 -= 18 + 10
+	ry = inlineRow(rx, ry, "Unchecked (default off)",
+		func(r []float64) { fb.AddCheckbox("chk_off", r, pg) })
+	ry = inlineRow(rx, ry, `Pre-checked (Value = "Yes")`,
+		func(r []float64) { fb.AddCheckbox("chk_on", r, pg).SetValue("Yes") })
 
-	// 9. Checkbox pre-checked
-	y2 -= 20
-	fb.AddCheckbox("chk_on", rect(rx, y2, 16, 16), pg).
-		SetValue("Yes")
-	y2 -= 18 + 10
-
-	// Section rule gap
-	y2 -= 14
-
-	// 10–12. Radio button group (3 options)
-	y2 -= 14
-	for _, name := range []string{"radio_a", "radio_b", "radio_c"} {
-		y2 -= 20
-		fb.AddRadioButton(name, rect(rx, y2, 16, 16), pg)
+	ry -= 6
+	ry = secDiv(rx, ry, rw, "Radio buttons")
+	for i, opt := range []string{"Option A", "Option B", "Option C"} {
+		name := fmt.Sprintf("radio_%c", rune('a'+i))
+		ry = inlineRow(rx, ry, opt,
+			func(r []float64) { fb.AddRadioButton(name, r, pg) })
 	}
-	y2 -= 14
 
-	// Section rule gap
-	y2 -= 14
+	ry -= 6
+	ry = secDiv(rx, ry, rw, "Choice fields")
 
-	// 13. Dropdown
-	y2 -= 20
-	fb.AddChoiceField("dropdown", rect(rx, y2, fw, 16), pg,
-		[]string{"USA", "Canada", "Mexico", "United Kingdom", "Australia", "Germany", "France"}).
-		SetValue("Canada")
-	y2 -= 18 + 10
+	ry = fieldRow(rx, ry, rw, 17, "Dropdown (combo box)", false,
+		func(r []float64) {
+			fb.AddChoiceField("dropdown", r, pg,
+				[]string{"USA", "Canada", "Mexico", "UK", "Germany", "Australia"}).
+				SetValue("Canada")
+		})
 
-	// 14. List box
-	y2 -= 62
-	fb.AddListBox("listbox", rect(rx, y2, fw, 58), pg,
-		[]string{"Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta"})
-	y2 -= 16 + 10
+	ry = fieldRow(rx, ry, rw, 52, "List box (always visible)", false,
+		func(r []float64) {
+			fb.AddListBox("listbox", r, pg,
+				[]string{"Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta"})
+		})
 
-	// Section rule gap
-	y2 -= 14
+	ry -= 6
+	ry = secDiv(rx, ry, rw, "Push button")
 
-	// 15. Push button
-	y2 -= 28
-	fb.AddButton("btn_submit", rect(rx, y2, fw, 22), pg)
-	_ = y2
-}
+	fieldRow(rx, ry, rw, 22, "Push button", false,
+		func(r []float64) { fb.AddButton("btn_submit", r, pg) })
 
-// rect returns a field rect [llx, lly, urx, ury].
-// (x, top) is the top-left corner; w and h are width and height.
-func rect(x, top, w, h float64) []float64 {
-	return []float64{x, top - h, x + w, top}
-}
-
-// approxLabelWidth returns a rough pixel width of text at the given font size.
-// Used only for positioning the required-star annotation.
-func approxLabelWidth(text string, size float64) float64 {
-	return float64(len(text)) * 0.46 * size
+	// Footer
+	cs.SetFillColorRGB(0.82, 0.82, 0.82).Rectangle(lx, 58, 468, 0.5).Fill()
+	cs.BeginText().SetFont(italic, 7.5).SetFillColorRGB(0.58, 0.58, 0.58).
+		SetTextPosition(lx, 46).
+		ShowText("* Required field.  15 widgets total.  Generated by pdfer — pure-Go zero-dependency PDF library.").
+		EndText()
 }
 
 func buildPage4(p *write.PageBuilder) {
