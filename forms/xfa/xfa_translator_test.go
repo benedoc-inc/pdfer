@@ -1309,3 +1309,502 @@ func TestPerTargetActionType(t *testing.T) {
 		t.Errorf("OTHER: got %q, want show (fallback)", got)
 	}
 }
+
+// ── Rendering improvement tests ───────────────────────────────────────────────
+
+// TestPositionProperties verifies that x/y/w/h attributes on fields and subforms
+// are captured and surfaced in Question.Properties and FormSection.
+func TestPositionProperties(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Sect" layout="position" w="190mm" h="100mm">
+    <field name="nameField" x="10mm" y="5mm" w="80mm" h="6mm">
+      <ui><textEdit/></ui>
+      <toolTip>Name</toolTip>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	if len(form.Questions) == 0 {
+		t.Fatal("no questions parsed")
+	}
+	q := form.Questions[0]
+	for _, key := range []string{"x", "y", "w", "h"} {
+		if q.Properties == nil || q.Properties[key] == nil {
+			t.Errorf("question Properties[%q] missing", key)
+		}
+	}
+	if q.Properties["x"] != "10mm" {
+		t.Errorf("x = %v, want 10mm", q.Properties["x"])
+	}
+	if q.Properties["y"] != "5mm" {
+		t.Errorf("y = %v, want 5mm", q.Properties["y"])
+	}
+
+	// Subform layout and dimensions on FormSection.
+	if len(form.Sections) == 0 {
+		t.Fatal("no sections")
+	}
+	sec := form.Sections[0]
+	if sec.Layout != "position" {
+		t.Errorf("section Layout = %q, want position", sec.Layout)
+	}
+	if sec.Width != "190mm" {
+		t.Errorf("section Width = %q, want 190mm", sec.Width)
+	}
+	if sec.Height != "100mm" {
+		t.Errorf("section Height = %q, want 100mm", sec.Height)
+	}
+}
+
+// TestMaxCharsToValidation verifies that textEdit maxChars maps to ValidationRules.MaxLength.
+func TestMaxCharsToValidation(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <field name="shortText">
+      <ui><textEdit maxChars="50"/></ui>
+      <toolTip>Short text</toolTip>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	if len(form.Questions) == 0 {
+		t.Fatal("no questions")
+	}
+	q := form.Questions[0]
+	if q.Validation == nil {
+		t.Fatal("Validation is nil, want MaxLength=50")
+	}
+	if q.Validation.MaxLength == nil || *q.Validation.MaxLength != 50 {
+		t.Errorf("MaxLength = %v, want 50", q.Validation.MaxLength)
+	}
+}
+
+// TestCaptionPlacement verifies that <caption placement="right"> is surfaced in Properties.
+func TestCaptionPlacement(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <field name="agree">
+      <ui><checkButton/></ui>
+      <caption placement="right"><value><text>I agree</text></value></caption>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	if len(form.Questions) == 0 {
+		t.Fatal("no questions")
+	}
+	q := form.Questions[0]
+	if q.Label != "I agree" {
+		t.Errorf("label = %q, want I agree", q.Label)
+	}
+	if q.Properties == nil || q.Properties["caption_placement"] != "right" {
+		t.Errorf("caption_placement = %v, want right", q.Properties["caption_placement"])
+	}
+}
+
+// TestChoiceListListbox verifies that open="always" is surfaced as Properties["listbox"]=true.
+func TestChoiceListListbox(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <field name="multiChoice">
+      <ui><choiceList open="always" multiSelect="1"/></ui>
+      <toolTip>Pick options</toolTip>
+      <items><text>A</text><text>B</text></items>
+    </field>
+    <field name="dropdown">
+      <ui><choiceList open="userInteraction"/></ui>
+      <toolTip>Pick one</toolTip>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	byName := make(map[string]types.Question)
+	for _, q := range form.Questions {
+		byName[q.Name] = q
+	}
+
+	if q, ok := byName["multiChoice"]; !ok {
+		t.Error("multiChoice missing")
+	} else {
+		if q.Properties == nil || q.Properties["listbox"] != true {
+			t.Errorf("multiChoice listbox = %v, want true", q.Properties["listbox"])
+		}
+		if q.Properties["multi_select"] != true {
+			t.Errorf("multiChoice multi_select = %v, want true", q.Properties["multi_select"])
+		}
+	}
+
+	if q, ok := byName["dropdown"]; !ok {
+		t.Error("dropdown missing")
+	} else {
+		if q.Properties != nil && q.Properties["listbox"] == true {
+			t.Error("dropdown should not have listbox=true")
+		}
+	}
+}
+
+// TestPasswordEditType verifies that passwordEdit fields map to ResponseTypePassword.
+func TestPasswordEditType(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <field name="pwd">
+      <ui><passwordEdit/></ui>
+      <toolTip>Password</toolTip>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	if len(form.Questions) == 0 {
+		t.Fatal("no questions")
+	}
+	q := form.Questions[0]
+	if q.Type != types.ResponseTypePassword {
+		t.Errorf("type = %q, want password", q.Type)
+	}
+}
+
+// TestCheckButtonAllowNeutral verifies that allowNeutral="1" is surfaced in Properties.
+func TestCheckButtonAllowNeutral(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <field name="tristate">
+      <ui><checkButton allowNeutral="1"/></ui>
+      <caption placement="right"><value><text>Optional flag</text></value></caption>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	if len(form.Questions) == 0 {
+		t.Fatal("no questions")
+	}
+	q := form.Questions[0]
+	if q.Properties == nil || q.Properties["allow_neutral"] != true {
+		t.Errorf("allow_neutral = %v, want true", q.Properties["allow_neutral"])
+	}
+}
+
+// TestNumericEditConstraints verifies that fracDigits and leadDigits are surfaced.
+func TestNumericEditConstraints(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <field name="amount">
+      <ui><numericEdit fracDigits="2" leadDigits="6"/></ui>
+      <toolTip>Amount</toolTip>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	if len(form.Questions) == 0 {
+		t.Fatal("no questions")
+	}
+	q := form.Questions[0]
+	if q.Properties == nil {
+		t.Fatal("Properties nil")
+	}
+	if q.Properties["frac_digits"] != 2 {
+		t.Errorf("frac_digits = %v, want 2", q.Properties["frac_digits"])
+	}
+	if q.Properties["lead_digits"] != 6 {
+		t.Errorf("lead_digits = %v, want 6", q.Properties["lead_digits"])
+	}
+}
+
+// TestExclGroupLayout verifies that exclGroup layout is surfaced in Properties.
+func TestExclGroupLayout(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <exclGroup name="choice" layout="lr-tb">
+      <field name="optA"><ui><radioButton/></ui><caption><value><text>A</text></value></caption></field>
+      <field name="optB"><ui><radioButton/></ui><caption><value><text>B</text></value></caption></field>
+    </exclGroup>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	if len(form.Questions) == 0 {
+		t.Fatal("no questions")
+	}
+	q := form.Questions[0]
+	if q.Type != types.ResponseTypeRadio {
+		t.Errorf("type = %q, want radio", q.Type)
+	}
+	if q.Properties == nil || q.Properties["layout"] != "lr-tb" {
+		t.Errorf("layout = %v, want lr-tb", q.Properties["layout"])
+	}
+}
+
+// TestDateTimeEditTimeSubtype verifies that a picture with TIME{} maps to ResponseTypeTime.
+func TestDateTimeEditTimeSubtype(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <field name="startTime">
+      <ui><dateTimeEdit/></ui>
+      <toolTip>Start time</toolTip>
+      <format><picture>TIME{HH:MM:SS}</picture></format>
+    </field>
+    <field name="startDate">
+      <ui><dateTimeEdit/></ui>
+      <toolTip>Start date</toolTip>
+      <format><picture>DATE{MM/DD/YYYY}</picture></format>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	byName := make(map[string]types.Question)
+	for _, q := range form.Questions {
+		byName[q.Name] = q
+	}
+
+	if q, ok := byName["startTime"]; !ok {
+		t.Error("startTime missing")
+	} else if q.Type != types.ResponseTypeTime {
+		t.Errorf("startTime type = %q, want time", q.Type)
+	}
+
+	if q, ok := byName["startDate"]; !ok {
+		t.Error("startDate missing")
+	} else if q.Type != types.ResponseTypeDate {
+		t.Errorf("startDate type = %q, want date", q.Type)
+	}
+}
+
+// TestExDataHTMLExtraction verifies that text/html exData without xfa:embed markers
+// is extracted as display text rather than suppressed.
+func TestExDataHTMLExtraction(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <field name="realField">
+      <ui><textEdit/></ui>
+      <toolTip>Real field</toolTip>
+    </field>
+    <draw name="richLabel">
+      <value>
+        <exData contentType="text/html">
+          <body xmlns="http://www.w3.org/1999/xhtml">
+            <p>510(k) Number <span style="font-style:italic">(if known)</span></p>
+          </body>
+        </exData>
+      </value>
+    </draw>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	byName := make(map[string]types.Question)
+	for _, q := range form.Questions {
+		byName[q.Name] = q
+	}
+
+	q, ok := byName["richLabel"]
+	if !ok {
+		t.Fatal("richLabel draw should appear as a display question when in an interactive section")
+	}
+	if q.Type != types.ResponseTypeDisplay {
+		t.Errorf("type = %q, want display", q.Type)
+	}
+	if !strings.Contains(q.Label, "510(k) Number") {
+		t.Errorf("label = %q, should contain '510(k) Number'", q.Label)
+	}
+	if strings.Contains(q.Label, "<") || strings.Contains(q.Label, ">") {
+		t.Errorf("label should not contain HTML tags: %q", q.Label)
+	}
+}
+
+// TestExDataPageCounterSuppressed verifies page-counter draws (xfa:embed) stay suppressed.
+func TestExDataPageCounterSuppressed(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <field name="realField">
+      <ui><textEdit/></ui>
+      <toolTip>Real field</toolTip>
+    </field>
+    <draw name="pageCounter">
+      <value>
+        <exData contentType="text/html">
+          <body><p>Page <span xfa:embed="#floatingField1"/> of <span xfa:embed="#floatingField2"/></p></body>
+        </exData>
+      </value>
+    </draw>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	for _, q := range form.Questions {
+		if q.Name == "pageCounter" {
+			t.Errorf("page-counter draw should be suppressed, got type=%s label=%q", q.Type, q.Label)
+		}
+	}
+}
+
+// TestNonInteractiveSectionContent verifies that static text in non-interactive subforms
+// is collected into FormSection.Content rather than the flat Questions list.
+func TestNonInteractiveSectionContent(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Header">
+    <draw name="title"><value><text>Indications for Use</text></value></draw>
+    <draw name="subtitle"><value><text>Form FDA 3881</text></value></draw>
+  </subform>
+  <subform name="Body">
+    <field name="indication">
+      <ui><textEdit multiLine="1"/></ui>
+      <toolTip>Describe the indication</toolTip>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+
+	// Header draws should NOT appear in flat Questions list.
+	for _, q := range form.Questions {
+		if q.Name == "title" || q.Name == "subtitle" {
+			t.Errorf("non-interactive draw %q should not be in flat Questions list", q.Name)
+		}
+	}
+
+	// Header section should have Content populated.
+	var headerSec *types.FormSection
+	for i := range form.Sections {
+		if form.Sections[i].Name == "Header" {
+			headerSec = &form.Sections[i]
+		}
+	}
+	if headerSec == nil {
+		t.Fatal("Header section missing")
+	}
+	if len(headerSec.Content) == 0 {
+		t.Fatal("Header section Content is empty, want static text items")
+	}
+	found := false
+	for _, c := range headerSec.Content {
+		if strings.Contains(c, "Indications for Use") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("'Indications for Use' not found in Header.Content: %v", headerSec.Content)
+	}
+}
+
+// TestSeparatorDraw verifies that <draw><value><line> is emitted as ResponseTypeSeparator.
+func TestSeparatorDraw(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <field name="aboveField">
+      <ui><textEdit/></ui>
+      <toolTip>Above</toolTip>
+    </field>
+    <draw name="divider" w="190mm" h="0pt">
+      <value><line><edge thickness="1pt"/></line></value>
+    </draw>
+    <field name="belowField">
+      <ui><textEdit/></ui>
+      <toolTip>Below</toolTip>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	byName := make(map[string]types.Question)
+	for _, q := range form.Questions {
+		byName[q.Name] = q
+	}
+
+	q, ok := byName["divider"]
+	if !ok {
+		t.Fatal("divider draw should be emitted as separator question")
+	}
+	if q.Type != types.ResponseTypeSeparator {
+		t.Errorf("divider type = %q, want separator", q.Type)
+	}
+}
+
+// TestParaHAlignAndFontProperties verifies that <para hAlign> and <font size/weight>
+// are captured in Question.Properties for display draws.
+func TestParaHAlignAndFontProperties(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <field name="anchor">
+      <ui><textEdit/></ui>
+      <toolTip>Anchor field</toolTip>
+    </field>
+    <draw name="heading">
+      <value><text>Section Title</text></value>
+      <para hAlign="center"/>
+      <font size="14pt" weight="bold"/>
+    </draw>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	byName := make(map[string]types.Question)
+	for _, q := range form.Questions {
+		byName[q.Name] = q
+	}
+
+	q, ok := byName["heading"]
+	if !ok {
+		t.Fatal("heading draw missing from Questions")
+	}
+	if q.Properties == nil {
+		t.Fatal("heading Properties nil")
+	}
+	if q.Properties["text_align"] != "center" {
+		t.Errorf("text_align = %v, want center", q.Properties["text_align"])
+	}
+	if q.Properties["font_size"] != "14pt" {
+		t.Errorf("font_size = %v, want 14pt", q.Properties["font_size"])
+	}
+	if q.Properties["font_weight"] != "bold" {
+		t.Errorf("font_weight = %v, want bold", q.Properties["font_weight"])
+	}
+}

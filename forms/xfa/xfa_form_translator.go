@@ -364,10 +364,12 @@ func mapResponseTypeToXFA(responseType types.ResponseType) string {
 		return "choiceList"
 	case types.ResponseTypeNumber:
 		return "numeric"
-	case types.ResponseTypeDate:
-		return "date"
+	case types.ResponseTypeDate, types.ResponseTypeTime:
+		return "dateTimeEdit"
 	case types.ResponseTypeEmail:
 		return "email"
+	case types.ResponseTypePassword:
+		return "passwordEdit"
 	case types.ResponseTypeButton:
 		return "button"
 	case types.ResponseTypeSignature:
@@ -399,9 +401,10 @@ type xfaNode struct {
 	Children []*xfaNode // document order; populated for containers
 
 	// Label sources, resolved by resolveInteractiveLabel / resolveDrawText.
-	Caption    string // from <caption><value><text> or <label>
-	ToolTip    string // from <toolTip>
-	SpeakLabel string // from <assist><speak>
+	Caption         string // from <caption><value><text> or <label>
+	CaptionPlacement string // from <caption placement="left|right|top|bottom|inline">
+	ToolTip         string // from <toolTip>
+	SpeakLabel      string // from <assist><speak>
 
 	// Content
 	Value       string
@@ -409,6 +412,12 @@ type xfaNode struct {
 	Description string
 	UIType      string // from <ui> child: textEdit | checkButton | radioButton | choiceList | …
 	Bind        string // "none" when <bind match="none">; "" means auto-bind
+
+	// Position / dimensions (present on field, draw, subform, exclGroup)
+	X, Y, W, H, MinH string
+
+	// Layout (subform and exclGroup layout mode: position|tb|lr-tb|row|table)
+	Layout string
 
 	// Field interaction
 	Required     bool
@@ -419,11 +428,27 @@ type xfaNode struct {
 	Validation   *XFAValidation
 	Events       []XFAEvent
 
+	// UI-element-specific constraints
+	AllowNeutral         bool   // checkButton allowNeutral="1" → tri-state checkbox
+	MaxChars             *int   // textEdit maxChars → ValidationRules.MaxLength
+	FracDigits           *int   // numericEdit fracDigits (decimal places)
+	LeadDigits           *int   // numericEdit leadDigits (max integer digits)
+	ChoiceListOpen       string // choiceList open: "always"=listbox, "userInteraction"=dropdown
+	ChoiceListMultiSelect bool  // choiceList multiSelect="1"
+	DateTimeSubType      string // "time" when picture starts with TIME{; "datetime" for combined
+
+	// Visual / display hints
+	IsLine     bool   // draw <value><line> → separator element
+	TextAlign  string // from <para hAlign="left|right|center|justify">
+	FontSize   string // from <font size="9pt">
+	FontWeight string // from <font weight="bold|normal">
+
 	// Draw classification flags — set at parse time, used in emitDraw.
 	ImageData        string
 	ImageContentType string
-	HasPresenceAttr  bool // explicit presence= attr → script-managed status indicator, suppress
-	HasExData        bool // contains <exData>       → template machinery, suppress
+	HasPresenceAttr  bool   // explicit presence= attr → script-managed status indicator, suppress
+	HasExData        bool   // contains <exData>
+	ExDataHTML       string // plain text extracted from text/html exData without xfa:embed markers
 
 	PageNumber int
 }
@@ -486,9 +511,9 @@ func resolveDisplayLabel(n *xfaNode) string {
 }
 
 // resolveDrawText returns the best display text for a draw/display element.
-// Priority: caption > toolTip > default/value text > speak.
+// Priority: caption > toolTip > rich HTML text > default/value text > speak.
 func resolveDrawText(n *xfaNode) string {
-	return firstNonEmpty(n.Caption, n.ToolTip, n.Default, n.Value, n.SpeakLabel)
+	return firstNonEmpty(n.Caption, n.ToolTip, n.ExDataHTML, n.Default, n.Value, n.SpeakLabel)
 }
 
 // isInteractiveSubtree reports whether node or any descendant is a data-bound field.
@@ -521,15 +546,24 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 	decoder := xml.NewDecoder(strings.NewReader(xfaXML))
 	decoder.Strict = false
 
-	var currentLeaf       *xfaNode
-	var currentValue      strings.Builder
-	var currentCaption    strings.Builder
-	var currentLabel      strings.Builder
-	var currentDesc       strings.Builder
-	var currentToolTip    strings.Builder
-	var currentSpeak      strings.Builder
-	var currentImageData  strings.Builder
-	var imageContentType  string
+	var currentLeaf        *xfaNode
+	var currentValue       strings.Builder
+	var currentCaption     strings.Builder
+	var currentLabel       strings.Builder
+	var currentDesc        strings.Builder
+	var currentToolTip     strings.Builder
+	var currentSpeak       strings.Builder
+	var currentImageData   strings.Builder
+	var imageContentType   string
+
+	// exData HTML extraction state
+	var exDataContentType string
+	var exDataHTMLBuf     strings.Builder
+	var exDataHasEmbed    bool
+
+	// picture element state (for dateTimeEdit subtype detection)
+	var inPicture     bool
+	var currentPicture strings.Builder
 
 	var inValue           bool
 	var inCaption         bool
@@ -559,6 +593,16 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 
 		switch se := token.(type) {
 		case xml.StartElement:
+			// When inside exData HTML content, only detect xfa:embed markers and skip
+			// all XFA element processing to avoid false-positive state transitions.
+			if inExData {
+				for _, attr := range se.Attr {
+					if attr.Name.Local == "embed" {
+						exDataHasEmbed = true
+					}
+				}
+				break
+			}
 			localName := se.Name.Local
 			switch localName {
 
@@ -591,6 +635,18 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 						if attr.Value == "readOnly" || attr.Value == "protected" || attr.Value == "nonInteractive" {
 							node.ReadOnly = true
 						}
+					case "layout":
+						node.Layout = attr.Value
+					case "x":
+						node.X = attr.Value
+					case "y":
+						node.Y = attr.Value
+					case "w":
+						node.W = attr.Value
+					case "h":
+						node.H = attr.Value
+					case "minH":
+						node.MinH = attr.Value
 					}
 				}
 				nodeStack = append(nodeStack, node)
@@ -602,8 +658,19 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 					Events:  make([]XFAEvent, 0),
 				}
 				for _, attr := range se.Attr {
-					if attr.Name.Local == "name" {
+					switch attr.Name.Local {
+					case "name":
 						node.Name = attr.Value
+					case "layout":
+						node.Layout = attr.Value
+					case "x":
+						node.X = attr.Value
+					case "y":
+						node.Y = attr.Value
+					case "w":
+						node.W = attr.Value
+					case "h":
+						node.H = attr.Value
 					}
 				}
 				nodeStack = append(nodeStack, node)
@@ -647,6 +714,16 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 						if p, e := strconv.Atoi(attr.Value); e == nil {
 							leaf.PageNumber = p
 						}
+					case "x":
+						leaf.X = attr.Value
+					case "y":
+						leaf.Y = attr.Value
+					case "w":
+						leaf.W = attr.Value
+					case "h":
+						leaf.H = attr.Value
+					case "minH":
+						leaf.MinH = attr.Value
 					}
 				}
 				currentLeaf = leaf
@@ -655,6 +732,11 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 				if currentLeaf != nil {
 					inCaption = true
 					currentCaption.Reset()
+					for _, attr := range se.Attr {
+						if attr.Name.Local == "placement" {
+							currentLeaf.CaptionPlacement = attr.Value
+						}
+					}
 				} else if topOfStack().Kind == xfaKindExclGroup {
 					inExclGroupCaption = true
 					currentCaption.Reset()
@@ -700,8 +782,15 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 				if currentLeaf != nil {
 					isML := false
 					for _, attr := range se.Attr {
-						if attr.Name.Local == "multiLine" && attr.Value == "1" {
-							isML = true
+						switch attr.Name.Local {
+						case "multiLine":
+							if attr.Value == "1" {
+								isML = true
+							}
+						case "maxChars":
+							if v, e := strconv.Atoi(attr.Value); e == nil && v > 0 {
+								currentLeaf.MaxChars = &v
+							}
 						}
 					}
 					if isML {
@@ -713,10 +802,25 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 			case "checkButton":
 				if currentLeaf != nil {
 					currentLeaf.UIType = "checkButton"
+					for _, attr := range se.Attr {
+						if attr.Name.Local == "allowNeutral" && (attr.Value == "1" || attr.Value == "true") {
+							currentLeaf.AllowNeutral = true
+						}
+					}
 				}
 			case "choiceList":
 				if currentLeaf != nil {
 					currentLeaf.UIType = "choiceList"
+					for _, attr := range se.Attr {
+						switch attr.Name.Local {
+						case "open":
+							currentLeaf.ChoiceListOpen = attr.Value
+						case "multiSelect":
+							if attr.Value == "1" || attr.Value == "true" {
+								currentLeaf.ChoiceListMultiSelect = true
+							}
+						}
+					}
 				}
 			case "radioButton":
 				if currentLeaf != nil {
@@ -729,6 +833,18 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 			case "numericEdit":
 				if currentLeaf != nil {
 					currentLeaf.UIType = "numericEdit"
+					for _, attr := range se.Attr {
+						switch attr.Name.Local {
+						case "fracDigits":
+							if v, e := strconv.Atoi(attr.Value); e == nil {
+								currentLeaf.FracDigits = &v
+							}
+						case "leadDigits":
+							if v, e := strconv.Atoi(attr.Value); e == nil {
+								currentLeaf.LeadDigits = &v
+							}
+						}
+					}
 				}
 			case "passwordEdit":
 				if currentLeaf != nil {
@@ -745,6 +861,41 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 			case "button":
 				if currentLeaf != nil && currentLeaf.UIType == "" {
 					currentLeaf.UIType = "button"
+				}
+
+			// Visual / layout hints
+			case "para":
+				if currentLeaf != nil {
+					for _, attr := range se.Attr {
+						if attr.Name.Local == "hAlign" {
+							currentLeaf.TextAlign = attr.Value
+						}
+					}
+				}
+
+			case "font":
+				if currentLeaf != nil {
+					for _, attr := range se.Attr {
+						switch attr.Name.Local {
+						case "size":
+							currentLeaf.FontSize = attr.Value
+						case "weight":
+							currentLeaf.FontWeight = attr.Value
+						}
+					}
+				}
+
+			case "line":
+				// <draw><value><line> → separator element
+				if currentLeaf != nil && currentLeaf.Kind == xfaKindDraw && inValue {
+					currentLeaf.IsLine = true
+				}
+
+			case "picture":
+				// Inside <format><picture> — used to detect dateTimeEdit subtype.
+				if currentLeaf != nil && currentLeaf.UIType == "dateTimeEdit" {
+					inPicture = true
+					currentPicture.Reset()
 				}
 
 			case "event":
@@ -844,6 +995,14 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 				if currentLeaf != nil {
 					inExData = true
 					currentLeaf.HasExData = true
+					exDataContentType = ""
+					exDataHTMLBuf.Reset()
+					exDataHasEmbed = false
+					for _, attr := range se.Attr {
+						if attr.Name.Local == "contentType" {
+							exDataContentType = attr.Value
+						}
+					}
 				}
 
 			case "bind":
@@ -857,6 +1016,10 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 			}
 
 		case xml.EndElement:
+			// When inside exData HTML content, only process the closing </exData> tag.
+			if inExData && se.Name.Local != "exData" {
+				break
+			}
 			localName := se.Name.Local
 			switch localName {
 
@@ -1014,7 +1177,31 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 				inAssist = false
 
 			case "exData":
+				// Extract plain text from text/html exData that has no xfa:embed page-counter markers.
+				if currentLeaf != nil && exDataContentType == "text/html" && !exDataHasEmbed {
+					text := strings.TrimSpace(exDataHTMLBuf.String())
+					if text != "" {
+						currentLeaf.ExDataHTML = text
+					}
+				}
 				inExData = false
+				exDataContentType = ""
+				exDataHasEmbed = false
+				exDataHTMLBuf.Reset()
+
+			case "picture":
+				// Detect dateTimeEdit subtype from picture pattern.
+				if currentLeaf != nil && inPicture {
+					pic := strings.ToUpper(strings.TrimSpace(currentPicture.String()))
+					switch {
+					case strings.HasPrefix(pic, "TIME{"):
+						currentLeaf.DateTimeSubType = "time"
+					case strings.HasPrefix(pic, "DATETIME{"), strings.Contains(pic, "}{TIME{"):
+						currentLeaf.DateTimeSubType = "datetime"
+					}
+				}
+				inPicture = false
+				currentPicture.Reset()
 
 			case "desc", "description":
 				if currentLeaf != nil {
@@ -1029,7 +1216,12 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 			case inImage:
 				currentImageData.WriteString(data)
 			case inExData:
-				// HTML markup / embedded refs — suppress
+				// Accumulate text/html content; page-counter machinery is filtered at </exData>.
+				if exDataContentType == "text/html" {
+					exDataHTMLBuf.WriteString(data)
+				}
+			case inPicture:
+				currentPicture.WriteString(data)
 			case inCaption || inExclGroupCaption:
 				currentCaption.WriteString(data)
 			case inLabel:
@@ -1186,10 +1378,14 @@ func buildSection(node *xfaNode, parentPath []string, schema *types.FormSchema, 
 
 	startLen := len(schema.Questions)
 	nodeHidden := parentHidden || node.Hidden
+	interactive := isInteractiveSubtree(node)
 	sec := types.FormSection{
 		Name:        node.Name,
 		Path:        strings.Join(path, "."),
-		Interactive: isInteractiveSubtree(node),
+		Interactive: interactive,
+		Layout:      node.Layout,
+		Width:       node.W,
+		Height:      node.H,
 	}
 	sec.Children = walkSubformChildren(node, path, schema, qIdx, nodeHidden, verbose)
 	// Record all question IDs added during this section's subtree walk.
@@ -1199,7 +1395,34 @@ func buildSection(node *xfaNode, parentPath []string, schema *types.FormSchema, 
 			sec.Questions = append(sec.Questions, q.ID)
 		}
 	}
+	// Collect static display text from non-interactive sections (headers, instructions, etc.)
+	if !interactive {
+		sec.Content = collectSectionContent(node)
+	}
 	return sec
+}
+
+// collectSectionContent returns static display text from a non-interactive subform.
+// It walks draw children (and non-interactive sub-subforms) and extracts their text content.
+func collectSectionContent(node *xfaNode) []string {
+	var result []string
+	for _, child := range node.Children {
+		switch child.Kind {
+		case xfaKindDraw:
+			if child.Caption == "\x00consumed" || child.IsLine {
+				continue
+			}
+			text := resolveDrawText(child)
+			if text != "" {
+				result = append(result, text)
+			}
+		case xfaKindSubform:
+			if !isInteractiveSubtree(child) {
+				result = append(result, collectSectionContent(child)...)
+			}
+		}
+	}
+	return result
 }
 
 // emitExclGroup emits an XFA exclGroup as a radio-button question.
@@ -1218,6 +1441,10 @@ func emitExclGroup(node *xfaNode, path []string, qIdx *int) types.Question {
 		for i, opt := range node.Options {
 			q.Options[i] = types.Option{Value: opt.Value, Label: opt.Label, Selected: opt.Selected}
 		}
+	}
+	props := buildNodeProperties(node)
+	if len(props) > 0 {
+		q.Properties = props
 	}
 	return q
 }
@@ -1278,8 +1505,10 @@ func emitDraw(node *xfaNode, path []string, parent *xfaNode, qIdx *int) (types.Q
 	if node.HasPresenceAttr {
 		return types.Question{}, false // script-managed status indicator
 	}
-	if node.HasExData {
-		return types.Question{}, false // page counter / embedded reference
+	// Suppress exData draws only when no plain text could be extracted.
+	// Draws with ExDataHTML set have their content recovered from text/html exData.
+	if node.HasExData && node.ExDataHTML == "" {
+		return types.Question{}, false // page counter / embedded reference with no text
 	}
 	if len(node.Events) > 0 {
 		return types.Question{}, false // has its own event handlers → dynamic
@@ -1288,9 +1517,33 @@ func emitDraw(node *xfaNode, path []string, parent *xfaNode, qIdx *int) (types.Q
 		return types.Question{}, false // colored status block (YesIndicator / NoIndicator)
 	}
 
+	// Separator draw (<line> value).
+	if node.IsLine {
+		if !isInteractiveSubtree(parent) {
+			return types.Question{}, false
+		}
+		*qIdx++
+		props := buildNodeProperties(node)
+		return types.Question{
+			ID:         sanitizeFieldIDWithIndex(node.Name, *qIdx),
+			Name:       node.Name,
+			Type:       types.ResponseTypeSeparator,
+			ReadOnly:   true,
+			Section:    sectionName(path),
+			PageNumber: node.PageNumber,
+			Properties: props,
+		}, true
+	}
+
 	// Image draw.
 	if node.ImageData != "" {
 		*qIdx++
+		props := buildNodeProperties(node)
+		if props == nil {
+			props = make(map[string]interface{})
+		}
+		props["image_data"] = node.ImageData
+		props["content_type"] = node.ImageContentType
 		return types.Question{
 			ID:         sanitizeFieldIDWithIndex(node.Name, *qIdx),
 			Name:       node.Name,
@@ -1299,14 +1552,11 @@ func emitDraw(node *xfaNode, path []string, parent *xfaNode, qIdx *int) (types.Q
 			ReadOnly:   true,
 			Section:    sectionName(path),
 			PageNumber: node.PageNumber,
-			Properties: map[string]interface{}{
-				"image_data":   node.ImageData,
-				"content_type": node.ImageContentType,
-			},
+			Properties: props,
 		}, true
 	}
 
-	// Static display draw.
+	// Static display draw (text or exData HTML).
 	displayText := resolveDrawText(node)
 	if displayText == "" {
 		return types.Question{}, false
@@ -1318,6 +1568,7 @@ func emitDraw(node *xfaNode, path []string, parent *xfaNode, qIdx *int) (types.Q
 		return types.Question{}, false
 	}
 	*qIdx++
+	props := buildNodeProperties(node)
 	return types.Question{
 		ID:         sanitizeFieldIDWithIndex(node.Name, *qIdx),
 		Name:       node.Name,
@@ -1326,6 +1577,7 @@ func emitDraw(node *xfaNode, path []string, parent *xfaNode, qIdx *int) (types.Q
 		ReadOnly:   true,
 		Section:    sectionName(path),
 		PageNumber: node.PageNumber,
+		Properties: props,
 	}, true
 }
 
@@ -1351,6 +1603,10 @@ func convertNodeToQuestion(node *xfaNode, index int, section string, verbose boo
 		PageNumber:  node.PageNumber,
 		Section:     section,
 	}
+	// Adjust dateTimeEdit type based on picture format.
+	if node.UIType == "dateTimeEdit" && node.DateTimeSubType == "time" {
+		q.Type = types.ResponseTypeTime
+	}
 	if node.Default != "" {
 		q.Default = node.Default
 	} else if node.Value != "" {
@@ -1362,8 +1618,10 @@ func convertNodeToQuestion(node *xfaNode, index int, section string, verbose boo
 			q.Options[i] = types.Option{Value: opt.Value, Label: opt.Label, Selected: opt.Selected}
 		}
 	}
+	// Build validation — merge XFA validate element with textEdit maxChars.
+	var val *types.ValidationRules
 	if node.Validation != nil {
-		q.Validation = &types.ValidationRules{
+		val = &types.ValidationRules{
 			MinLength:    node.Validation.MinLength,
 			MaxLength:    node.Validation.MaxLength,
 			MinValue:     node.Validation.MinValue,
@@ -1373,7 +1631,81 @@ func convertNodeToQuestion(node *xfaNode, index int, section string, verbose boo
 			ErrorMessage: node.Validation.ErrorMessage,
 		}
 	}
+	if node.MaxChars != nil && *node.MaxChars > 0 {
+		if val == nil {
+			val = &types.ValidationRules{}
+		}
+		if val.MaxLength == nil {
+			val.MaxLength = node.MaxChars
+		}
+	}
+	q.Validation = val
+	// Populate extended properties.
+	if props := buildNodeProperties(node); len(props) > 0 {
+		q.Properties = props
+	}
 	return q
+}
+
+// buildNodeProperties builds the Properties map for a Question from node metadata.
+// Only non-default / non-zero values are included to keep the JSON lean.
+func buildNodeProperties(node *xfaNode) map[string]interface{} {
+	props := make(map[string]interface{})
+	// Position / dimensions
+	if node.X != "" {
+		props["x"] = node.X
+	}
+	if node.Y != "" {
+		props["y"] = node.Y
+	}
+	if node.W != "" {
+		props["w"] = node.W
+	}
+	h := node.H
+	if h == "" {
+		h = node.MinH
+	}
+	if h != "" {
+		props["h"] = h
+	}
+	// Layout (exclGroup / subform)
+	if node.Layout != "" {
+		props["layout"] = node.Layout
+	}
+	// Caption placement
+	if node.CaptionPlacement != "" {
+		props["caption_placement"] = node.CaptionPlacement
+	}
+	// Text display
+	if node.TextAlign != "" {
+		props["text_align"] = node.TextAlign
+	}
+	if node.FontSize != "" {
+		props["font_size"] = node.FontSize
+	}
+	if node.FontWeight != "" && node.FontWeight != "normal" {
+		props["font_weight"] = node.FontWeight
+	}
+	// UI constraints
+	if node.AllowNeutral {
+		props["allow_neutral"] = true
+	}
+	if node.ChoiceListOpen == "always" {
+		props["listbox"] = true
+	}
+	if node.ChoiceListMultiSelect {
+		props["multi_select"] = true
+	}
+	if node.FracDigits != nil {
+		props["frac_digits"] = *node.FracDigits
+	}
+	if node.LeadDigits != nil {
+		props["lead_digits"] = *node.LeadDigits
+	}
+	if len(props) == 0 {
+		return nil
+	}
+	return props
 }
 
 // mapXFAUITypeToResponseType maps a UI element name (from <ui> children) to a ResponseType.
@@ -1395,7 +1727,7 @@ func mapXFAUITypeToResponseType(uiType, fieldType string) types.ResponseType {
 	case "numericedit":
 		return types.ResponseTypeNumber
 	case "passwordedit":
-		return types.ResponseTypeText
+		return types.ResponseTypePassword
 	case "button":
 		return types.ResponseTypeButton
 	case "signature":

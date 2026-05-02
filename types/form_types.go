@@ -16,6 +16,10 @@ type FormSection struct {
 	Name        string        `json:"name"`
 	Path        string        `json:"path"`                  // dot-separated path from root, e.g. "form1.section2.sub"
 	Interactive bool          `json:"interactive"`           // true if the section contains any data-bound fields
+	Layout      string        `json:"layout,omitempty"`      // XFA layout mode: position|tb|lr-tb|row|table
+	Width       string        `json:"width,omitempty"`       // subform w attribute (mm/in/pt)
+	Height      string        `json:"height,omitempty"`      // subform h attribute (mm/in/pt)
+	Content     []string      `json:"content,omitempty"`     // static display text from non-interactive sections
 	Children    []FormSection `json:"children,omitempty"`
 	Questions   []string      `json:"questions,omitempty"` // question IDs in document order
 }
@@ -60,9 +64,12 @@ const (
 	ResponseTypeDate      ResponseType = "date"      // Date picker
 	ResponseTypeEmail     ResponseType = "email"     // Email input
 	ResponseTypeButton    ResponseType = "button"    // Button (not a question, but action)
+	ResponseTypePassword  ResponseType = "password"  // Password input
+	ResponseTypeTime      ResponseType = "time"      // Time picker (XFA dateTimeEdit with TIME{} picture)
 	ResponseTypeSignature ResponseType = "signature" // Signature field
 	ResponseTypeDisplay   ResponseType = "display"   // Static display text (XFA draw / no-bind label)
 	ResponseTypeImage     ResponseType = "image"     // Embedded image (XFA draw with <image> content)
+	ResponseTypeSeparator ResponseType = "separator" // Horizontal/vertical rule (XFA draw with <line> value)
 	ResponseTypeFile      ResponseType = "file"      // File attachment upload
 	ResponseTypeUnknown   ResponseType = "unknown"   // Unknown type
 )

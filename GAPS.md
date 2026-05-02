@@ -285,3 +285,26 @@ the `hmtx` table). CIDFont Type0 (OpenType CFF) and vertical-writing fonts
 CJK vertical text, some Arabic/Hebrew layout engines.
 
 **File**: `resources/font/font.go`, `resources/font/subset.go`
+
+---
+
+### ~~XFA browser rendering gaps~~ ✅ Fixed in v1.4.0
+
+Fourteen improvements to the XFA → `FormSchema` translation for browser rendering fidelity:
+
+1. **Position/size data** — `x`, `y`, `w`, `h`, `minH` on `<field>`, `<draw>`, `<subform>`, `<exclGroup>` captured into `Question.Properties` and `FormSection.Width`/`Height`.
+2. **Subform layout mode** — `layout` attribute (`position`, `tb`, `lr-tb`, `row`, `table`) captured into `FormSection.Layout`.
+3. **`maxChars` → `ValidationRules.MaxLength`** — `<textEdit maxChars="N">` now wires directly to `ValidationRules.MaxLength`.
+4. **Caption placement** — `<caption placement="left|right|top|bottom|inline">` captured into `Question.Properties["caption_placement"]`.
+5. **Listbox vs dropdown** — `<choiceList open="always">` sets `Properties["listbox"]=true`; `multiSelect="1"` sets `Properties["multi_select"]=true`.
+6. **`dateTimeEdit` subtype** — `<picture>TIME{...}</picture>` maps to `ResponseTypeTime`; `DATE{...}` keeps `ResponseTypeDate`.
+7. **`passwordEdit` → `ResponseTypePassword`** — was incorrectly mapped to `ResponseTypeText`.
+8. **Tri-state checkbox** — `<checkButton allowNeutral="1">` sets `Properties["allow_neutral"]=true`.
+9. **`exclGroup` layout** — `<exclGroup layout="lr-tb">` sets `Properties["layout"]`.
+10. **Rich-text exData extraction** — `<exData contentType="text/html">` without `xfa:embed` markers now extracts plain text for display instead of being blanket-suppressed.
+11. **Non-interactive section content** — static draw text in non-interactive subforms (headers, instructions) is collected into `FormSection.Content` instead of being silently dropped.
+12. **Separator draws** — `<draw><value><line>` pattern emits `ResponseTypeSeparator` questions for `<hr>`-style rendering.
+13. **Text alignment** — `<para hAlign="center|left|right|justify">` captured into `Properties["text_align"]`.
+14. **Font hints** — `<font size="9pt" weight="bold">` captured into `Properties["font_size"]` and `Properties["font_weight"]`.
+
+**Files**: `types/form_types.go`, `forms/xfa/xfa_form_translator.go`
