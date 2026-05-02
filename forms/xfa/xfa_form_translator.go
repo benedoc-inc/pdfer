@@ -628,6 +628,7 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 	var inValue           bool
 	var inCaption         bool
 	var inExclGroupCaption bool // reading the exclGroup's own <caption>, not a child field's
+	var inSubformCaption  bool // reading the <caption> that is a direct child of a subform
 	var inLabel           bool
 	var inDescription     bool
 	var inItems           bool
@@ -799,11 +800,14 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 				} else if topOfStack().Kind == xfaKindExclGroup {
 					inExclGroupCaption = true
 					currentCaption.Reset()
+				} else if topOfStack().Kind == xfaKindSubform {
+					inSubformCaption = true
+					currentCaption.Reset()
 				}
 
 			case "value":
 				// Suppress inValue inside caption (caption has its own accumulator).
-				if currentLeaf != nil && !inCaption && !inExclGroupCaption {
+				if currentLeaf != nil && !inCaption && !inExclGroupCaption && !inSubformCaption {
 					inValue = true
 					currentValue.Reset()
 				}
@@ -1091,11 +1095,16 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 					if topOfStack().Kind == xfaKindExclGroup {
 						topOfStack().Caption = text
 					}
+				} else if inSubformCaption {
+					if topOfStack().Kind == xfaKindSubform && text != "" && topOfStack().Caption == "" {
+						topOfStack().Caption = text
+					}
 				} else if currentLeaf != nil && text != "" && currentLeaf.Caption == "" {
 					currentLeaf.Caption = text
 				}
 				inCaption = false
 				inExclGroupCaption = false
+				inSubformCaption = false
 
 			case "label":
 				if currentLeaf != nil {
@@ -1289,7 +1298,7 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 				}
 			case inPicture:
 				currentPicture.WriteString(data)
-			case inCaption || inExclGroupCaption:
+			case inCaption || inExclGroupCaption || inSubformCaption:
 				currentCaption.WriteString(data)
 			case inLabel:
 				currentLabel.WriteString(data)
@@ -1446,9 +1455,14 @@ func buildSection(node *xfaNode, parentPath []string, schema *types.FormSchema, 
 	startLen := len(schema.Questions)
 	nodeHidden := parentHidden || node.Hidden
 	interactive := isInteractiveSubtree(node)
+	label := ""
+	if cap := strings.TrimSpace(node.Caption); cap != "" && !isPlaceholderCaption(cap) {
+		label = cap
+	}
 	sec := types.FormSection{
 		Name:        node.Name,
 		Path:        strings.Join(path, "."),
+		Label:       label,
 		Interactive: interactive,
 		Layout:      node.Layout,
 		Width:       node.W,

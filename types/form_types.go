@@ -15,6 +15,7 @@ type FormSchema struct {
 type FormSection struct {
 	Name        string        `json:"name"`
 	Path        string        `json:"path"`                  // dot-separated path from root, e.g. "form1.section2.sub"
+	Label       string        `json:"label,omitempty"`       // human-readable label from XFA subform caption; empty when not specified
 	Interactive bool          `json:"interactive"`           // true if the section contains any data-bound fields
 	Layout      string        `json:"layout,omitempty"`      // XFA layout mode: position|tb|lr-tb|row|table
 	Width       string        `json:"width,omitempty"`       // subform w attribute (mm/in/pt)
