@@ -16,6 +16,12 @@ import (
 // presenceTargetRe matches "Name.presence =" in XFA JavaScript scripts.
 var presenceTargetRe = regexp.MustCompile(`\b([A-Za-z_]\w*)\.presence\s*=`)
 
+// xfaFuncDeclRe matches "function Name(...) {" in JavaScript.
+var xfaFuncDeclRe = regexp.MustCompile(`function\s+(\w+)\s*\([^)]*\)\s*\{`)
+
+// xfaRawValueCondRe extracts a field name from "FieldName.rawValue ==" patterns.
+var xfaRawValueCondRe = regexp.MustCompile(`\b([A-Za-z_]\w*)\.rawValue\s*==`)
+
 // ParseXFAForm parses raw XFA XML and converts it to a strongly-typed FormSchema.
 func ParseXFAForm(xfaXML string, verbose bool) (*types.FormSchema, error) {
 	return ParseXFAFormWithResources(xfaXML, nil, verbose)
@@ -39,7 +45,9 @@ func ParseXFAFormWithResources(xfaXML string, resources map[string][]byte, verbo
 	if err != nil && verbose {
 		log.Printf("Warning: Failed to extract XFA rules: %v", err)
 	}
-	schema.Rules = rules
+	// Append field-event rules to any rules already built by buildFormSchema
+	// (subform events, variables function bodies).
+	schema.Rules = append(schema.Rules, rules...)
 	if len(resources) > 0 {
 		resolveImageHRefs(schema, resources)
 	}
@@ -515,10 +523,19 @@ type xfaNode struct {
 
 // xfaTemplateResult bundles the parse tree with top-level metadata.
 type xfaTemplateResult struct {
-	Root        *xfaNode
-	Title       string
-	Description string
-	Version     string
+	Root               *xfaNode
+	Title              string
+	Description        string
+	Version            string
+	VariablesFunctions []variablesFuncDef
+}
+
+// variablesFuncDef holds the body of a JavaScript function extracted from a
+// <variables> script block. These function bodies contain presence-based
+// visibility logic that cannot be attributed to individual field events.
+type variablesFuncDef struct {
+	body string
+	lang string
 }
 
 // XFAOption represents an option for choice fields
@@ -639,6 +656,9 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 	var inSpeak           bool
 	var inExData          bool
 	var inScript          bool
+	var inVariables       bool   // inside a <variables> element
+	var inVariablesScript bool   // inside a <variables><script> element
+	var variablesScriptLang string
 
 	for {
 		token, err := decoder.Token()
@@ -673,6 +693,9 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 						res.Title = attr.Value
 					}
 				}
+
+			case "variables":
+				inVariables = true
 
 			case "subform", "pageArea":
 				kind := xfaKindSubform
@@ -987,7 +1010,18 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 				}
 
 			case "script":
-				if currentLeaf != nil && len(currentLeaf.Events) > 0 {
+				if inVariables {
+					inVariablesScript = true
+					variablesScriptLang = "javascript"
+					currentValue.Reset()
+					for _, attr := range se.Attr {
+						if attr.Name.Local == "contentType" {
+							if l := contentTypeToLang(attr.Value); l != "" {
+								variablesScriptLang = l
+							}
+						}
+					}
+				} else if currentLeaf != nil && len(currentLeaf.Events) > 0 {
 					inScript = true
 					currentValue.Reset()
 					for _, attr := range se.Attr {
@@ -1220,7 +1254,14 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 				}
 
 			case "script":
-				if currentLeaf != nil && len(currentLeaf.Events) > 0 {
+				if inVariablesScript {
+					body := strings.TrimSpace(currentValue.String())
+					if body != "" {
+						res.VariablesFunctions = append(res.VariablesFunctions,
+							extractJSFunctionBodies(body, variablesScriptLang)...)
+					}
+					inVariablesScript = false
+				} else if currentLeaf != nil && len(currentLeaf.Events) > 0 {
 					last := &currentLeaf.Events[len(currentLeaf.Events)-1]
 					last.Script = strings.TrimSpace(currentValue.String())
 				} else if top := topOfStack(); top.Kind == xfaKindSubform && len(top.Events) > 0 {
@@ -1229,6 +1270,9 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 				}
 				inScript = false
 				currentValue.Reset()
+
+			case "variables":
+				inVariables = false
 
 			case "pattern":
 				if currentLeaf != nil && currentLeaf.Validation != nil {
@@ -1306,7 +1350,7 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 				currentToolTip.WriteString(data)
 			case inSpeak && inAssist:
 				currentSpeak.WriteString(data)
-			case inScript:
+			case inScript || inVariablesScript:
 				currentValue.WriteString(data)
 			case inItems:
 				currentValue.WriteString(data)
@@ -1343,6 +1387,15 @@ func buildFormSchema(result *xfaTemplateResult, verbose bool) *types.FormSchema 
 
 	var qIdx int
 	schema.Sections = walkSubformChildren(result.Root, nil, schema, &qIdx, false, verbose)
+
+	// Extract visibility rules from <variables> function bodies. These functions
+	// contain presence-based logic that XFA field events delegate to rather than
+	// implementing inline, so they can't be attributed to a single field event.
+	for _, fn := range result.VariablesFunctions {
+		newRules := parseVariablesFunctionRules(fn.body, fn.lang, len(schema.Rules))
+		schema.Rules = append(schema.Rules, newRules...)
+	}
+
 	return schema
 }
 
@@ -2609,4 +2662,206 @@ func extractPageCount(xfaXML string) int {
 		pageCount = strings.Count(xfaXML, "<pageSet")
 	}
 	return pageCount
+}
+
+// ── Variables function rule extraction ───────────────────────────────────────
+
+// extractJSFunctionBodies parses function definitions from a JavaScript block
+// and returns each function's body (content between the outer braces).
+func extractJSFunctionBodies(script, lang string) []variablesFuncDef {
+	var out []variablesFuncDef
+	matches := xfaFuncDeclRe.FindAllStringSubmatchIndex(script, -1)
+	for _, m := range matches {
+		// m[1]-1 is the position of '{' ending the function signature.
+		braceStart := m[1] - 1
+		if braceStart < 0 || braceStart >= len(script) || script[braceStart] != '{' {
+			continue
+		}
+		end := matchingBraceJS(script, braceStart)
+		if end < 0 {
+			continue
+		}
+		body := script[braceStart+1 : end]
+		if strings.TrimSpace(body) != "" {
+			out = append(out, variablesFuncDef{body: body, lang: lang})
+		}
+	}
+	return out
+}
+
+// matchingBraceJS returns the index of the closing '}' that matches the '{' at
+// position start. Returns -1 if not found.
+func matchingBraceJS(s string, start int) int {
+	depth := 0
+	for i := start; i < len(s); i++ {
+		switch s[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// matchingParenJS returns the index of the closing ')' matching the '(' at start.
+func matchingParenJS(s string, start int) int {
+	depth := 0
+	for i := start; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// ifChainBranch is a single branch of an if/else-if*/else? chain.
+type ifChainBranch struct {
+	cond string // raw JS condition expression; empty for the final else branch
+	body string // body of the branch (content between { and })
+}
+
+// splitJSIfElseChain splits a JavaScript if/else-if*/else? chain into branches.
+// Returns nil if the script doesn't start with an if statement.
+func splitJSIfElseChain(s string) []ifChainBranch {
+	var branches []ifChainBranch
+	rest := strings.TrimSpace(s)
+
+	for {
+		lower := strings.ToLower(rest)
+		if !strings.HasPrefix(lower, "if") {
+			break
+		}
+		// Require "if (" or "if(" — not "ifdef" etc.
+		if len(rest) > 2 && rest[2] != '(' && rest[2] != ' ' && rest[2] != '\t' {
+			break
+		}
+
+		// Find condition in ( ... )
+		parenStart := strings.Index(rest, "(")
+		if parenStart < 0 {
+			break
+		}
+		parenEnd := matchingParenJS(rest, parenStart)
+		if parenEnd < 0 {
+			break
+		}
+		cond := strings.TrimSpace(rest[parenStart+1 : parenEnd])
+
+		// Find the body block { ... }
+		braceStart := strings.Index(rest[parenEnd:], "{")
+		if braceStart < 0 {
+			break
+		}
+		braceStart += parenEnd
+		braceEnd := matchingBraceJS(rest, braceStart)
+		if braceEnd < 0 {
+			break
+		}
+		body := rest[braceStart+1 : braceEnd]
+		branches = append(branches, ifChainBranch{cond: cond, body: body})
+		rest = strings.TrimSpace(rest[braceEnd+1:])
+
+		// Check for else / else if
+		lower = strings.ToLower(rest)
+		if !strings.HasPrefix(lower, "else") {
+			break
+		}
+		rest = strings.TrimSpace(rest[4:]) // consume "else"
+		lower = strings.ToLower(rest)
+		if strings.HasPrefix(lower, "if") {
+			// else if — continue the loop
+			continue
+		}
+		// Final else { ... }
+		if strings.HasPrefix(lower, "{") {
+			braceEnd2 := matchingBraceJS(rest, 0)
+			if braceEnd2 >= 0 {
+				branches = append(branches, ifChainBranch{body: rest[1:braceEnd2]})
+			}
+		}
+		break
+	}
+
+	return branches
+}
+
+// parseVariablesFunctionRules extracts visibility rules from a <variables>
+// function body. The function body typically contains an if/else-if chain
+// keyed on a radio-button or select field's rawValue.
+func parseVariablesFunctionRules(funcBody, lang string, baseIndex int) []types.Rule {
+	lower := strings.ToLower(funcBody)
+	if !strings.Contains(lower, "presence") {
+		return nil
+	}
+
+	var branches []ifChainBranch
+	if lang == "javascript" || lang == "" {
+		branches = splitJSIfElseChain(strings.TrimSpace(funcBody))
+	}
+
+	var source string
+	if len(branches) > 0 && branches[0].cond != "" {
+		if m := xfaRawValueCondRe.FindStringSubmatch(branches[0].cond); m != nil {
+			source = m[1]
+		}
+	}
+
+	var rules []types.Rule
+
+	if len(branches) > 0 {
+		// Generate one rule per branch with the exact condition.
+		for i, branch := range branches {
+			targets := extractAllPresenceTargets(branch.body)
+			if len(targets) == 0 {
+				continue
+			}
+			actions := presenceActionsForTargets(branch.body, targets,
+				dominantActionType(strings.ToLower(branch.body)))
+			if len(actions) == 0 {
+				continue
+			}
+			var cond *types.Condition
+			if branch.cond != "" {
+				cond = &types.Condition{Expression: branch.cond}
+			}
+			rules = append(rules, types.Rule{
+				ID:      fmt.Sprintf("rule_var_%d", baseIndex+i+1),
+				Source:  source,
+				Type:    types.RuleTypeVisibility,
+				Actions: actions,
+				Condition: cond,
+			})
+		}
+	} else {
+		// Fallback: no multi-branch parse — use tryParseVisibilityScript on the whole body.
+		results := parseXFAScript(funcBody, source, "", lang)
+		for i, parsed := range results {
+			if parsed.ruleType != types.RuleTypeVisibility {
+				continue
+			}
+			rule := types.Rule{
+				ID:      fmt.Sprintf("rule_var_%d", baseIndex+i+1),
+				Source:  source,
+				Type:    types.RuleTypeVisibility,
+				Condition: parsed.condition,
+				Actions: parsed.actions,
+			}
+			if rule.Actions == nil {
+				rule.Actions = []types.Action{}
+			}
+			rules = append(rules, rule)
+		}
+	}
+
+	return rules
 }

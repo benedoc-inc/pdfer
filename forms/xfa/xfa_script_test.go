@@ -565,3 +565,132 @@ endif`,
 		t.Fatalf("expected 2 rules for if/else script, got %d", len(rules))
 	}
 }
+
+// --- splitJSIfElseChain --------------------------------------------------
+
+func TestSplitJSIfElseChain_ThreeBranches(t *testing.T) {
+	s := `if (field.rawValue == "0") {
+  A.presence = "visible";
+  B.presence = "hidden";
+} else if (field.rawValue == "1") {
+  A.presence = "hidden";
+  B.presence = "visible";
+} else if (field.rawValue == "2") {
+  A.presence = "hidden";
+  B.presence = "hidden";
+}`
+	branches := splitJSIfElseChain(s)
+	if len(branches) != 3 {
+		t.Fatalf("expected 3 branches, got %d", len(branches))
+	}
+	if branches[0].cond != `field.rawValue == "0"` {
+		t.Errorf("branch 0 cond = %q", branches[0].cond)
+	}
+	if branches[2].cond != `field.rawValue == "2"` {
+		t.Errorf("branch 2 cond = %q", branches[2].cond)
+	}
+}
+
+func TestSplitJSIfElseChain_WithElse(t *testing.T) {
+	s := `if (x.rawValue == "a") {
+  A.presence = "visible";
+} else {
+  A.presence = "hidden";
+}`
+	branches := splitJSIfElseChain(s)
+	if len(branches) != 2 {
+		t.Fatalf("expected 2 branches, got %d: %+v", len(branches), branches)
+	}
+	if branches[0].cond != `x.rawValue == "a"` {
+		t.Errorf("branch 0 cond = %q", branches[0].cond)
+	}
+	if branches[1].cond != "" {
+		t.Errorf("else branch should have empty cond, got %q", branches[1].cond)
+	}
+}
+
+// --- parseVariablesFunctionRules -----------------------------------------
+
+func TestParseVariablesFunctionRules_ThreeBranches(t *testing.T) {
+	body := `
+  if (ATRadioButton100.rawValue == "0") {
+    IMDRF.presence = "visible";
+    USA.presence = "hidden";
+    CDN.presence = "hidden";
+  } else if (ATRadioButton100.rawValue == "1") {
+    IMDRF.presence = "hidden";
+    USA.presence = "visible";
+    CDN.presence = "hidden";
+  } else if (ATRadioButton100.rawValue == "2") {
+    IMDRF.presence = "hidden";
+    USA.presence = "hidden";
+    CDN.presence = "visible";
+  }`
+	rules := parseVariablesFunctionRules(body, "javascript", 0)
+	if len(rules) != 3 {
+		t.Fatalf("expected 3 rules, got %d", len(rules))
+	}
+	// Branch 0: IMDRF visible, USA hidden, CDN hidden
+	r0 := rules[0]
+	if r0.Condition == nil || r0.Condition.Expression != `ATRadioButton100.rawValue == "0"` {
+		t.Errorf("rule 0 condition = %+v", r0.Condition)
+	}
+	// Branch 0 should show IMDRF and hide USA and CDN
+	var showTargets, hideTargets []string
+	for _, a := range r0.Actions {
+		if a.Type == types.ActionTypeShow {
+			showTargets = append(showTargets, a.Target)
+		} else if a.Type == types.ActionTypeHide {
+			hideTargets = append(hideTargets, a.Target)
+		}
+	}
+	if len(showTargets) != 1 || showTargets[0] != "IMDRF" {
+		t.Errorf("branch 0 show targets = %v, want [IMDRF]", showTargets)
+	}
+	if len(hideTargets) != 2 {
+		t.Errorf("branch 0 hide targets = %v, want [USA CDN]", hideTargets)
+	}
+
+	// Branch 1: USA visible
+	r1 := rules[1]
+	if r1.Condition == nil || r1.Condition.Expression != `ATRadioButton100.rawValue == "1"` {
+		t.Errorf("rule 1 condition = %+v", r1.Condition)
+	}
+	var show1 []string
+	for _, a := range r1.Actions {
+		if a.Type == types.ActionTypeShow {
+			show1 = append(show1, a.Target)
+		}
+	}
+	if len(show1) != 1 || show1[0] != "USA" {
+		t.Errorf("branch 1 show targets = %v, want [USA]", show1)
+	}
+}
+
+// --- extractJSFunctionBodies --------------------------------------------
+
+func TestExtractJSFunctionBodies_SingleFunction(t *testing.T) {
+	script := `function AutoPopulate() {
+  if (x.rawValue == "0") { A.presence = "visible"; }
+}`
+	fns := extractJSFunctionBodies(script, "javascript")
+	if len(fns) != 1 {
+		t.Fatalf("expected 1 function, got %d", len(fns))
+	}
+	if !strings.Contains(fns[0].body, "A.presence") {
+		t.Errorf("function body missing expected content: %q", fns[0].body)
+	}
+}
+
+func TestExtractJSFunctionBodies_TwoFunctions(t *testing.T) {
+	script := `function AutoPopulate() {
+  A.presence = "visible";
+}
+function LBPresence() {
+  B.presence = "hidden";
+}`
+	fns := extractJSFunctionBodies(script, "javascript")
+	if len(fns) != 2 {
+		t.Fatalf("expected 2 functions, got %d", len(fns))
+	}
+}

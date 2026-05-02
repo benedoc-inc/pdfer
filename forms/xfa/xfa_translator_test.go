@@ -1953,3 +1953,70 @@ func TestPresenceAttrImageEmitted(t *testing.T) {
 		t.Error("ActiveLogo should not be hidden (presence=visible)")
 	}
 }
+
+// TestVariablesBlockRulesExtracted verifies that <variables><script> function
+// bodies with presence-based if/else-if chains are extracted as visibility rules.
+func TestVariablesBlockRulesExtracted(t *testing.T) {
+	xfaXML := `<template>
+  <variables>
+    <script name="Functions" contentType="application/x-javascript">
+      function AutoPopulate() {
+        if (AppType.rawValue == "0") {
+          SectionA.presence = "visible";
+          SectionB.presence = "hidden";
+          SectionC.presence = "hidden";
+        } else if (AppType.rawValue == "1") {
+          SectionA.presence = "hidden";
+          SectionB.presence = "visible";
+          SectionC.presence = "hidden";
+        } else if (AppType.rawValue == "2") {
+          SectionA.presence = "hidden";
+          SectionB.presence = "hidden";
+          SectionC.presence = "visible";
+        }
+      }
+    </script>
+  </variables>
+  <subform name="Page1">
+    <exclGroup name="AppType">
+      <field name="opt0"><ui><checkButton/></ui><items><text>A</text></items><items save="1"><text>0</text></items></field>
+      <field name="opt1"><ui><checkButton/></ui><items><text>B</text></items><items save="1"><text>1</text></items></field>
+      <field name="opt2"><ui><checkButton/></ui><items><text>C</text></items><items save="1"><text>2</text></items></field>
+    </exclGroup>
+    <subform name="SectionA"><field name="FieldA"><ui><textEdit/></ui><caption><value><text>Field A</text></value></caption></field></subform>
+    <subform name="SectionB"><field name="FieldB"><ui><textEdit/></ui><caption><value><text>Field B</text></value></caption></field></subform>
+    <subform name="SectionC"><field name="FieldC"><ui><textEdit/></ui><caption><value><text>Field C</text></value></caption></field></subform>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	if len(form.Rules) != 3 {
+		t.Fatalf("expected 3 rules from variables block, got %d: %+v", len(form.Rules), form.Rules)
+	}
+	// Rule 0: AppType == "0" → SectionA show, SectionB hide, SectionC hide
+	r0 := form.Rules[0]
+	if r0.Type != types.RuleTypeVisibility {
+		t.Errorf("rule 0 type = %v", r0.Type)
+	}
+	if r0.Condition == nil || r0.Condition.Expression != `AppType.rawValue == "0"` {
+		t.Errorf("rule 0 condition = %+v", r0.Condition)
+	}
+	// Rule 1: AppType == "1" → SectionB show
+	r1 := form.Rules[1]
+	if r1.Condition == nil || r1.Condition.Expression != `AppType.rawValue == "1"` {
+		t.Errorf("rule 1 condition = %+v", r1.Condition)
+	}
+	// Verify rule 1 shows SectionB
+	var found bool
+	for _, a := range r1.Actions {
+		if a.Type == types.ActionTypeShow && a.Target == "SectionB" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("rule 1 actions don't include show SectionB: %+v", r1.Actions)
+	}
+}
