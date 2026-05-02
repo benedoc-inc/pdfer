@@ -761,10 +761,9 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 							leaf.Required = true
 						}
 					case "presence":
+						leaf.Hidden = attr.Value != "visible"
 						if kind == xfaKindDraw {
 							leaf.HasPresenceAttr = true
-						} else if kind == xfaKindField || kind == xfaKindExclGroup {
-							leaf.Hidden = attr.Value != "visible"
 						}
 					case "access":
 						if attr.Value == "readOnly" || attr.Value == "protected" || attr.Value == "nonInteractive" {
@@ -1423,7 +1422,7 @@ func walkSubformChildren(node *xfaNode, path []string, schema *types.FormSchema,
 			}
 
 		case xfaKindDraw:
-			if q, ok := emitDraw(child, path, node, qIdx); ok {
+			if q, ok := emitDraw(child, path, node, qIdx, parentHidden); ok {
 				schema.Questions = append(schema.Questions, q)
 			}
 		}
@@ -1565,13 +1564,10 @@ func emitField(node *xfaNode, path []string, qIdx *int, verbose bool) (types.Que
 // emitDraw emits a <draw> node as a Question. Returns (question, true) if the
 // draw should be rendered, (zero, false) if it should be suppressed.
 // parent is the subform node that owns this draw.
-func emitDraw(node *xfaNode, path []string, parent *xfaNode, qIdx *int) (types.Question, bool) {
+func emitDraw(node *xfaNode, path []string, parent *xfaNode, qIdx *int, parentHidden bool) (types.Question, bool) {
 	// Structural classification — each check corresponds to a distinct entity type.
 	if node.Caption == "\x00consumed" {
 		return types.Question{}, false // claimed as exclGroup label
-	}
-	if node.HasPresenceAttr {
-		return types.Question{}, false // script-managed status indicator
 	}
 	// Suppress exData draws only when no plain text could be extracted.
 	// Draws with ExDataHTML set have their content recovered from text/html exData.
@@ -1597,6 +1593,7 @@ func emitDraw(node *xfaNode, path []string, parent *xfaNode, qIdx *int) (types.Q
 			Name:       node.Name,
 			Type:       types.ResponseTypeSeparator,
 			ReadOnly:   true,
+			Hidden:     parentHidden || node.Hidden,
 			Section:    sectionName(path),
 			PageNumber: node.PageNumber,
 			Properties: props,
@@ -1604,6 +1601,7 @@ func emitDraw(node *xfaNode, path []string, parent *xfaNode, qIdx *int) (types.Q
 	}
 
 	// Image draw — inline base64 data or an href reference to an external resource.
+	// These are emitted even when presence-attributed, so visibility rules can show/hide them.
 	if node.ImageData != "" || node.ImageHRef != "" {
 		*qIdx++
 		props := buildNodeProperties(node)
@@ -1623,10 +1621,17 @@ func emitDraw(node *xfaNode, path []string, parent *xfaNode, qIdx *int) (types.Q
 			Label:      resolveInteractiveLabel(node),
 			Type:       types.ResponseTypeImage,
 			ReadOnly:   true,
+			Hidden:     parentHidden || node.Hidden,
 			Section:    sectionName(path),
 			PageNumber: node.PageNumber,
 			Properties: props,
 		}, true
+	}
+
+	// Non-image draws: suppress if script-managed (presence= attr).
+	// These are UI status indicators (colored blocks, dynamic labels) controlled by scripts.
+	if node.HasPresenceAttr {
+		return types.Question{}, false
 	}
 
 	// Static display draw (text or exData HTML).

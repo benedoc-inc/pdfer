@@ -1901,3 +1901,55 @@ func TestImageHRefResolution(t *testing.T) {
 		t.Errorf("image_data = %v, want %v", img.Properties["image_data"], want)
 	}
 }
+
+// TestPresenceAttrImageEmitted verifies that image draws with a presence= attribute
+// are still emitted (as hidden questions), not silently suppressed. This covers
+// conditional logo images like the FDA/HC/IMDRFRF monograms in the eSTAR form.
+func TestPresenceAttrImageEmitted(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <field name="SomeField">
+      <ui><textEdit/></ui>
+      <caption><value><text>Name</text></value></caption>
+    </field>
+    <draw name="CondLogo" presence="hidden">
+      <value>
+        <image contentType="image/png">iVBORw0KGgo=</image>
+      </value>
+    </draw>
+    <draw name="ActiveLogo" presence="visible">
+      <value>
+        <image contentType="image/jpeg">iVBORw0KGgo=</image>
+      </value>
+    </draw>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	byName := make(map[string]types.Question)
+	for _, q := range form.Questions {
+		byName[q.Name] = q
+	}
+
+	condLogo, ok := byName["CondLogo"]
+	if !ok {
+		t.Fatal("CondLogo missing — presence=hidden image draw should still be emitted")
+	}
+	if condLogo.Type != types.ResponseTypeImage {
+		t.Errorf("CondLogo type = %v, want image", condLogo.Type)
+	}
+	if !condLogo.Hidden {
+		t.Error("CondLogo should be hidden (presence=hidden)")
+	}
+
+	activeLogo, ok := byName["ActiveLogo"]
+	if !ok {
+		t.Fatal("ActiveLogo missing")
+	}
+	if activeLogo.Hidden {
+		t.Error("ActiveLogo should not be hidden (presence=visible)")
+	}
+}
