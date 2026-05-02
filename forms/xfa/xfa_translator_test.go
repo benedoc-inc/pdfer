@@ -1808,3 +1808,96 @@ func TestParaHAlignAndFontProperties(t *testing.T) {
 		t.Errorf("font_weight = %v, want bold", q.Properties["font_weight"])
 	}
 }
+
+// TestImageHRefParsing verifies that an <image href="..."> attribute is captured
+// as image_href in properties and that contentType is not corrupted by it.
+func TestImageHRefParsing(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <field name="SomeField">
+      <ui><textEdit/></ui>
+      <caption><value><text>Name</text></value></caption>
+    </field>
+    <draw name="LogoDraw">
+      <value>
+        <image contentType="image/png" href="$rr:logo.png"/>
+      </value>
+    </draw>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	var img *types.Question
+	for i := range form.Questions {
+		if form.Questions[i].Name == "LogoDraw" {
+			img = &form.Questions[i]
+			break
+		}
+	}
+	if img == nil {
+		t.Fatal("LogoDraw missing — href-only image should still be emitted")
+	}
+	if img.Type != types.ResponseTypeImage {
+		t.Errorf("type = %v, want image", img.Type)
+	}
+	if img.Properties == nil {
+		t.Fatal("Properties nil")
+	}
+	if img.Properties["image_href"] != "$rr:logo.png" {
+		t.Errorf("image_href = %v, want $rr:logo.png", img.Properties["image_href"])
+	}
+	if img.Properties["content_type"] != "image/png" {
+		t.Errorf("content_type = %v, want image/png (href must not overwrite contentType)", img.Properties["content_type"])
+	}
+	if _, hasData := img.Properties["image_data"]; hasData {
+		t.Error("image_data should be absent when no inline data is present")
+	}
+}
+
+// TestImageHRefResolution verifies that ParseXFAFormWithResources fills in
+// image_data when a matching resource is supplied.
+func TestImageHRefResolution(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <field name="SomeField">
+      <ui><textEdit/></ui>
+      <caption><value><text>Name</text></value></caption>
+    </field>
+    <draw name="LogoDraw">
+      <value>
+        <image contentType="image/png" href="$rr:logo.png"/>
+      </value>
+    </draw>
+  </subform>
+</template>`
+
+	fakeImageBytes := []byte{0x89, 0x50, 0x4E, 0x47} // PNG magic bytes
+	resources := map[string][]byte{
+		"logo.png": fakeImageBytes,
+	}
+
+	form, err := ParseXFAFormWithResources(xfaXML, resources, false)
+	if err != nil {
+		t.Fatalf("ParseXFAFormWithResources() error = %v", err)
+	}
+	var img *types.Question
+	for i := range form.Questions {
+		if form.Questions[i].Name == "LogoDraw" {
+			img = &form.Questions[i]
+			break
+		}
+	}
+	if img == nil {
+		t.Fatal("LogoDraw missing")
+	}
+	if img.Properties["image_data"] == "" {
+		t.Error("image_data should be filled in after resource resolution")
+	}
+	want := "iVBORw=="
+	if img.Properties["image_data"] != want {
+		t.Errorf("image_data = %v, want %v", img.Properties["image_data"], want)
+	}
+}

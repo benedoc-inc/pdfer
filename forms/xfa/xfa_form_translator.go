@@ -1,6 +1,7 @@
 package xfa
 
 import (
+	"encoding/base64"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -17,8 +18,16 @@ var presenceTargetRe = regexp.MustCompile(`\b([A-Za-z_]\w*)\.presence\s*=`)
 
 // ParseXFAForm parses raw XFA XML and converts it to a strongly-typed FormSchema.
 func ParseXFAForm(xfaXML string, verbose bool) (*types.FormSchema, error) {
+	return ParseXFAFormWithResources(xfaXML, nil, verbose)
+}
+
+// ParseXFAFormWithResources parses XFA XML and resolves any href-based image
+// references against the provided resource map. Keys in resources are the bare
+// resource name (e.g. "logo.jpeg"); values are the raw image bytes.
+// Pass nil when no external resources are available.
+func ParseXFAFormWithResources(xfaXML string, resources map[string][]byte, verbose bool) (*types.FormSchema, error) {
 	if verbose {
-		log.Printf("Parsing XFA XML to FormSchema (length: %d bytes)", len(xfaXML))
+		log.Printf("Parsing XFA XML to FormSchema (length: %d bytes, resources: %d)", len(xfaXML), len(resources))
 	}
 	result, err := parseXFATemplate(xfaXML, verbose)
 	if err != nil {
@@ -31,11 +40,61 @@ func ParseXFAForm(xfaXML string, verbose bool) (*types.FormSchema, error) {
 		log.Printf("Warning: Failed to extract XFA rules: %v", err)
 	}
 	schema.Rules = rules
+	if len(resources) > 0 {
+		resolveImageHRefs(schema, resources)
+	}
 	if verbose {
 		log.Printf("Parsed XFA to FormSchema: %d questions, %d sections, %d rules",
 			len(schema.Questions), len(schema.Sections), len(schema.Rules))
 	}
 	return schema, nil
+}
+
+// resolveImageHRefs fills in image_data for questions that carry an image_href
+// pointing to a $rr: resource. The href is stripped of its $rr: prefix and
+// matched against the resource map keys case-insensitively.
+func resolveImageHRefs(schema *types.FormSchema, resources map[string][]byte) {
+	// Build a lowercase lookup to handle case mismatches.
+	lower := make(map[string][]byte, len(resources))
+	for k, v := range resources {
+		lower[strings.ToLower(k)] = v
+	}
+	for i := range schema.Questions {
+		q := &schema.Questions[i]
+		if q.Type != types.ResponseTypeImage || q.Properties == nil {
+			continue
+		}
+		href, _ := q.Properties["image_href"].(string)
+		if href == "" {
+			continue
+		}
+		// Strip $rr: or # prefix.
+		name := href
+		if strings.HasPrefix(name, "$rr:") {
+			name = name[4:]
+		} else if strings.HasPrefix(name, "#") {
+			name = name[1:]
+		}
+		data, ok := lower[strings.ToLower(name)]
+		if !ok {
+			continue
+		}
+		q.Properties["image_data"] = base64.StdEncoding.EncodeToString(data)
+		// Infer content type from extension if not already set.
+		if ct, _ := q.Properties["content_type"].(string); ct == "image/jpeg" {
+			ext := strings.ToLower(name)
+			switch {
+			case strings.HasSuffix(ext, ".png"):
+				q.Properties["content_type"] = "image/png"
+			case strings.HasSuffix(ext, ".gif"):
+				q.Properties["content_type"] = "image/gif"
+			case strings.HasSuffix(ext, ".bmp"):
+				q.Properties["content_type"] = "image/bmp"
+			case strings.HasSuffix(ext, ".webp"):
+				q.Properties["content_type"] = "image/webp"
+			}
+		}
+	}
 }
 
 // FormToXFA converts a FormSchema to XFA XML
@@ -446,6 +505,7 @@ type xfaNode struct {
 	// Draw classification flags — set at parse time, used in emitDraw.
 	ImageData        string
 	ImageContentType string
+	ImageHRef        string // href attribute value (e.g. "$rr:logo.jpeg"); empty for inline images
 	HasPresenceAttr  bool   // explicit presence= attr → script-managed status indicator, suppress
 	HasExData        bool   // contains <exData>
 	ExDataHTML       string // plain text extracted from text/html exData without xfa:embed markers
@@ -970,8 +1030,11 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 					currentImageData.Reset()
 					imageContentType = "image/jpeg"
 					for _, attr := range se.Attr {
-						if attr.Name.Local == "contentType" || attr.Name.Local == "href" {
+						switch attr.Name.Local {
+						case "contentType":
 							imageContentType = attr.Value
+						case "href":
+							currentLeaf.ImageHRef = attr.Value
 						}
 					}
 				}
@@ -1114,9 +1177,14 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 				inValue = false
 
 			case "image":
-				if currentLeaf != nil && currentImageData.Len() > 0 {
-					currentLeaf.ImageData = strings.TrimSpace(currentImageData.String())
-					currentLeaf.ImageContentType = imageContentType
+				if currentLeaf != nil {
+					if currentImageData.Len() > 0 {
+						currentLeaf.ImageData = strings.TrimSpace(currentImageData.String())
+					}
+					// Always store content type — relevant for both inline and href images.
+					if currentLeaf.ImageHRef != "" || currentImageData.Len() > 0 {
+						currentLeaf.ImageContentType = imageContentType
+					}
 				}
 				inImage = false
 				currentImageData.Reset()
@@ -1513,7 +1581,7 @@ func emitDraw(node *xfaNode, path []string, parent *xfaNode, qIdx *int) (types.Q
 	if len(node.Events) > 0 {
 		return types.Question{}, false // has its own event handlers → dynamic
 	}
-	if node.UIType == "imageEdit" && node.ImageData == "" {
+	if node.UIType == "imageEdit" && node.ImageData == "" && node.ImageHRef == "" {
 		return types.Question{}, false // colored status block (YesIndicator / NoIndicator)
 	}
 
@@ -1535,14 +1603,19 @@ func emitDraw(node *xfaNode, path []string, parent *xfaNode, qIdx *int) (types.Q
 		}, true
 	}
 
-	// Image draw.
-	if node.ImageData != "" {
+	// Image draw — inline base64 data or an href reference to an external resource.
+	if node.ImageData != "" || node.ImageHRef != "" {
 		*qIdx++
 		props := buildNodeProperties(node)
 		if props == nil {
 			props = make(map[string]interface{})
 		}
-		props["image_data"] = node.ImageData
+		if node.ImageData != "" {
+			props["image_data"] = node.ImageData
+		}
+		if node.ImageHRef != "" {
+			props["image_href"] = node.ImageHRef
+		}
 		props["content_type"] = node.ImageContentType
 		return types.Question{
 			ID:         sanitizeFieldIDWithIndex(node.Name, *qIdx),

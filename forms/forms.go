@@ -154,8 +154,18 @@ func Extract(pdfBytes []byte, password []byte, verbose bool) (Form, error) {
 	}
 	streams, err := xfa.ExtractAllXFAStreams(xfaBytes, nil, verbose)
 	if err == nil && streams.Template != nil && len(streams.Template.Data) > 0 {
-		// Parse XFA form
-		formSchema, err := xfa.ParseXFAForm(string(streams.Template.Data), verbose)
+		// Build a resource map from any extra XFA packet streams (images, fonts, etc.)
+		var resources map[string][]byte
+		if len(streams.Resources) > 0 {
+			resources = make(map[string][]byte, len(streams.Resources))
+			for name, info := range streams.Resources {
+				if info != nil {
+					resources[name] = info.Data
+				}
+			}
+		}
+		// Parse XFA form, resolving any $rr: image href references.
+		formSchema, err := xfa.ParseXFAFormWithResources(string(streams.Template.Data), resources, verbose)
 		if err != nil {
 			return nil, types.WrapError(types.ErrCodeInvalidForm, "failed to parse XFA form", err)
 		}
@@ -203,7 +213,16 @@ func ExtractXFA(pdfBytes []byte, password []byte, verbose bool) (*types.FormSche
 	var datasets *types.XFADatasets
 
 	if streams.Template != nil {
-		formSchema, _ = xfa.ParseXFAForm(string(streams.Template.Data), verbose)
+		var resources map[string][]byte
+		if len(streams.Resources) > 0 {
+			resources = make(map[string][]byte, len(streams.Resources))
+			for name, info := range streams.Resources {
+				if info != nil {
+					resources[name] = info.Data
+				}
+			}
+		}
+		formSchema, _ = xfa.ParseXFAFormWithResources(string(streams.Template.Data), resources, verbose)
 	}
 	if streams.Datasets != nil {
 		datasets, _ = xfa.ParseXFADatasets(string(streams.Datasets.Data), verbose)
