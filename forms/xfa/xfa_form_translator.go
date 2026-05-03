@@ -1523,17 +1523,25 @@ func claimDrawLabels(node *xfaNode) {
 				if prev.Caption == "\x00consumed" {
 					continue
 				}
-				label := resolveDrawText(prev)
-				// Reject long strings — they are instruction text, not headings.
-				if label != "" && len(label) <= 200 {
-					child.Caption = label
-					// Propagate the draw's tooltip (e.g. IMDRF TOC refs) to the subform.
-					if child.ToolTip == "" && prev.ToolTip != "" {
-						child.ToolTip = prev.ToolTip
-					}
-					prev.Caption = "\x00consumed"
-					break
+				// A draw with an explicit height (h or minH) reserves vertical layout
+				// space — it is a positioned content block, not an inline label. Label
+				// draws in flow layout auto-size to their text and carry no explicit
+				// height attributes. HTML-formatted draws (HasExData) are styled
+				// paragraph blocks.
+				if prev.H != "" || prev.MinH != "" || prev.HasExData {
+					continue
 				}
+				label := resolveDrawText(prev)
+				if label == "" {
+					continue
+				}
+				child.Caption = label
+				// Propagate the draw's tooltip (e.g. IMDRF TOC refs) to the subform.
+				if child.ToolTip == "" && prev.ToolTip != "" {
+					child.ToolTip = prev.ToolTip
+				}
+				prev.Caption = "\x00consumed"
+				break
 			}
 		}
 		// Recurse into subforms BEFORE checking first-child draws so that fields
@@ -1557,14 +1565,21 @@ func claimDrawLabels(node *xfaNode) {
 				if gc.Kind != xfaKindDraw || gc.UIType == "imageEdit" || len(gc.Events) > 0 || gc.Caption == "\x00consumed" {
 					continue
 				}
-				if label := resolveDrawText(gc); label != "" && len(label) <= 200 {
-					child.Caption = label
-					if child.ToolTip == "" && gc.ToolTip != "" {
-						child.ToolTip = gc.ToolTip
-					}
-					gc.Caption = "\x00consumed"
-					break
+				// Same structural check: skip draws with explicit height or minHeight
+				// (content blocks) or HTML-formatted paragraph content.
+				if gc.H != "" || gc.MinH != "" || gc.HasExData {
+					continue
 				}
+				label := resolveDrawText(gc)
+				if label == "" {
+					continue
+				}
+				child.Caption = label
+				if child.ToolTip == "" && gc.ToolTip != "" {
+					child.ToolTip = gc.ToolTip
+				}
+				gc.Caption = "\x00consumed"
+				break
 			}
 		}
 	}
