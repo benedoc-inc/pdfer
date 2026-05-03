@@ -1529,6 +1529,17 @@ func buildSection(node *xfaNode, parentPath []string, schema *types.FormSchema, 
 			sec.Questions = append(sec.Questions, q.ID)
 		}
 	}
+	// CheckboxGroup subforms have no caption of their own; use the first display-type
+	// child question's text as the section label so the sidebar shows meaningful text
+	// instead of the formatted internal name (e.g. "AD Checkbox Group").
+	if sec.Label == "" && strings.Contains(node.Name, "CheckboxGroup") {
+		for _, q := range schema.Questions[startLen:] {
+			if q.Type == "display" && strings.TrimSpace(q.Label) != "" {
+				sec.Label = strings.TrimSpace(q.Label)
+				break
+			}
+		}
+	}
 	// Collect static display text from non-interactive sections (headers, instructions, etc.)
 	if !interactive {
 		sec.Content = collectSectionContent(node)
