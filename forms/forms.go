@@ -70,10 +70,11 @@ func (w *AcroFormWrapper) GetValues() map[string]interface{} {
 
 // XFAFormWrapper wraps XFA form data to implement the Form interface
 type XFAFormWrapper struct {
-	formSchema *types.FormSchema
-	datasets   *types.XFADatasets
-	pdfBytes   []byte
-	password   []byte
+	formSchema     *types.FormSchema
+	datasets       *types.XFADatasets
+	pdfBytes       []byte
+	password       []byte
+	decryptedBytes []byte // non-nil when pdfBytes was encrypted; used by Fill
 }
 
 func (w *XFAFormWrapper) Type() FormType {
@@ -85,16 +86,25 @@ func (w *XFAFormWrapper) Schema() *types.FormSchema {
 }
 
 func (w *XFAFormWrapper) Fill(pdfBytes []byte, data types.FormData, password []byte, verbose bool) ([]byte, error) {
-	// Get encryption info if needed
-	var encryptInfo *types.PDFEncryption
+	// If we have pre-decrypted bytes (from encrypted PDF extraction), use them.
+	// The XFA update pipeline requires plaintext object streams; passing the
+	// original encrypted bytes causes object-stream decompression to fail.
+	if w.decryptedBytes != nil {
+		return xfa.UpdateXFAInPDF(w.decryptedBytes, data, nil, verbose)
+	}
+
+	// PDF was not encrypted at extraction time — but the caller may have supplied
+	// a password for a separately-obtained encrypted copy.
 	if len(password) > 0 || len(w.password) > 0 {
 		pwd := password
 		if len(pwd) == 0 {
 			pwd = w.password
 		}
-		// Parse encryption if PDF is encrypted
-		// For now, use the XFA update function
-		return xfa.UpdateXFAInPDF(pdfBytes, data, encryptInfo, verbose)
+		if bytes.Contains(pdfBytes, []byte("/Encrypt")) {
+			if decrypted, decErr := decryptForXFA(pdfBytes, pwd, verbose); decErr == nil {
+				return xfa.UpdateXFAInPDF(decrypted, data, nil, verbose)
+			}
+		}
 	}
 	return xfa.UpdateXFAInPDF(pdfBytes, data, nil, verbose)
 }
@@ -143,6 +153,7 @@ func Extract(pdfBytes []byte, password []byte, verbose bool) (Form, error) {
 	// Try XFA — decrypt first if the PDF is encrypted, since XFA stream
 	// extraction requires plaintext bytes (encryptInfo=nil path).
 	xfaBytes := pdfBytes
+	var decryptedForFill []byte // non-nil if we decrypted pdfBytes
 	if bytes.Contains(pdfBytes, []byte("/Encrypt")) {
 		pwd := password
 		if len(pwd) == 0 {
@@ -150,6 +161,7 @@ func Extract(pdfBytes []byte, password []byte, verbose bool) (Form, error) {
 		}
 		if decrypted, decErr := decryptForXFA(pdfBytes, pwd, verbose); decErr == nil {
 			xfaBytes = decrypted
+			decryptedForFill = decrypted
 		}
 	}
 	streams, err := xfa.ExtractAllXFAStreams(xfaBytes, nil, verbose)
@@ -174,12 +186,12 @@ func Extract(pdfBytes []byte, password []byte, verbose bool) (Form, error) {
 		if streams.Datasets != nil {
 			datasets, _ = xfa.ParseXFADatasets(string(streams.Datasets.Data), verbose)
 		}
-
 		return &XFAFormWrapper{
-			formSchema: formSchema,
-			datasets:   datasets,
-			pdfBytes:   pdfBytes,
-			password:   password,
+			formSchema:     formSchema,
+			datasets:       datasets,
+			pdfBytes:       pdfBytes,
+			password:       password,
+			decryptedBytes: decryptedForFill,
 		}, nil
 	}
 

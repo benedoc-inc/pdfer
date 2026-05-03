@@ -176,7 +176,20 @@ func extractDictionaryKeys(dictContent []byte) string {
 
 // findAndDecryptAcroForm finds and decrypts the AcroForm object, returning the decrypted content
 func findAndDecryptAcroForm(pdfBytes []byte, acroFormObjNum int, encryptInfo *types.PDFEncryption, verbose bool) ([]byte, error) {
-	// Find the AcroForm object
+	// Prefer GetObjectContent which handles compressed object streams (PDF 1.5+ XRef streams).
+	// This is the correct path for PDFs whose AcroForm dict lives in an object stream.
+	content, err := parse.GetObjectContent(pdfBytes, acroFormObjNum, encryptInfo, verbose)
+	if err == nil && len(content) > 0 {
+		if verbose {
+			log.Printf("AcroForm object %d: retrieved via GetObjectContent (%d bytes)", acroFormObjNum, len(content))
+		}
+		return content, nil
+	}
+	if verbose && err != nil {
+		log.Printf("GetObjectContent(%d) failed (%v), falling back to byte-scan path", acroFormObjNum, err)
+	}
+
+	// Legacy byte-scan path (for PDFs where the direct-search heuristic is needed).
 	objIndex, err := parse.FindObjectByNumber(pdfBytes, acroFormObjNum, encryptInfo, verbose)
 	if err != nil {
 		return nil, fmt.Errorf("AcroForm object %d not found: %v", acroFormObjNum, err)

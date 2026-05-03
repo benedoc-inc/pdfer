@@ -167,13 +167,10 @@ func ParseEncryptionDictionary(pdfBytes []byte, verbose bool) (*types.PDFEncrypt
 			parenStart := bytes.Index(pdfBytes[oStartInDict:], []byte("("))
 			if parenStart != -1 {
 				parenStart += oStartInDict + 1
-				parenEnd := bytes.Index(pdfBytes[parenStart:], []byte(")"))
-				if parenEnd != -1 {
-					encrypt.O = make([]byte, parenEnd)
-					copy(encrypt.O, pdfBytes[parenStart:parenStart+parenEnd])
-					if verbose {
-						log.Printf("Extracted O value (binary): %d bytes", len(encrypt.O))
-					}
+				raw, _ := parsePDFLiteralStringBytes(pdfBytes, parenStart)
+				encrypt.O = raw
+				if verbose {
+					log.Printf("Extracted O value (binary): %d bytes", len(encrypt.O))
 				}
 			}
 		}
@@ -198,13 +195,10 @@ func ParseEncryptionDictionary(pdfBytes []byte, verbose bool) (*types.PDFEncrypt
 			parenStart := bytes.Index(pdfBytes[uStartInDict:], []byte("("))
 			if parenStart != -1 {
 				parenStart += uStartInDict + 1
-				parenEnd := bytes.Index(pdfBytes[parenStart:], []byte(")"))
-				if parenEnd != -1 {
-					encrypt.U = make([]byte, parenEnd)
-					copy(encrypt.U, pdfBytes[parenStart:parenStart+parenEnd])
-					if verbose {
-						log.Printf("Extracted U value (binary): %d bytes", len(encrypt.U))
-					}
+				raw, _ := parsePDFLiteralStringBytes(pdfBytes, parenStart)
+				encrypt.U = raw
+				if verbose {
+					log.Printf("Extracted U value (binary): %d bytes", len(encrypt.U))
 				}
 			}
 		}
@@ -243,13 +237,10 @@ func ParseEncryptionDictionary(pdfBytes []byte, verbose bool) (*types.PDFEncrypt
 				parenStart := bytes.Index(pdfBytes[ueStartInDict:], []byte("("))
 				if parenStart != -1 {
 					parenStart += ueStartInDict + 1
-					parenEnd := bytes.Index(pdfBytes[parenStart:], []byte(")"))
-					if parenEnd != -1 {
-						encrypt.UE = make([]byte, parenEnd)
-						copy(encrypt.UE, pdfBytes[parenStart:parenStart+parenEnd])
-						if verbose {
-							log.Printf("Extracted UE value (binary): %d bytes", len(encrypt.UE))
-						}
+					raw, _ := parsePDFLiteralStringBytes(pdfBytes, parenStart)
+					encrypt.UE = raw
+					if verbose {
+						log.Printf("Extracted UE value (binary): %d bytes", len(encrypt.UE))
 					}
 				}
 			}
@@ -272,13 +263,10 @@ func ParseEncryptionDictionary(pdfBytes []byte, verbose bool) (*types.PDFEncrypt
 				parenStart := bytes.Index(pdfBytes[oeStartInDict:], []byte("("))
 				if parenStart != -1 {
 					parenStart += oeStartInDict + 1
-					parenEnd := bytes.Index(pdfBytes[parenStart:], []byte(")"))
-					if parenEnd != -1 {
-						encrypt.OE = make([]byte, parenEnd)
-						copy(encrypt.OE, pdfBytes[oeStartInDict:oeStartInDict+parenEnd])
-						if verbose {
-							log.Printf("Extracted OE value (binary): %d bytes", len(encrypt.OE))
-						}
+					raw, _ := parsePDFLiteralStringBytes(pdfBytes, parenStart)
+					encrypt.OE = raw
+					if verbose {
+						log.Printf("Extracted OE value (binary): %d bytes", len(encrypt.OE))
 					}
 				}
 			}
@@ -286,4 +274,92 @@ func ParseEncryptionDictionary(pdfBytes []byte, verbose bool) (*types.PDFEncrypt
 	}
 
 	return encrypt, nil
+}
+
+// parsePDFLiteralStringBytes reads a PDF literal string starting at pdfBytes[start],
+// where start points to the first byte AFTER the opening '('.
+// It returns the decoded bytes (PDF escape sequences resolved) and the index
+// of the byte after the closing ')'. Nested parentheses are balanced.
+//
+// PDF escape sequences handled:
+//
+//	\n  → 0x0A   \r  → 0x0D   \t  → 0x09   \b  → 0x08
+//	\f  → 0x0C   \\  → 0x5C   \(  → 0x28   \)  → 0x29
+//	\ooo → octal byte value
+//	\ followed by EOL → line continuation (byte dropped)
+func parsePDFLiteralStringBytes(pdfBytes []byte, start int) ([]byte, int) {
+	var out []byte
+	depth := 1 // Already consumed the opening '('
+	i := start
+	for i < len(pdfBytes) && depth > 0 {
+		b := pdfBytes[i]
+		if b == '\\' && i+1 < len(pdfBytes) {
+			next := pdfBytes[i+1]
+			switch next {
+			case 'n':
+				out = append(out, 0x0A)
+				i += 2
+			case 'r':
+				out = append(out, 0x0D)
+				i += 2
+			case 't':
+				out = append(out, 0x09)
+				i += 2
+			case 'b':
+				out = append(out, 0x08)
+				i += 2
+			case 'f':
+				out = append(out, 0x0C)
+				i += 2
+			case '\\':
+				out = append(out, 0x5C)
+				i += 2
+			case '(':
+				out = append(out, 0x28)
+				i += 2
+			case ')':
+				out = append(out, 0x29)
+				i += 2
+			case '\r', '\n':
+				// Line continuation: skip the backslash and the EOL
+				i++ // skip '\'
+				if pdfBytes[i] == '\r' && i+1 < len(pdfBytes) && pdfBytes[i+1] == '\n' {
+					i += 2 // CRLF
+				} else {
+					i++ // LF or CR
+				}
+			default:
+				// Octal: \ddd
+				if next >= '0' && next <= '7' {
+					val := int(next - '0')
+					i += 2
+					for k := 0; k < 2 && i < len(pdfBytes) && pdfBytes[i] >= '0' && pdfBytes[i] <= '7'; k++ {
+						val = val*8 + int(pdfBytes[i]-'0')
+						i++
+					}
+					out = append(out, byte(val))
+				} else {
+					// Unknown escape: pass through the next byte as-is
+					out = append(out, next)
+					i += 2
+				}
+			}
+			continue
+		}
+		if b == '(' {
+			depth++
+			out = append(out, b)
+		} else if b == ')' {
+			depth--
+			if depth == 0 {
+				i++ // consume the closing ')'
+				break
+			}
+			out = append(out, b)
+		} else {
+			out = append(out, b)
+		}
+		i++
+	}
+	return out, i
 }

@@ -1524,7 +1524,8 @@ func claimDrawLabels(node *xfaNode) {
 					continue
 				}
 				label := resolveDrawText(prev)
-				if label != "" {
+				// Reject long strings — they are instruction text, not headings.
+				if label != "" && len(label) <= 200 {
 					child.Caption = label
 					// Propagate the draw's tooltip (e.g. IMDRF TOC refs) to the subform.
 					if child.ToolTip == "" && prev.ToolTip != "" {
@@ -1556,7 +1557,7 @@ func claimDrawLabels(node *xfaNode) {
 				if gc.Kind != xfaKindDraw || gc.UIType == "imageEdit" || len(gc.Events) > 0 || gc.Caption == "\x00consumed" {
 					continue
 				}
-				if label := resolveDrawText(gc); label != "" {
+				if label := resolveDrawText(gc); label != "" && len(label) <= 200 {
 					child.Caption = label
 					if child.ToolTip == "" && gc.ToolTip != "" {
 						child.ToolTip = gc.ToolTip
