@@ -2190,3 +2190,104 @@ func TestHTMLCaptionExtraction(t *testing.T) {
 		t.Errorf("label must not contain HTML tags: %q", q.Label)
 	}
 }
+
+// TestDrawTextValueBeatsToolTip verifies that for draw/heading elements, the
+// visible <value><text> content is used as the section label rather than
+// <assist><toolTip>, which XFA authors use for accessibility annotations
+// (e.g. IMDRF TOC chapter references) that are not intended as display text.
+// Matches the real eSTAR structure: CoverLetter contains imageEdit draws (which
+// are skipped by claimDrawLabels) and then CLHeading (which the first-child scan
+// claims). The field inside has bind=none so it doesn't steal the draw label.
+func TestDrawTextValueBeatsToolTip(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="form1">
+    <subform name="CoverLetter">
+      <draw name="YesIndicator"><ui><imageEdit/></ui></draw>
+      <draw name="CLHeading">
+        <ui><textEdit/></ui>
+        <value><text>Cover Letter / Letters of Reference</text></value>
+        <assist role="H1"><toolTip>IMDRF TOC CH1.01, CH1.13</toolTip></assist>
+      </draw>
+      <field name="CLAddAttachment" w="34.925mm">
+        <ui><button/></ui>
+        <caption><value><text>Add Attachment</text></value></caption>
+        <bind match="none"/>
+      </field>
+    </subform>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+
+	var coverLetter *types.FormSection
+	if len(form.Sections) > 0 {
+		for _, child := range form.Sections[0].Children {
+			c := child
+			if c.Name == "CoverLetter" {
+				coverLetter = &c
+				break
+			}
+		}
+	}
+	if coverLetter == nil {
+		t.Fatal("CoverLetter section not found")
+	}
+
+	wantLabel := "Cover Letter / Letters of Reference"
+	if coverLetter.Label != wantLabel {
+		t.Errorf("section label = %q, want %q (ToolTip must not override visible Value text)", coverLetter.Label, wantLabel)
+	}
+
+	wantTooltip := "IMDRF TOC CH1.01, CH1.13"
+	if coverLetter.Tooltip != wantTooltip {
+		t.Errorf("section tooltip = %q, want %q", coverLetter.Tooltip, wantTooltip)
+	}
+}
+
+// TestBookmarkNameAsLabel verifies that <extras name="bookmark"><text name="name">
+// is used as the authoritative section label, overriding any instruction-text draw
+// that claimDrawLabels would otherwise claim as the label.
+func TestBookmarkNameAsLabel(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="form1">
+    <draw name="BCText1">
+      <value><text>If this section is not applicable, please attach a statement explaining why.</text></value>
+    </draw>
+    <subform name="PatientMaterials">
+      <extras name="bookmark">
+        <text name="name">Tissue Contacting Materials</text>
+      </extras>
+      <field name="MaterialsList">
+        <ui><textEdit/></ui>
+      </field>
+    </subform>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+
+	var patientMaterials *types.FormSection
+	if len(form.Sections) > 0 {
+		for _, child := range form.Sections[0].Children {
+			c := child
+			if c.Name == "PatientMaterials" {
+				patientMaterials = &c
+				break
+			}
+		}
+	}
+	if patientMaterials == nil {
+		t.Fatal("PatientMaterials section not found")
+	}
+
+	wantLabel := "Tissue Contacting Materials"
+	if patientMaterials.Label != wantLabel {
+		t.Errorf("section label = %q, want %q (bookmark name must override claimed draw text)", patientMaterials.Label, wantLabel)
+	}
+}

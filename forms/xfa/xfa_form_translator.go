@@ -479,8 +479,9 @@ type xfaNode struct {
 	// Label sources, resolved by resolveInteractiveLabel / resolveDrawText.
 	Caption         string // from <caption><value><text> or <label>
 	CaptionPlacement string // from <caption placement="left|right|top|bottom|inline">
-	ToolTip         string // from <toolTip>
+	ToolTip         string // from <assist><toolTip> — accessibility annotation (e.g. IMDRF TOC refs)
 	SpeakLabel      string // from <assist><speak>
+	BookmarkName    string // from <extras name="bookmark"><text name="name"> — PDF bookmark label
 
 	// Content
 	Value       string
@@ -597,9 +598,12 @@ func resolveDisplayLabel(n *xfaNode) string {
 }
 
 // resolveDrawText returns the best display text for a draw/display element.
-// Priority: caption > toolTip > rich HTML text > default/value text > speak.
+// Priority: caption > rich HTML > default/value text > toolTip > speak.
+// ToolTip is placed after visible content because XFA authors use it for
+// accessibility annotations (e.g. IMDRF TOC references) that are not
+// intended as display labels.
 func resolveDrawText(n *xfaNode) string {
-	return firstNonEmpty(n.Caption, n.ToolTip, n.ExDataHTML, n.Default, n.Value, n.SpeakLabel)
+	return firstNonEmpty(n.Caption, n.ExDataHTML, n.Default, n.Value, n.ToolTip, n.SpeakLabel)
 }
 
 // isInteractiveSubtree reports whether node or any descendant produces a user-facing
@@ -678,6 +682,11 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 	var inVariables       bool   // inside a <variables> element
 	var inVariablesScript bool   // inside a <variables><script> element
 	var variablesScriptLang string
+
+	// bookmark extras state
+	var inBookmarkExtras bool
+	var inBookmarkName   bool
+	var currentBookmarkName strings.Builder
 
 	for {
 		token, err := decoder.Token()
@@ -880,6 +889,15 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 			case "text":
 				if inItems && currentLeaf != nil {
 					currentValue.Reset()
+				} else if inBookmarkExtras && currentLeaf == nil {
+					// Detect <text name="name"> inside a bookmark extras block.
+					for _, attr := range se.Attr {
+						if attr.Name.Local == "name" && attr.Value == "name" {
+							inBookmarkName = true
+							currentBookmarkName.Reset()
+							break
+						}
+					}
 				}
 
 			// UI element type detection
@@ -1133,6 +1151,17 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 						}
 					}
 				}
+
+			case "extras":
+				// Track <extras name="bookmark"> on subforms for bookmark label extraction.
+				if currentLeaf == nil {
+					for _, attr := range se.Attr {
+						if attr.Name.Local == "name" && attr.Value == "bookmark" {
+							inBookmarkExtras = true
+							break
+						}
+					}
+				}
 			}
 
 		case xml.EndElement:
@@ -1263,7 +1292,13 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 				itemsIsSave = false
 
 			case "text":
-				if inItems && currentLeaf != nil {
+				if inBookmarkName {
+					if text := strings.TrimSpace(currentBookmarkName.String()); text != "" {
+						topOfStack().BookmarkName = text
+					}
+					currentBookmarkName.Reset()
+					inBookmarkName = false
+				} else if inItems && currentLeaf != nil {
 					text := strings.TrimSpace(currentValue.String())
 					currentValue.Reset()
 					if itemsIsSave {
@@ -1272,6 +1307,9 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 						currentLeaf.Options = append(currentLeaf.Options, XFAOption{Value: text, Label: text})
 					}
 				}
+
+			case "extras":
+				inBookmarkExtras = false
 
 			case "script":
 				if inVariablesScript {
@@ -1377,6 +1415,8 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 				currentToolTip.WriteString(data)
 			case inSpeak && inAssist:
 				currentSpeak.WriteString(data)
+			case inBookmarkName:
+				currentBookmarkName.WriteString(data)
 			case inScript || inVariablesScript:
 				currentValue.WriteString(data)
 			case inItems:
@@ -1486,6 +1526,10 @@ func claimDrawLabels(node *xfaNode) {
 				label := resolveDrawText(prev)
 				if label != "" {
 					child.Caption = label
+					// Propagate the draw's tooltip (e.g. IMDRF TOC refs) to the subform.
+					if child.ToolTip == "" && prev.ToolTip != "" {
+						child.ToolTip = prev.ToolTip
+					}
 					prev.Caption = "\x00consumed"
 					break
 				}
@@ -1514,6 +1558,9 @@ func claimDrawLabels(node *xfaNode) {
 				}
 				if label := resolveDrawText(gc); label != "" {
 					child.Caption = label
+					if child.ToolTip == "" && gc.ToolTip != "" {
+						child.ToolTip = gc.ToolTip
+					}
 					gc.Caption = "\x00consumed"
 					break
 				}
@@ -1576,14 +1623,19 @@ func buildSection(node *xfaNode, parentPath []string, schema *types.FormSchema, 
 	startLen := len(schema.Questions)
 	nodeHidden := parentHidden || node.Hidden
 	interactive := isInteractiveSubtree(node)
+	// Prefer bookmark name (from <extras name="bookmark">) as the authoritative label;
+	// fall back to caption claimed from sibling/child draws.
 	label := ""
-	if cap := strings.TrimSpace(node.Caption); cap != "" && !isPlaceholderCaption(cap) {
+	if bk := strings.TrimSpace(node.BookmarkName); bk != "" {
+		label = bk
+	} else if cap := strings.TrimSpace(node.Caption); cap != "" && !isPlaceholderCaption(cap) {
 		label = cap
 	}
 	sec := types.FormSection{
 		Name:        node.Name,
 		Path:        strings.Join(path, "."),
 		Label:       label,
+		Tooltip:     node.ToolTip,
 		Interactive: interactive,
 		Layout:      node.Layout,
 		Width:       node.W,
