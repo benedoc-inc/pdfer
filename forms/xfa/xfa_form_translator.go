@@ -1399,6 +1399,20 @@ func buildFormSchema(result *xfaTemplateResult, verbose bool) *types.FormSchema 
 	return schema
 }
 
+// subformHasInteractive reports whether node contains at least one field or
+// exclGroup anywhere in its subtree (direct or nested).
+func subformHasInteractive(node *xfaNode) bool {
+	for _, c := range node.Children {
+		if c.Kind == xfaKindField || c.Kind == xfaKindExclGroup {
+			return true
+		}
+		if c.Kind == xfaKindSubform && subformHasInteractive(c) {
+			return true
+		}
+	}
+	return false
+}
+
 // claimDrawLabels performs a depth-first pre-pass over the tree. For each
 // unlabeled exclGroup or data-bound field, it scans backwards through its
 // sibling list for the nearest eligible draw and claims its text as the
@@ -1420,8 +1434,11 @@ func claimDrawLabels(node *xfaNode) {
 			shouldClaim = needsLabel
 		case xfaKindField:
 			shouldClaim = child.Bind != "none" && needsLabel
+		case xfaKindSubform:
+			shouldClaim = needsLabel
 		}
 		if shouldClaim {
+			// Scan preceding siblings for a draw label.
 			for j := i - 1; j >= 0; j-- {
 				prev := node.Children[j]
 				// Stop at any structural or interactive boundary.
@@ -1447,9 +1464,33 @@ func claimDrawLabels(node *xfaNode) {
 				}
 			}
 		}
-		// Recurse into subforms.
+		// Recurse into subforms BEFORE checking first-child draws so that fields
+		// within the subform can claim their sibling draws first.
 		if child.Kind == xfaKindSubform {
 			claimDrawLabels(child)
+		}
+		// For a subform still without a label after recursion: scan its leading draw
+		// children (before any interactive content) as a fallback. This covers
+		// group containers (e.g. *CheckboxGroup*) whose instruction/label draw is
+		// the first child rather than a preceding sibling. Because we recurse first,
+		// interactive-field draws are already consumed and won't be stolen.
+		//
+		// Only claim from a child draw when the subform has interactive descendants;
+		// purely-static subforms have no label need — their draws become section Content.
+		if shouldClaim && child.Kind == xfaKindSubform && child.Caption == "" && subformHasInteractive(child) {
+			for _, gc := range child.Children {
+				if gc.Kind == xfaKindField || gc.Kind == xfaKindExclGroup || gc.Kind == xfaKindSubform {
+					break // stop at interactive content
+				}
+				if gc.Kind != xfaKindDraw || gc.UIType == "imageEdit" || len(gc.Events) > 0 || gc.Caption == "\x00consumed" {
+					continue
+				}
+				if label := resolveDrawText(gc); label != "" {
+					child.Caption = label
+					gc.Caption = "\x00consumed"
+					break
+				}
+			}
 		}
 	}
 }
@@ -1527,17 +1568,6 @@ func buildSection(node *xfaNode, parentPath []string, schema *types.FormSchema, 
 		sec.Questions = make([]string, 0, endLen-startLen)
 		for _, q := range schema.Questions[startLen:endLen] {
 			sec.Questions = append(sec.Questions, q.ID)
-		}
-	}
-	// CheckboxGroup subforms have no caption of their own; use the first display-type
-	// child question's text as the section label so the sidebar shows meaningful text
-	// instead of the formatted internal name (e.g. "AD Checkbox Group").
-	if sec.Label == "" && strings.Contains(node.Name, "CheckboxGroup") {
-		for _, q := range schema.Questions[startLen:] {
-			if q.Type == "display" && strings.TrimSpace(q.Label) != "" {
-				sec.Label = strings.TrimSpace(q.Label)
-				break
-			}
 		}
 	}
 	// Collect static display text from non-interactive sections (headers, instructions, etc.)
