@@ -22,6 +22,15 @@ var xfaFuncDeclRe = regexp.MustCompile(`function\s+(\w+)\s*\([^)]*\)\s*\{`)
 // xfaRawValueCondRe extracts a field name from "FieldName.rawValue ==" patterns.
 var xfaRawValueCondRe = regexp.MustCompile(`\b([A-Za-z_]\w*)\.rawValue\s*==`)
 
+// htmlTagRe matches HTML tags for stripping caption exData HTML to plain text.
+var htmlTagRe = regexp.MustCompile(`<[^>]+>`)
+
+// stripHTMLTags removes all HTML tags and normalises whitespace to a single space.
+func stripHTMLTags(s string) string {
+	plain := htmlTagRe.ReplaceAllString(s, " ")
+	return strings.Join(strings.Fields(plain), " ")
+}
+
 // ParseXFAForm parses raw XFA XML and converts it to a strongly-typed FormSchema.
 func ParseXFAForm(xfaXML string, verbose bool) (*types.FormSchema, error) {
 	return ParseXFAFormWithResources(xfaXML, nil, verbose)
@@ -664,6 +673,7 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 	var inAssist          bool
 	var inSpeak           bool
 	var inExData          bool
+	var inCaptionExData   bool // exData nested inside a <caption> — routes to currentCaption
 	var inScript          bool
 	var inVariables       bool   // inside a <variables> element
 	var inVariablesScript bool   // inside a <variables><script> element
@@ -1107,6 +1117,7 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 					exDataContentType = ""
 					exDataHTMLBuf.Reset()
 					exDataHasEmbed = false
+					inCaptionExData = inCaption || inExclGroupCaption || inSubformCaption
 					for _, attr := range se.Attr {
 						if attr.Name.Local == "contentType" {
 							exDataContentType = attr.Value
@@ -1310,10 +1321,17 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 				if currentLeaf != nil && exDataContentType == "text/html" && !exDataHasEmbed {
 					text := strings.TrimSpace(exDataHTMLBuf.String())
 					if text != "" {
-						currentLeaf.ExDataHTML = text
+						if inCaptionExData {
+							// Caption exData: route stripped plain text into currentCaption so
+							// resolveInteractiveLabel can pick it up as Caption.
+							currentCaption.WriteString(stripHTMLTags(text))
+						} else {
+							currentLeaf.ExDataHTML = text
+						}
 					}
 				}
 				inExData = false
+				inCaptionExData = false
 				exDataContentType = ""
 				exDataHasEmbed = false
 				exDataHTMLBuf.Reset()

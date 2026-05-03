@@ -2143,3 +2143,50 @@ func TestSectionContentNoiseFiltered(t *testing.T) {
 		}
 	}
 }
+
+// TestHTMLCaptionExtraction verifies that a field whose <caption> contains
+// <exData contentType="text/html"> gets the stripped plain text as its label,
+// not the field name (which is what happens when Caption remains empty).
+func TestHTMLCaptionExtraction(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Section1">
+    <field name="BCDropDownList105">
+      <ui><choiceList><listOpen>true</listOpen></choiceList></ui>
+      <caption>
+        <value>
+          <exData contentType="text/html">
+            <body xmlns="http://www.w3.org/1999/xhtml">
+              <p>How many tissue contacting products/components/materials are there?</p>
+            </body>
+          </exData>
+        </value>
+      </caption>
+      <items>
+        <text>1</text>
+        <text>2</text>
+      </items>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	byName := make(map[string]types.Question)
+	for _, q := range form.Questions {
+		byName[q.Name] = q
+	}
+
+	q, ok := byName["BCDropDownList105"]
+	if !ok {
+		t.Fatal("BCDropDownList105 not found in questions")
+	}
+	wantLabel := "How many tissue contacting products/components/materials are there?"
+	if q.Label != wantLabel {
+		t.Errorf("label = %q, want %q", q.Label, wantLabel)
+	}
+	if strings.Contains(q.Label, "<") || strings.Contains(q.Label, ">") {
+		t.Errorf("label must not contain HTML tags: %q", q.Label)
+	}
+}
