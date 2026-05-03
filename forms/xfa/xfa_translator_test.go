@@ -2020,3 +2020,126 @@ func TestVariablesBlockRulesExtracted(t *testing.T) {
 		t.Errorf("rule 1 actions don't include show SectionB: %+v", r1.Actions)
 	}
 }
+
+// TestAddAttachmentSectionInteractive verifies that a subform containing only
+// AddAttachment button fields (bind="none") is treated as interactive. These
+// buttons are emitted as file questions and must cause their containing section
+// to appear in the navigation — they are not data-bound but they are user-facing.
+func TestAddAttachmentSectionInteractive(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="CoverLetter">
+    <subform name="AttachmentSlot">
+      <field name="CLAddAttachment110">
+        <ui><button/></ui>
+        <caption><value><text>Add Attachment</text></value></caption>
+        <bind match="none"/>
+      </field>
+    </subform>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+
+	// CLAddAttachment110 must be emitted as a file question.
+	var fileQ *types.Question
+	for i := range form.Questions {
+		if form.Questions[i].Name == "CLAddAttachment110" {
+			fileQ = &form.Questions[i]
+		}
+	}
+	if fileQ == nil {
+		t.Fatal("CLAddAttachment110 not found in Questions")
+	}
+	if fileQ.Type != types.ResponseTypeFile {
+		t.Errorf("CLAddAttachment110 type = %q, want %q", fileQ.Type, types.ResponseTypeFile)
+	}
+
+	// CoverLetter section must be marked interactive so it appears in nav.
+	var coverLetterSec *types.FormSection
+	for i := range form.Sections {
+		if form.Sections[i].Name == "CoverLetter" {
+			coverLetterSec = &form.Sections[i]
+		}
+	}
+	if coverLetterSec == nil {
+		t.Fatal("CoverLetter section not found")
+	}
+	if !coverLetterSec.Interactive {
+		t.Error("CoverLetter.Interactive = false, want true (contains AddAttachment file question)")
+	}
+}
+
+// TestSectionContentNoiseFiltered verifies that graphical status indicator draws
+// (imageEdit elements with accessibility captions like "Required Question Incomplete")
+// are excluded from FormSection.Content, and that draws whose only text is in their
+// Caption — not in their Value — are likewise excluded. Only draws with actual visible
+// text (from <value><text>) are collected.
+func TestSectionContentNoiseFiltered(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Header">
+    <draw name="statusBar">
+      <ui><imageEdit/></ui>
+      <caption><value><text>Required Question Incomplete</text></value></caption>
+    </draw>
+    <draw name="statusDot">
+      <ui><imageEdit/></ui>
+      <caption><value><text>Optional Question</text></value></caption>
+    </draw>
+    <draw name="captionOnlyDraw">
+      <caption><value><text>Top Border</text></value></caption>
+    </draw>
+    <draw name="instruction">
+      <value><text>Please complete all required fields before submitting.</text></value>
+    </draw>
+    <draw name="reference">
+      <value><text>IMDRF TOC CH1.04</text></value>
+    </draw>
+  </subform>
+  <subform name="Body">
+    <field name="deviceName">
+      <ui><textEdit/></ui>
+      <toolTip>Device name</toolTip>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+
+	var headerSec *types.FormSection
+	for i := range form.Sections {
+		if form.Sections[i].Name == "Header" {
+			headerSec = &form.Sections[i]
+		}
+	}
+	if headerSec == nil {
+		t.Fatal("Header section not found")
+	}
+
+	for _, c := range headerSec.Content {
+		switch c {
+		case "Required Question Incomplete", "Optional Question", "Top Border":
+			t.Errorf("noise string %q must not appear in Content", c)
+		}
+	}
+
+	want := map[string]bool{
+		"Please complete all required fields before submitting.": false,
+		"IMDRF TOC CH1.04": false,
+	}
+	for _, c := range headerSec.Content {
+		if _, ok := want[c]; ok {
+			want[c] = true
+		}
+	}
+	for text, found := range want {
+		if !found {
+			t.Errorf("expected %q in Content, not found; Content = %v", text, headerSec.Content)
+		}
+	}
+}

@@ -593,11 +593,20 @@ func resolveDrawText(n *xfaNode) string {
 	return firstNonEmpty(n.Caption, n.ToolTip, n.ExDataHTML, n.Default, n.Value, n.SpeakLabel)
 }
 
-// isInteractiveSubtree reports whether node or any descendant is a data-bound field.
+// isInteractiveSubtree reports whether node or any descendant produces a user-facing
+// interactive element. This covers:
+//   - Data-bound fields (bind != "none")
+//   - exclGroups (always interactive)
+//   - AddAttachment buttons (bind="none", UIType="button") — these are emitted as
+//     file questions by emitField and must be counted as interactive so that
+//     sections containing only file attachment inputs appear in the navigation.
 func isInteractiveSubtree(n *xfaNode) bool {
 	switch n.Kind {
 	case xfaKindField:
-		return n.Bind != "none"
+		if n.Bind != "none" {
+			return true
+		}
+		return n.UIType == "button" && strings.Contains(n.Name, "AddAttachment")
 	case xfaKindExclGroup:
 		return true
 	}
@@ -1578,7 +1587,19 @@ func buildSection(node *xfaNode, parentPath []string, schema *types.FormSchema, 
 }
 
 // collectSectionContent returns static display text from a non-interactive subform.
-// It walks draw children (and non-interactive sub-subforms) and extracts their text content.
+// It walks draw children (and non-interactive sub-subforms) and extracts visible text.
+//
+// Filtering rules mirror emitDraw's suppression logic:
+//   - Consumed draws (claimed as labels) and line-separator draws are skipped.
+//   - imageEdit draws without image data are graphical status indicators (colored
+//     bars/dots used for completion tracking in Adobe LiveCycle forms). Their
+//     Caption is an accessibility label, not visible text — skip them.
+//   - Event-bearing draws are script-managed — skip them.
+//
+// Text source: only n.Value / n.ExDataHTML / n.Default — the actual rendered text
+// of the draw element. n.Caption is an XFA accessibility label set on graphical
+// elements and must NOT be used here; it produces noise like "Required Question
+// Incomplete" or "Part of a meter display" from status indicator widgets.
 func collectSectionContent(node *xfaNode) []string {
 	var result []string
 	for _, child := range node.Children {
@@ -1587,7 +1608,13 @@ func collectSectionContent(node *xfaNode) []string {
 			if child.Caption == "\x00consumed" || child.IsLine {
 				continue
 			}
-			text := resolveDrawText(child)
+			if child.UIType == "imageEdit" && child.ImageData == "" && child.ImageHRef == "" {
+				continue // graphical status block — accessibility caption is not content
+			}
+			if len(child.Events) > 0 {
+				continue // script-managed draw
+			}
+			text := firstNonEmpty(child.ExDataHTML, child.Default, child.Value)
 			if text != "" {
 				result = append(result, text)
 			}
