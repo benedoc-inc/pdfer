@@ -118,16 +118,25 @@ func TestESTAR_PreSTAR_Fill(t *testing.T) {
 func assertSchemaQuality(t *testing.T, schema *pdftypes.FormSchema, tag string) {
 	t.Helper()
 
-	// 1. Meaningful labels: at least 10% of questions should have labels.
+	// 1. Meaningful labels: all questions should have non-empty labels, and
+	// ≤2% may fall back to their machine name (label == id).
 	labelledCount := 0
+	machineNameCount := 0
 	for _, q := range schema.Questions {
 		if q.Label != "" {
 			labelledCount++
 		}
+		if q.Label == q.ID {
+			machineNameCount++
+		}
 	}
 	labelRate := float64(labelledCount) / float64(len(schema.Questions))
+	machineNameRate := float64(machineNameCount) / float64(len(schema.Questions))
 	if labelRate < 0.10 {
 		t.Errorf("%s: only %.1f%% of questions have labels (expected ≥10%%)", tag, labelRate*100)
+	}
+	if machineNameRate > 0.02 {
+		t.Errorf("%s: %.1f%% of questions use machine-name fallback labels (expected ≤2%%)", tag, machineNameRate*100)
 	}
 	t.Logf("%s: %.1f%% of questions have labels (%d/%d)", tag, labelRate*100, labelledCount, len(schema.Questions))
 

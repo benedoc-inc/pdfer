@@ -1523,16 +1523,18 @@ func claimDrawLabels(node *xfaNode) {
 				if prev.Caption == "\x00consumed" {
 					continue
 				}
-				// A draw with an explicit height (h or minH) reserves vertical layout
-				// space — it is a positioned content block, not an inline label. Label
-				// draws in flow layout auto-size to their text and carry no explicit
-				// height attributes. HTML-formatted draws (HasExData) are styled
-				// paragraph blocks.
-				if prev.H != "" || prev.MinH != "" || prev.HasExData {
+				// Skip variable-height content blocks.
+				if prev.MinH != "" {
 					continue
 				}
 				label := resolveDrawText(prev)
 				if label == "" {
+					continue
+				}
+				// Content blocks (HTML or positioned) with substantial text are not labels.
+				// Short draws — even those with explicit h or exData — are row-aligned
+				// question titles and are valid label candidates.
+				if len(label) > 150 && (prev.HasExData || prev.H != "") {
 					continue
 				}
 				child.Caption = label
@@ -1565,13 +1567,15 @@ func claimDrawLabels(node *xfaNode) {
 				if gc.Kind != xfaKindDraw || gc.UIType == "imageEdit" || len(gc.Events) > 0 || gc.Caption == "\x00consumed" {
 					continue
 				}
-				// Same structural check: skip draws with explicit height or minHeight
-				// (content blocks) or HTML-formatted paragraph content.
-				if gc.H != "" || gc.MinH != "" || gc.HasExData {
+				// Same checks as the sibling-scan path above.
+				if gc.MinH != "" {
 					continue
 				}
 				label := resolveDrawText(gc)
 				if label == "" {
+					continue
+				}
+				if len(label) > 150 && (gc.HasExData || gc.H != "") {
 					continue
 				}
 				child.Caption = label
