@@ -139,6 +139,31 @@ func TestPDFWriter_XRefTable(t *testing.T) {
 	t.Logf("xref section starts at offset %d", xrefIdx)
 }
 
+func TestEscapePDFString_WinAnsiEncoding(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"Hello", "Hello"},
+		{"(test)", "\\(test\\)"},
+		{"a\\b", "a\\\\b"},
+		// Bullet • (U+2022) must become WinAnsi byte 0x95
+		{"•", "\x95"},
+		// Em dash — (U+2014) must become WinAnsi byte 0x97
+		{"—", "\x97"},
+		// Latin-1: ñ (U+00F1) maps directly to byte 0xF1
+		{"ñ", "\xF1"},
+		// Characters outside WinAnsiEncoding are dropped
+		{"a\U0001F600b", "ab"},
+	}
+	for _, tt := range tests {
+		got := escapePDFString(tt.input)
+		if got != tt.want {
+			t.Errorf("escapePDFString(%q) = %q (%x), want %q (%x)", tt.input, got, []byte(got), tt.want, []byte(tt.want))
+		}
+	}
+}
+
 func TestDictionary_Formatting(t *testing.T) {
 	w := NewPDFWriter()
 	

@@ -8,6 +8,16 @@ behaviour.
 
 ## P1 — High impact
 
+### ~~AES-128 (V=4/R=4) passwords rejected by all PDF readers~~ ✅ Fixed in v1.7.0
+`DeriveEncryptionKey` and `DeriveOwnerKey` were padding short passwords by
+cycling password bytes (e.g. "open" → "openopenopen…") instead of appending
+the standard 32-byte PDF padding string (ISO 32000-1 §7.6.3.3 step a).
+`ComputeOValue` (in `encrypt.go`) already used the correct `padPassword` helper,
+so the /O entry was valid but the derived encryption key did not match what any
+external PDF reader computes. Fixed by calling `padPassword` in both functions.
+
+**File**: `core/encrypt/key_derivation.go`
+
 ### ~~`DecryptPDF` returns encrypted bytes unchanged~~ ✅ Fixed in v0.9.27–v0.9.28
 `manipulate.DecryptPDF` / `pdfer.DecryptPDF` now produces a fully decrypted
 plaintext PDF. `encrypt.DecryptPDF` signature changed to `(*PDFEncryption,
@@ -139,6 +149,41 @@ by `Redact`. Call `RedactMetadata` separately for document-level metadata.
 ---
 
 ### P2 — Medium impact
+
+#### ~~Annotation appearance streams missing for most subtypes~~ ✅ Fixed in v1.7.0
+`AnnotationBuilder.build()` produced structurally valid annotation dicts but no
+`/AP` (appearance) entry.  Adobe Acrobat synthesises appearances from the
+annotation dictionary; Preview and Skim do not for: Squiggly, Polygon, PolyLine,
+Ink, Line, Square, Circle, and FreeText.  A new `buildAppearance()` method now
+generates a Form XObject for each of these subtypes and wires it in as
+`/AP<</N N 0 R>>`.
+
+**File**: `core/write/annotations_ap.go` (new), `core/write/annotations.go`
+
+#### AcroForm push button is invisible
+`AddButton` (via `acroform.FormBuilder`) creates the widget dict but emits no
+`/AP` entry.  The invisible push button has a cursor hit-area but no visual
+(confirmed: cursor changes shape but no rectangle is drawn).
+
+**Workaround**: none — callers cannot add the AP stream without touching library
+internals.
+
+**File**: `forms/acroform/writer.go` (`writeBtnKeys`)
+
+#### AcroForm password field shows plain text
+`SetPassword(true)` sets bit 13 of `/Ff` correctly but the appearance stream
+generated for the text field does not mask input characters.  PDF readers that
+synthesise appearance (Adobe) display bullets; readers that rely on `/AP` show
+the clear value.
+
+**File**: `forms/acroform/writer.go` (appearance stream generation for password fields)
+
+#### AcroForm underline-style field shows no underline
+`AddUnderlineTextField` sets `/BS<</W 1/S/U>>` (underline border style) but the
+generated appearance stream uses a full rectangular border, ignoring the `/S/U`
+instruction.  Only the bottom edge should be stroked.
+
+**File**: `forms/acroform/writer.go` (appearance stream generation for underline fields)
 
 #### JavaScript action removal API missing
 `core/parse` can detect JavaScript in a PDF (e.g. scanning `/S /JavaScript`

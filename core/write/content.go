@@ -328,7 +328,12 @@ func (cs *ContentStream) Raw(data string) *ContentStream {
 	return cs
 }
 
-// escapePDFString escapes special characters in a PDF string
+// escapePDFString escapes a Go string for use in a PDF literal string with a
+// standard Type1 font that uses WinAnsiEncoding.  ASCII characters (0–127) are
+// passed through; characters in the Latin-1 Supplement (U+00A0–U+00FF) map
+// directly to their WinAnsi byte value; the Windows-1252 "high" range
+// (U+0080–U+009F) is mapped to its WinAnsi equivalents.  Code points with no
+// WinAnsiEncoding representation are silently dropped.
 func escapePDFString(s string) string {
 	var result bytes.Buffer
 	for _, c := range s {
@@ -346,8 +351,80 @@ func escapePDFString(s string) string {
 		case '\t':
 			result.WriteString("\\t")
 		default:
-			result.WriteRune(c)
+			if c < 128 {
+				result.WriteByte(byte(c))
+			} else if b, ok := runeToWinAnsi(c); ok {
+				result.WriteByte(b)
+			}
+			// silently drop characters outside WinAnsiEncoding
 		}
 	}
 	return result.String()
+}
+
+// runeToWinAnsi converts a Unicode code point to its WinAnsiEncoding byte.
+// Returns (byte, true) on success, (0, false) if the code point has no mapping.
+func runeToWinAnsi(r rune) (byte, bool) {
+	// Latin-1 Supplement maps directly (WinAnsi bytes 0xA0–0xFF == Unicode U+00A0–U+00FF).
+	if r >= 0x00A0 && r <= 0x00FF {
+		return byte(r), true
+	}
+	// Windows-1252 specific mappings for the 0x80–0x9F range.
+	switch r {
+	case 0x20AC:
+		return 0x80, true // €
+	case 0x201A:
+		return 0x82, true // ‚
+	case 0x0192:
+		return 0x83, true // ƒ
+	case 0x201E:
+		return 0x84, true // „
+	case 0x2026:
+		return 0x85, true // …
+	case 0x2020:
+		return 0x86, true // †
+	case 0x2021:
+		return 0x87, true // ‡
+	case 0x02C6:
+		return 0x88, true // ˆ
+	case 0x2030:
+		return 0x89, true // ‰
+	case 0x0160:
+		return 0x8A, true // Š
+	case 0x2039:
+		return 0x8B, true // ‹
+	case 0x0152:
+		return 0x8C, true // Œ
+	case 0x017D:
+		return 0x8E, true // Ž
+	case 0x2018:
+		return 0x91, true // '
+	case 0x2019:
+		return 0x92, true // '
+	case 0x201C:
+		return 0x93, true // "
+	case 0x201D:
+		return 0x94, true // "
+	case 0x2022:
+		return 0x95, true // •
+	case 0x2013:
+		return 0x96, true // –
+	case 0x2014:
+		return 0x97, true // —
+	case 0x02DC:
+		return 0x98, true // ˜
+	case 0x2122:
+		return 0x99, true // ™
+	case 0x0161:
+		return 0x9A, true // š
+	case 0x203A:
+		return 0x9B, true // ›
+	case 0x0153:
+		return 0x9C, true // œ
+	case 0x017E:
+		return 0x9E, true // ž
+	case 0x0178:
+		return 0x9F, true // Ÿ
+	}
+	return 0, false
 }

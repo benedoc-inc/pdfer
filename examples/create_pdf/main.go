@@ -27,13 +27,16 @@ func main() {
 	fontDict := []byte("<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>")
 	fontNum := w.AddObject(fontDict)
 
+	// pagesNum will be the object added right after pageNum.
+	pagesNum := w.NextObjectNumber() + 1
+
 	// Create page
-	pageDict := fmt.Sprintf("<</Type/Page/Parent 3 0 R/MediaBox[0 0 612 792]/Contents %d 0 R/Resources<</Font<</F1 %d 0 R>>>>>>", contentNum, fontNum)
+	pageDict := fmt.Sprintf("<</Type/Page/Parent %d 0 R/MediaBox[0 0 612 792]/Contents %d 0 R/Resources<</Font<</F1 %d 0 R>>>>>>", pagesNum, contentNum, fontNum)
 	pageNum := w.AddObject([]byte(pageDict))
 
 	// Create pages collection
 	pagesDict := fmt.Sprintf("<</Type/Pages/Kids[%d 0 R]/Count 1>>", pageNum)
-	pagesNum := w.AddObject([]byte(pagesDict))
+	_ = w.AddObject([]byte(pagesDict)) // assigned to pagesNum above
 
 	// Create catalog (root)
 	catalogDict := fmt.Sprintf("<</Type/Catalog/Pages %d 0 R>>", pagesNum)

@@ -23,30 +23,10 @@ func DeriveEncryptionKey(password []byte, encrypt *types.PDFEncryption, fileID [
 	if encrypt.R >= 5 {
 		return DeriveEncryptionKeyV5(password, encrypt, fileID, verbose)
 	}
-	// Pad or truncate password to 32 bytes
-	// According to PDF spec Algorithm 2:
-	// - If password is shorter than 32 bytes, pad by appending bytes from the password cyclically
-	// - For empty password, the padding string itself is used
-	paddingString := []byte{
-		0x28, 0xBF, 0x4E, 0x5E, 0x4E, 0x75, 0x8A, 0x41,
-		0x64, 0x00, 0x4E, 0x56, 0xFF, 0xFA, 0x01, 0x08,
-		0x2E, 0x2E, 0x00, 0xB6, 0xD0, 0x68, 0x3E, 0x80,
-		0x2F, 0x0C, 0xA9, 0xFE, 0x64, 0x53, 0x69, 0x7A,
-	}
-
-	paddedPassword := make([]byte, 32)
-	if len(password) == 0 {
-		// Empty password: use padding string directly
-		copy(paddedPassword, paddingString)
-	} else {
-		copy(paddedPassword, password)
-		if len(password) < 32 {
-			// Pad with password bytes cyclically
-			for i := len(password); i < 32; i++ {
-				paddedPassword[i] = password[i%len(password)]
-			}
-		}
-	}
+	// Pad or truncate password to 32 bytes per PDF spec Algorithm 2:
+	// take up to 32 bytes of the password, then fill the rest with the
+	// standard PDF padding string (ISO 32000-1 §7.6.3.3 step a).
+	paddedPassword := padPassword(password)
 
 	// Step 1: Compute hash of padded password + O + P (as 32-bit int, little-endian) + ID[0]
 	hash := md5.New()
@@ -201,26 +181,8 @@ func DeriveOwnerKey(ownerPassword []byte, encrypt *types.PDFEncryption, fileID [
 	if encrypt.R >= 5 {
 		return DeriveOwnerKeyV5(ownerPassword, encrypt, fileID, verbose)
 	}
-	// Pad owner password to 32 bytes
-	paddingString := []byte{
-		0x28, 0xBF, 0x4E, 0x5E, 0x4E, 0x75, 0x8A, 0x41,
-		0x64, 0x00, 0x4E, 0x56, 0xFF, 0xFA, 0x01, 0x08,
-		0x2E, 0x2E, 0x00, 0xB6, 0xD0, 0x68, 0x3E, 0x80,
-		0x2F, 0x0C, 0xA9, 0xFE, 0x64, 0x53, 0x69, 0x7A,
-	}
-
-	paddedOwnerPassword := make([]byte, 32)
-	if len(ownerPassword) > 0 {
-		copy(paddedOwnerPassword, ownerPassword)
-		if len(ownerPassword) < 32 {
-			for i := len(ownerPassword); i < 32; i++ {
-				paddedOwnerPassword[i] = ownerPassword[i%len(ownerPassword)]
-			}
-		}
-	} else {
-		// Empty password - use padding string
-		copy(paddedOwnerPassword, paddingString)
-	}
+	// Pad owner password to 32 bytes per Algorithm 3 step a.
+	paddedOwnerPassword := padPassword(ownerPassword)
 
 	// MD5 hash of padded owner password
 	hash := md5.New()
