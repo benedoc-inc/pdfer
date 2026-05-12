@@ -625,13 +625,13 @@ func buildPage4(p *write.PageBuilder) {
 	hdr.AddCell("Notes").WithAlign(write.TextAlignCenter)
 
 	data := [][]string{
-		{"pdfer core", "✓ Stable", "v1.4.0", "Pure Go, zero deps"},
-		{"AcroForm", "✓ Stable", "v1.4.0", "Parse, fill, flatten"},
+		{"pdfer core", "✓ Stable", "v1.9.0", "Pure Go, zero deps"},
+		{"AcroForm", "✓ Stable", "v1.9.0", "Parse, fill, flatten; explicit AP streams"},
 		{"XFA forms", "✓ Stable", "v1.4.0", "Extract, fill, XML export"},
 		{"Signatures", "✓ Stable", "v1.3.0", "PKCS#7, TSA, LTV"},
 		{"Content extraction", "✓ Stable", "v1.2.0", "Text, images, tables"},
-		{"File attachments", "✓ New", "v1.4.0", "EmbedAttachments API"},
-		{"Table writing", "✓ New", "v1.4.0", "This page!"},
+		{"File attachments", "✓ Stable", "v1.4.0", "EmbedAttachments API"},
+		{"Table writing", "✓ Stable", "v1.4.0", "DrawTable helper"},
 	}
 	for i, row := range data {
 		r := tbl.AddRow(false)

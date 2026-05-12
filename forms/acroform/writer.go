@@ -308,8 +308,12 @@ func (fb *FieldBuilder) passwordFieldAppearance(field *FieldDef) int {
 	s.WriteString("Q\n")
 
 	// If the field has a pre-filled value, render masked bullets.
-	if field.Value != nil {
-		valueStr := fmt.Sprint(field.Value)
+	displayVal := field.Value
+	if displayVal == nil {
+		displayVal = field.DefaultValue
+	}
+	if displayVal != nil {
+		valueStr := fmt.Sprint(displayVal)
 		n := len([]rune(valueStr))
 		if n > 0 {
 			// Vertical centering: Helvetica cap-height ≈ 0.72 × fontSize.
@@ -451,9 +455,13 @@ func (fb *FieldBuilder) textFieldAppearance(field *FieldDef) int {
 	}
 	s.WriteString("Q\n")
 
-	// Text value.
-	if field.Value != nil {
-		valueStr := fmt.Sprint(field.Value)
+	// Text value: prefer /V (current value) over /DV (default) for initial display.
+	displayVal := field.Value
+	if displayVal == nil {
+		displayVal = field.DefaultValue
+	}
+	if displayVal != nil {
+		valueStr := fmt.Sprint(displayVal)
 		if valueStr != "" {
 			isMultiline := field.Flags&(1<<12) != 0
 
