@@ -371,6 +371,51 @@ func TestAnnotation_Caret(t *testing.T) {
 	}
 }
 
+// TestAnnotation_AppearanceStreams verifies that subtypes which were previously
+// invisible in Preview/Skim now carry /AP entries in the generated PDF bytes.
+func TestAnnotation_AppearanceStreams(t *testing.T) {
+	verts := []float64{100, 100, 200, 200, 150, 300}
+	strokes := [][]float64{{100, 100, 150, 150, 200, 100}}
+	qp := write.RectToQuadPoints(72, 710, 300, 722)
+
+	cases := []struct {
+		name   string
+		annot  *write.AnnotationBuilder
+		hasAP  bool
+	}{
+		{"Square", write.NewSquareAnnotation(72, 600, 300, 700).WithColor(1, 0, 0).WithBorderWidth(2), true},
+		{"Circle", write.NewCircleAnnotation(72, 500, 200, 580).WithColor(0, 0, 1), true},
+		{"Line", write.NewLineAnnotation(72, 700, 300, 720).WithBorderWidth(2), true},
+		{"Polygon", write.NewPolygonAnnotation(100, 100, 200, 300, verts).WithBorderWidth(1.5), true},
+		{"PolyLine", write.NewPolylineAnnotation(72, 700, 300, 720, verts).WithBorderWidth(1), true},
+		{"Ink", write.NewInkAnnotation(100, 100, 250, 200, strokes).WithBorderWidth(1.5), true},
+		{"Squiggly", write.NewSquigglyAnnotation(72, 710, 300, 722, qp).WithColor(1, 0.5, 0), true},
+		{"FreeText", write.NewFreeTextAnnotation(72, 400, 300, 450, "hi", "/Helvetica 9 Tf 0 g").WithColor(1, 1, 0.8).WithBorderWidth(1), true},
+		{"Link", write.NewLinkAnnotation(72, 700, 300, 720, "https://example.com"), false},
+		{"Text", write.NewTextAnnotation(72, 680, 200, 700, "note"), false},
+		{"Stamp", write.NewStampAnnotation(72, 650, 250, 700, "Draft"), false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pdf := buildAnnotationPDF(t, tc.annot)
+			raw := string(pdf)
+			hasAP := strings.Contains(raw, "/AP")
+			if hasAP != tc.hasAP {
+				t.Errorf("hasAP=%v, want %v", hasAP, tc.hasAP)
+			}
+			// Structural sanity: must still parse.
+			doc, err := extract.ExtractContent(pdf, nil, false)
+			if err != nil {
+				t.Fatalf("extract failed: %v", err)
+			}
+			if len(doc.Pages[0].Annotations) != 1 {
+				t.Fatalf("expected 1 annotation, got %d", len(doc.Pages[0].Annotations))
+			}
+		})
+	}
+}
+
 func TestAnnotation_RectToQuadPoints(t *testing.T) {
 	qp := write.RectToQuadPoints(10, 20, 100, 50)
 	// Expect: upper-left, upper-right, lower-left, lower-right

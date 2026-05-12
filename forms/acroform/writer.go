@@ -272,7 +272,12 @@ func (fb *FieldBuilder) writeTxKeys(b *strings.Builder, field *FieldDef) {
 func (fb *FieldBuilder) writeBtnKeys(b *strings.Builder, field *FieldDef) {
 	isPushButton := field.Flags&(1<<16) != 0
 	if isPushButton {
-		// Push buttons don't have a value; they trigger actions.
+		w := field.Rect[2] - field.Rect[0]
+		h := field.Rect[3] - field.Rect[1]
+		apNum := fb.pushButtonAppearance(w, h)
+		fmt.Fprintf(b, "/AP<</N %d 0 R>>", apNum)
+		// /MK /CA supplies the button label that viewers render on top.
+		fmt.Fprintf(b, "/MK<</CA(%s)/TP 0>>", escapeFieldStr(field.Name))
 		return
 	}
 
@@ -332,6 +337,37 @@ func (fb *FieldBuilder) writeChKeys(b *strings.Builder, field *FieldDef) {
 	if field.DefaultValue != nil {
 		fmt.Fprintf(b, "/DV(%s)", escapeFieldStr(fmt.Sprint(field.DefaultValue)))
 	}
+}
+
+// pushButtonAppearance draws a raised-style push button background.
+// The button caption is set via /MK /CA and rendered by the viewer.
+func (fb *FieldBuilder) pushButtonAppearance(w, h float64) int {
+	var s strings.Builder
+	// Light gray fill
+	s.WriteString("q\n0.7529 0.7529 0.7529 rg\n")
+	fmt.Fprintf(&s, "0 0 %.4f %.4f re\nf\n", w, h)
+	// Raised bevel: bright top/left edges, dark bottom/right edges
+	bw := 1.5
+	// Highlight (top-left)
+	s.WriteString("1 1 1 RG\n")
+	fmt.Fprintf(&s, "%.4f w\n", bw)
+	fmt.Fprintf(&s, "%.4f %.4f m %.4f %.4f l %.4f %.4f l S\n",
+		0.0, 0.0, 0.0, h, w, h)
+	// Shadow (bottom-right)
+	s.WriteString("0.5 0.5 0.5 RG\n")
+	fmt.Fprintf(&s, "%.4f w\n", bw)
+	fmt.Fprintf(&s, "%.4f %.4f m %.4f %.4f l %.4f %.4f l S\n",
+		w, h, w, 0.0, 0.0, 0.0)
+	// Dark outer border
+	s.WriteString("0 0 0 RG\n0.5 w\n")
+	fmt.Fprintf(&s, "0.25 0.25 %.4f %.4f re\nS\nQ\n", w-0.5, h-0.5)
+
+	dict := write.Dictionary{
+		"/Type":    "/XObject",
+		"/Subtype": "/Form",
+		"/BBox":    []interface{}{0.0, 0.0, w, h},
+	}
+	return fb.writer.AddStreamObject(dict, []byte(s.String()), false)
 }
 
 // boxAppearance draws a plain bordered box (unchecked checkbox state).

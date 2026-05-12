@@ -1,6 +1,7 @@
 package acroform
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/benedoc-inc/pdfer/core/write"
@@ -38,6 +39,41 @@ func TestFieldBuilder(t *testing.T) {
 	}
 
 	t.Logf("Created AcroForm object %d with %d fields", acroFormNum, len(fb.fields))
+}
+
+func TestPushButton_HasAppearanceStream(t *testing.T) {
+	w := write.NewPDFWriter()
+	fb := NewFieldBuilder(w)
+	fb.AddButton("btn_submit", []float64{72, 100, 200, 125}, 0)
+	if _, err := fb.Build(); err != nil {
+		t.Fatalf("Build failed: %v", err)
+	}
+
+	// Collect all objects from the writer via Bytes() and check for /AP.
+	pdfBytes, err := func() ([]byte, error) {
+		b := write.NewSimplePDFBuilder()
+		page := b.AddPage(write.PageSizeLetter)
+		fb2 := NewFieldBuilder(b.Writer())
+		fb2.AddButton("submit", []float64{72, 100, 200, 125}, 0)
+		b.FinalizePage(page)
+		acroNum, err := fb2.Build()
+		if err != nil {
+			return nil, err
+		}
+		b.RegisterAcroForm(acroNum)
+		return b.Bytes()
+	}()
+	if err != nil {
+		t.Fatalf("Bytes() failed: %v", err)
+	}
+
+	raw := string(pdfBytes)
+	if !strings.Contains(raw, "/AP") {
+		t.Error("push button should have /AP entry")
+	}
+	if !strings.Contains(raw, "/MK") {
+		t.Error("push button should have /MK entry for caption")
+	}
 }
 
 func TestFieldDef(t *testing.T) {

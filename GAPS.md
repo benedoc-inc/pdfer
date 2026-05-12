@@ -160,15 +160,12 @@ generates a Form XObject for each of these subtypes and wires it in as
 
 **File**: `core/write/annotations_ap.go` (new), `core/write/annotations.go`
 
-#### AcroForm push button is invisible
-`AddButton` (via `acroform.FormBuilder`) creates the widget dict but emits no
-`/AP` entry.  The invisible push button has a cursor hit-area but no visual
-(confirmed: cursor changes shape but no rectangle is drawn).
+#### ~~AcroForm push button is invisible~~ ✅ Fixed in v1.7.0
+`writeBtnKeys` now generates a raised-bevel gray appearance stream
+(`pushButtonAppearance`) and adds `/MK<</CA(label)/TP 0>>` so viewers display
+the field name as the button caption.
 
-**Workaround**: none — callers cannot add the AP stream without touching library
-internals.
-
-**File**: `forms/acroform/writer.go` (`writeBtnKeys`)
+**File**: `forms/acroform/writer.go` (`writeBtnKeys`, `pushButtonAppearance`)
 
 #### AcroForm password field shows plain text
 `SetPassword(true)` sets bit 13 of `/Ff` correctly but the appearance stream

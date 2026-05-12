@@ -398,6 +398,12 @@ func (a *AnnotationBuilder) build(w *PDFWriter) int {
 		}
 	}
 
+	// Appearance stream — generated before closing the dict so we can embed the ref.
+	apObjNum := a.buildAppearance(w)
+	if apObjNum > 0 {
+		fmt.Fprintf(&b, "/AP<</N %d 0 R>>", apObjNum)
+	}
+
 	b.WriteString(">>")
 	return w.AddObject([]byte(b.String()))
 }
