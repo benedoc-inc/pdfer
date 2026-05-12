@@ -328,6 +328,11 @@ func (cs *ContentStream) Raw(data string) *ContentStream {
 	return cs
 }
 
+// EscapePDFString escapes s for use inside a PDF parenthesised string literal
+// with a WinAnsiEncoding Type1 font. Identical to escapePDFString but exported
+// so other packages (e.g. forms/acroform) can reuse it without duplication.
+func EscapePDFString(s string) string { return escapePDFString(s) }
+
 // escapePDFString escapes a Go string for use in a PDF literal string with a
 // standard Type1 font that uses WinAnsiEncoding.  ASCII characters (0–127) are
 // passed through; characters in the Latin-1 Supplement (U+00A0–U+00FF) map

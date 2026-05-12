@@ -76,6 +76,81 @@ func TestPushButton_HasAppearanceStream(t *testing.T) {
 	}
 }
 
+func TestTextField_HasExplicitAP(t *testing.T) {
+	tests := []struct {
+		name        string
+		rect        []float64
+		borderStyle string
+		value       string
+		multiline   bool
+		wantBorder  string // substring expected in raw PDF
+		noWant      string // substring that must NOT appear
+	}{
+		{
+			name:       "solid border with value",
+			rect:       []float64{72, 680, 300, 700},
+			value:      "Hello World",
+			wantBorder: "re\nS", // box stroke path
+		},
+		{
+			name:        "underline border - bottom line only",
+			rect:        []float64{72, 680, 300, 700},
+			borderStyle: "U",
+			value:       "Underline",
+			wantBorder:  "0 l\nS",    // horizontal line stroke
+			noWant:      "0.25 0.25", // must NOT have the box inset
+		},
+		{
+			// Tall field so multiple wrapped lines fit (height=120, font=12, lineHeight=14.4 → ~8 lines).
+			name:       "multiline wraps with AFM widths",
+			rect:       []float64{72, 580, 300, 700},
+			value:      "The quick brown fox jumps over the lazy dog",
+			multiline:  true,
+			wantBorder: "T*", // T* operator proves multiple lines were rendered
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pdfBytes, err := func() ([]byte, error) {
+				b := write.NewSimplePDFBuilder()
+				page := b.AddPage(write.PageSizeLetter)
+				fb := NewFieldBuilder(b.Writer())
+				f := fb.AddTextField("f", tc.rect, 0)
+				if tc.borderStyle != "" {
+					f.SetBorderStyle(tc.borderStyle)
+				}
+				if tc.value != "" {
+					f.SetValue(tc.value)
+				}
+				if tc.multiline {
+					f.SetMultiline(true)
+				}
+				b.FinalizePage(page)
+				acroNum, err := fb.Build()
+				if err != nil {
+					return nil, err
+				}
+				b.RegisterAcroForm(acroNum)
+				return b.Bytes()
+			}()
+			if err != nil {
+				t.Fatalf("Bytes() failed: %v", err)
+			}
+			raw := string(pdfBytes)
+			if !strings.Contains(raw, "/AP") {
+				t.Error("text field should have /AP entry")
+			}
+			if tc.wantBorder != "" && !strings.Contains(raw, tc.wantBorder) {
+				t.Errorf("expected %q in raw PDF", tc.wantBorder)
+			}
+			if tc.noWant != "" && strings.Contains(raw, tc.noWant) {
+				t.Errorf("unexpected %q found in raw PDF", tc.noWant)
+			}
+		})
+	}
+}
+
 func TestPasswordField_HasMaskedAP(t *testing.T) {
 	pdfBytes, err := func() ([]byte, error) {
 		b := write.NewSimplePDFBuilder()

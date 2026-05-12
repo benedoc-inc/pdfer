@@ -268,13 +268,16 @@ func (fb *FieldBuilder) writeTxKeys(b *strings.Builder, field *FieldDef) {
 	}
 	fmt.Fprintf(b, "/BS<</W 1/S/%s>>", bs)
 
-	// Password fields need an explicit AP stream so non-Adobe viewers (Preview, Skim)
-	// show masked bullets instead of plain text. Adobe derives the masked appearance
-	// from the /Ff bit automatically, but other viewers require it to be explicit.
+	// Always emit an explicit /AP so non-Adobe viewers (Preview, Skim) render
+	// the correct background, border style, and value without needing to
+	// synthesise an appearance from /V + /DA + /BS themselves.
+	var apNum int
 	if field.Flags&(1<<13) != 0 {
-		apNum := fb.passwordFieldAppearance(field)
-		fmt.Fprintf(b, "/AP<</N %d 0 R>>", apNum)
+		apNum = fb.passwordFieldAppearance(field)
+	} else {
+		apNum = fb.textFieldAppearance(field)
 	}
+	fmt.Fprintf(b, "/AP<</N %d 0 R>>", apNum)
 }
 
 // passwordFieldAppearance builds a Form XObject that renders a password field:
@@ -405,6 +408,106 @@ func (fb *FieldBuilder) writeChKeys(b *strings.Builder, field *FieldDef) {
 	if field.DefaultValue != nil {
 		fmt.Fprintf(b, "/DV(%s)", escapeFieldStr(fmt.Sprint(field.DefaultValue)))
 	}
+}
+
+// textFieldAppearance builds a Form XObject for a regular (non-password) text field:
+// white background, correct border (solid box or underline-only), and the field
+// value rendered with Helvetica AFM glyph widths for accurate layout.
+//
+// Single-line: value rendered on one line, vertically centred, clipped at the
+// right edge by the field boundary.
+//
+// Multiline (bit 12 of /Ff): value is word-wrapped using helveticaWidths glyph
+// data; explicit '\n' characters force hard line breaks. Rendering stops when
+// the next line would fall below y=0 (the field bottom).
+func (fb *FieldBuilder) textFieldAppearance(field *FieldDef) int {
+	w := field.Rect[2] - field.Rect[0]
+	h := field.Rect[3] - field.Rect[1]
+
+	fontSize := field.FontSize
+	if fontSize == 0 {
+		fontSize = 12
+	}
+
+	const hMargin = 2.0 // horizontal text inset in points
+	const vMargin = 1.0 // vertical inset for multiline
+
+	var s strings.Builder
+
+	// White background.
+	s.WriteString("q\n1 g\n")
+	fmt.Fprintf(&s, "0 0 %.4f %.4f re\nf\nQ\n", w, h)
+
+	// Border.
+	s.WriteString("q\n0 G\n0.5 w\n")
+	bs := field.BorderStyle
+	if bs == "" {
+		bs = "S"
+	}
+	if bs == "U" {
+		fmt.Fprintf(&s, "0 0 m\n%.4f 0 l\nS\n", w)
+	} else {
+		fmt.Fprintf(&s, "0.25 0.25 %.4f %.4f re\nS\n", w-0.5, h-0.5)
+	}
+	s.WriteString("Q\n")
+
+	// Text value.
+	if field.Value != nil {
+		valueStr := fmt.Sprint(field.Value)
+		if valueStr != "" {
+			isMultiline := field.Flags&(1<<12) != 0
+
+			// Clip to field interior so text stays within the border.
+			s.WriteString("q\n")
+			fmt.Fprintf(&s, "%.4f 0 %.4f %.4f re\nW\nn\n", hMargin, w-2*hMargin, h)
+			s.WriteString("BT\n")
+			fmt.Fprintf(&s, "/Helv %.4g Tf\n", fontSize)
+			s.WriteString("0 g\n")
+
+			if isMultiline {
+				const lineScale = 1.2
+				textWidth := w - 2*hMargin
+				lines := wrapText(valueStr, textWidth, fontSize)
+				lineHeight := fontSize * lineScale
+				// Cap height ≈ 0.72 × fontSize; first baseline inset from top.
+				firstBaselineY := h - vMargin - 0.72*fontSize
+				// Limit to lines that fit above y=0.
+				maxLines := int(firstBaselineY/lineHeight) + 1
+				if len(lines) > maxLines {
+					lines = lines[:maxLines]
+				}
+				fmt.Fprintf(&s, "%.4f %.4f Td\n%.4f TL\n",
+					hMargin, firstBaselineY, lineHeight)
+				for i, line := range lines {
+					if i == 0 {
+						fmt.Fprintf(&s, "(%s) Tj\n", write.EscapePDFString(line))
+					} else {
+						fmt.Fprintf(&s, "T* (%s) Tj\n", write.EscapePDFString(line))
+					}
+				}
+			} else {
+				// Single-line: vertically centred.
+				capHeight := 0.72 * fontSize
+				baselineY := (h - capHeight) / 2
+				fmt.Fprintf(&s, "%.4f %.4f Td\n", hMargin, baselineY)
+				fmt.Fprintf(&s, "(%s) Tj\n", write.EscapePDFString(valueStr))
+			}
+
+			s.WriteString("ET\nQ\n")
+		}
+	}
+
+	dict := write.Dictionary{
+		"/Type":    "/XObject",
+		"/Subtype": "/Form",
+		"/BBox":    []interface{}{0.0, 0.0, w, h},
+		"/Resources": write.Dictionary{
+			"/Font": write.Dictionary{
+				"/Helv": fmt.Sprintf("%d 0 R", fb.fontNum),
+			},
+		},
+	}
+	return fb.writer.AddStreamObject(dict, []byte(s.String()), false)
 }
 
 // pushButtonAppearance draws a raised-style push button background.

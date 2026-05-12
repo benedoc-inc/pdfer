@@ -177,12 +177,20 @@ are embedded in the XObject's `/Resources` dict so the stream is self-contained.
 
 **File**: `forms/acroform/writer.go` (`writeTxKeys`, `passwordFieldAppearance`)
 
-#### AcroForm underline-style field shows no underline
-`AddUnderlineTextField` sets `/BS<</W 1/S/U>>` (underline border style) but the
-generated appearance stream uses a full rectangular border, ignoring the `/S/U`
-instruction.  Only the bottom edge should be stroked.
+#### ~~AcroForm underline-style field shows no underline~~ ✅ Fixed in v1.9.0
+`AddUnderlineTextField` sets `/BS<</W 1/S/U>>` correctly. All `Tx` fields now
+get an explicit `/AP` Form XObject from `textFieldAppearance`. The border branch
+checks `BorderStyle == "U"` and strokes only the bottom edge (`0 0 m w 0 l S`);
+any other style strokes the full inset box. For non-password fields with a value,
+`textFieldAppearance` also renders the value using Helvetica AFM glyph widths
+(`helvetica_widths.go`): single-line fields are vertically centred and
+right-edge-clipped; multiline fields are word-wrapped with `wrapText` (which
+also respects explicit `\n` hard breaks) and overflow-guarded. The rendering
+path uses `write.EscapePDFString` for correct WinAnsiEncoding of non-ASCII chars.
 
-**File**: `forms/acroform/writer.go` (appearance stream generation for underline fields)
+**File**: `forms/acroform/writer.go` (`textFieldAppearance`),
+`forms/acroform/helvetica_widths.go` (`wrapText`, `stringWidth`, `glyphWidth`),
+`core/write/content.go` (`EscapePDFString` export)
 
 #### JavaScript action removal API missing
 `core/parse` can detect JavaScript in a PDF (e.g. scanning `/S /JavaScript`
