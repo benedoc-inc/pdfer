@@ -167,13 +167,15 @@ the field name as the button caption.
 
 **File**: `forms/acroform/writer.go` (`writeBtnKeys`, `pushButtonAppearance`)
 
-#### AcroForm password field shows plain text
-`SetPassword(true)` sets bit 13 of `/Ff` correctly but the appearance stream
-generated for the text field does not mask input characters.  PDF readers that
-synthesise appearance (Adobe) display bullets; readers that rely on `/AP` show
-the clear value.
+#### ~~AcroForm password field shows plain text~~ ✅ Fixed in v1.8.0
+`SetPassword(true)` sets bit 13 of `/Ff` correctly. When the password flag is
+set, `writeTxKeys` now calls `passwordFieldAppearance` to emit an explicit `/AP`
+Form XObject containing a white background, border (solid or underline-only per
+`BorderStyle`), and masked bullet chars (`\225` WinAnsi) for any pre-filled value.
+Vertical centering uses cap-height ≈ 0.72 × fontSize. Font resources (`/Helv`)
+are embedded in the XObject's `/Resources` dict so the stream is self-contained.
 
-**File**: `forms/acroform/writer.go` (appearance stream generation for password fields)
+**File**: `forms/acroform/writer.go` (`writeTxKeys`, `passwordFieldAppearance`)
 
 #### AcroForm underline-style field shows no underline
 `AddUnderlineTextField` sets `/BS<</W 1/S/U>>` (underline border style) but the

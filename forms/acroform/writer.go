@@ -267,6 +267,74 @@ func (fb *FieldBuilder) writeTxKeys(b *strings.Builder, field *FieldDef) {
 		bs = "S"
 	}
 	fmt.Fprintf(b, "/BS<</W 1/S/%s>>", bs)
+
+	// Password fields need an explicit AP stream so non-Adobe viewers (Preview, Skim)
+	// show masked bullets instead of plain text. Adobe derives the masked appearance
+	// from the /Ff bit automatically, but other viewers require it to be explicit.
+	if field.Flags&(1<<13) != 0 {
+		apNum := fb.passwordFieldAppearance(field)
+		fmt.Fprintf(b, "/AP<</N %d 0 R>>", apNum)
+	}
+}
+
+// passwordFieldAppearance builds a Form XObject that renders a password field:
+// white background, border, and masked bullets for any pre-filled value.
+func (fb *FieldBuilder) passwordFieldAppearance(field *FieldDef) int {
+	w := field.Rect[2] - field.Rect[0]
+	h := field.Rect[3] - field.Rect[1]
+
+	fontSize := field.FontSize
+	if fontSize == 0 {
+		fontSize = 12
+	}
+
+	var s strings.Builder
+
+	// White background.
+	s.WriteString("q\n1 g\n")
+	fmt.Fprintf(&s, "0 0 %.4f %.4f re\nf\nQ\n", w, h)
+
+	// Border — solid box or underline-only depending on BorderStyle.
+	bs := field.BorderStyle
+	s.WriteString("q\n0 G\n0.5 w\n")
+	if bs == "U" {
+		fmt.Fprintf(&s, "0 0 m\n%.4f 0 l\nS\n", w)
+	} else {
+		fmt.Fprintf(&s, "0.25 0.25 %.4f %.4f re\nS\n", w-0.5, h-0.5)
+	}
+	s.WriteString("Q\n")
+
+	// If the field has a pre-filled value, render masked bullets.
+	if field.Value != nil {
+		valueStr := fmt.Sprint(field.Value)
+		n := len([]rune(valueStr))
+		if n > 0 {
+			// Vertical centering: Helvetica cap-height ≈ 0.72 × fontSize.
+			capHeight := 0.72 * fontSize
+			baselineY := (h - capHeight) / 2
+
+			// \225 is the PDF octal escape for WinAnsi byte 0x95 = bullet •.
+			bullets := strings.Repeat(`\225`, n)
+
+			s.WriteString("BT\n")
+			fmt.Fprintf(&s, "/Helv %.4g Tf\n", fontSize)
+			fmt.Fprintf(&s, "2 %.4f Td\n", baselineY)
+			fmt.Fprintf(&s, "(%s) Tj\n", bullets)
+			s.WriteString("ET\n")
+		}
+	}
+
+	dict := write.Dictionary{
+		"/Type":    "/XObject",
+		"/Subtype": "/Form",
+		"/BBox":    []interface{}{0.0, 0.0, w, h},
+		"/Resources": write.Dictionary{
+			"/Font": write.Dictionary{
+				"/Helv": fmt.Sprintf("%d 0 R", fb.fontNum),
+			},
+		},
+	}
+	return fb.writer.AddStreamObject(dict, []byte(s.String()), false)
 }
 
 func (fb *FieldBuilder) writeBtnKeys(b *strings.Builder, field *FieldDef) {

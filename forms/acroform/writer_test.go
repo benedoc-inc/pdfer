@@ -76,6 +76,35 @@ func TestPushButton_HasAppearanceStream(t *testing.T) {
 	}
 }
 
+func TestPasswordField_HasMaskedAP(t *testing.T) {
+	pdfBytes, err := func() ([]byte, error) {
+		b := write.NewSimplePDFBuilder()
+		page := b.AddPage(write.PageSizeLetter)
+		fb := NewFieldBuilder(b.Writer())
+		pwField := fb.AddTextField("password", []float64{72, 680, 300, 700}, 0)
+		pwField.SetPassword(true).SetValue("secret")
+		b.FinalizePage(page)
+		acroNum, err := fb.Build()
+		if err != nil {
+			return nil, err
+		}
+		b.RegisterAcroForm(acroNum)
+		return b.Bytes()
+	}()
+	if err != nil {
+		t.Fatalf("Bytes() failed: %v", err)
+	}
+
+	raw := string(pdfBytes)
+	if !strings.Contains(raw, "/AP") {
+		t.Error("password field should have /AP entry")
+	}
+	// Bullets are WinAnsi octal \225 — 6 chars per bullet × 6 chars in "secret"
+	if !strings.Contains(raw, `\225`) {
+		t.Error("password field AP should contain bullet chars (\\225)")
+	}
+}
+
 func TestFieldDef(t *testing.T) {
 	fd := &FieldDef{
 		Name: "test",
