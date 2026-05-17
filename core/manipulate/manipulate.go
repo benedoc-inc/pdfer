@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/benedoc-inc/pdfer/core/encrypt"
 	"github.com/benedoc-inc/pdfer/core/parse"
 	"github.com/benedoc-inc/pdfer/core/write"
 )
@@ -35,7 +36,7 @@ func NewPDFManipulator(pdfBytes []byte, password []byte, verbose bool) (*PDFMani
 	// Copy all objects from original PDF
 	objects := make(map[int][]byte)
 	for _, objNum := range pdf.Objects() {
-		obj, err := pdf.GetObject(objNum)
+		obj, err := pdf.GetObjectContent(objNum)
 		if err != nil {
 			if verbose {
 				fmt.Printf("Warning: failed to get object %d: %v\n", objNum, err)
@@ -92,9 +93,11 @@ func (m *PDFManipulator) rebuildPDF() ([]byte, error) {
 		}
 	}
 
-	// Set encryption if present
+	// Set encryption if present, preserving the original file ID so key derivation
+	// (which includes the file ID for V<=4 encryption) remains consistent.
 	if m.pdf.IsEncrypted() {
-		m.writer.SetEncryption(m.pdf.Encryption(), nil) // fileID will be regenerated
+		origFileID := encrypt.ExtractFileID(m.pdfBytes, m.verbose)
+		m.writer.SetEncryption(m.pdf.Encryption(), origFileID)
 	}
 
 	return m.writer.Bytes()
