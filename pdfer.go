@@ -94,8 +94,8 @@ type FormSchema = types.FormSchema
 // Question represents a single form field.
 type Question = types.Question
 
-// Rule represents a validation or calculation rule.
-type Rule = types.Rule
+// FormScript represents a raw script block extracted from an XFA form.
+type FormScript = types.FormScript
 
 // FormData is a map of field names to values for form filling.
 type FormData = types.FormData
