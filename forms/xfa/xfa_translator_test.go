@@ -1243,7 +1243,6 @@ func TestPresenceVisibleField(t *testing.T) {
 	}
 }
 
-
 // ── Rendering improvement tests ───────────────────────────────────────────────
 
 // TestPositionProperties verifies that x/y/w/h attributes on fields and subforms

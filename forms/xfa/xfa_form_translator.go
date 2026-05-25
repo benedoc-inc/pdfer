@@ -493,11 +493,11 @@ type XFAValidation struct {
 // It captures the raw <event> and child <script> attributes; bodies are exposed
 // verbatim via FormScript — pdfer does not interpret script semantics.
 type XFAEvent struct {
-	Type       string // <event activity="..."> — "initialize", "change", "click", etc.
-	Name       string // <event name="..."> — Adobe convention is the same word as Type
-	RunAt      string // <script runAt="..."> — "client" | "server" | "both"
-	Lang       string // "formcalc" | "javascript" — derived from <script contentType="...">
-	Body       string // verbatim <script> content
+	Type       string                 // <event activity="..."> — "initialize", "change", "click", etc.
+	Name       string                 // <event name="..."> — Adobe convention is the same word as Type
+	RunAt      string                 // <script runAt="..."> — "client" | "server" | "both"
+	Lang       string                 // "formcalc" | "javascript" — derived from <script contentType="...">
+	Body       string                 // verbatim <script> content
 	Properties map[string]interface{} // unknown <event>/<script> attrs (listen, ref, id, binding, …)
 }
 
@@ -609,7 +609,7 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 	var inVariablesScript bool // inside a <variables><script> element
 	var variablesScriptLang string
 	var variablesScriptName string
-	var variablesOwnerPath  string
+	var variablesOwnerPath string
 	var variablesScriptProperties map[string]interface{}
 
 	// bookmark extras state
@@ -2194,4 +2194,3 @@ func extractPageCount(xfaXML string) int {
 	}
 	return pageCount
 }
-
