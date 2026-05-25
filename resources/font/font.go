@@ -1007,11 +1007,11 @@ func subsetBuildCmapFormat4(mappings []runeGIDPair) []byte {
 	// Wrap in a cmap table: 4-byte header + 8-byte encoding record + subtable.
 	headerLen := 4 + 8
 	cmap := make([]byte, headerLen+subtableLen)
-	binary.BigEndian.PutUint16(cmap[0:], 0)                     // version
-	binary.BigEndian.PutUint16(cmap[2:], 1)                     // numTables
-	binary.BigEndian.PutUint16(cmap[4:], 3)                     // platformID = Windows
-	binary.BigEndian.PutUint16(cmap[6:], 1)                     // encodingID = Unicode BMP
-	binary.BigEndian.PutUint32(cmap[8:], uint32(headerLen))     // offset to subtable
+	binary.BigEndian.PutUint16(cmap[0:], 0)                 // version
+	binary.BigEndian.PutUint16(cmap[2:], 1)                 // numTables
+	binary.BigEndian.PutUint16(cmap[4:], 3)                 // platformID = Windows
+	binary.BigEndian.PutUint16(cmap[6:], 1)                 // encodingID = Unicode BMP
+	binary.BigEndian.PutUint32(cmap[8:], uint32(headerLen)) // offset to subtable
 	copy(cmap[headerLen:], sub)
 	return cmap
 }

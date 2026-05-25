@@ -6,7 +6,7 @@ type FormSchema struct {
 	Metadata  FormMetadata  `json:"metadata"`
 	Questions []Question    `json:"questions"`
 	Sections  []FormSection `json:"sections,omitempty"` // hierarchical section tree (XFA only)
-	Rules     []Rule        `json:"rules"`               // Control flow rules (dependencies, conditions)
+	Rules     []Rule        `json:"rules"`              // Control flow rules (dependencies, conditions)
 }
 
 // FormSection is a node in the XFA subform hierarchy.
@@ -14,14 +14,14 @@ type FormSchema struct {
 // the flat Questions slice on FormSchema is the canonical store.
 type FormSection struct {
 	Name        string        `json:"name"`
-	Path        string        `json:"path"`                  // dot-separated path from root, e.g. "form1.section2.sub"
-	Label       string        `json:"label,omitempty"`       // human-readable label from XFA subform caption; empty when not specified
-	Tooltip     string        `json:"tooltip,omitempty"`     // accessibility tooltip (e.g. IMDRF TOC chapter references)
-	Interactive bool          `json:"interactive"`           // true if the section contains any data-bound fields
-	Layout      string        `json:"layout,omitempty"`      // XFA layout mode: position|tb|lr-tb|row|table
-	Width       string        `json:"width,omitempty"`       // subform w attribute (mm/in/pt)
-	Height      string        `json:"height,omitempty"`      // subform h attribute (mm/in/pt)
-	Content     []string      `json:"content,omitempty"`     // static display text from non-interactive sections
+	Path        string        `json:"path"`              // dot-separated path from root, e.g. "form1.section2.sub"
+	Label       string        `json:"label,omitempty"`   // human-readable label from XFA subform caption; empty when not specified
+	Tooltip     string        `json:"tooltip,omitempty"` // accessibility tooltip (e.g. IMDRF TOC chapter references)
+	Interactive bool          `json:"interactive"`       // true if the section contains any data-bound fields
+	Layout      string        `json:"layout,omitempty"`  // XFA layout mode: position|tb|lr-tb|row|table
+	Width       string        `json:"width,omitempty"`   // subform w attribute (mm/in/pt)
+	Height      string        `json:"height,omitempty"`  // subform h attribute (mm/in/pt)
+	Content     []string      `json:"content,omitempty"` // static display text from non-interactive sections
 	Children    []FormSection `json:"children,omitempty"`
 	Questions   []string      `json:"questions,omitempty"` // question IDs in document order
 }

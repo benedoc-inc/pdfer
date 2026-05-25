@@ -280,8 +280,8 @@ func TestRedact_TwoPagePDF(t *testing.T) {
 
 func TestParseRectArray(t *testing.T) {
 	tests := []struct {
-		input                          string
-		wantOK                         bool
+		input                              string
+		wantOK                             bool
 		wantLLX, wantLLY, wantURX, wantURY float64
 	}{
 		{"[50 100 200 300]", true, 50, 100, 200, 300},

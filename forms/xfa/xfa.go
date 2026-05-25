@@ -12,8 +12,8 @@ import (
 	"strings"
 
 	"github.com/benedoc-inc/pdfer/core/parse"
-	"github.com/benedoc-inc/pdfer/types"
 	"github.com/benedoc-inc/pdfer/core/write"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 // extractStreamDataFromObject extracts stream data from raw object bytes
@@ -103,18 +103,18 @@ type XFAStreamInfo struct {
 
 // XFAStreams represents all XFA streams extracted from a PDF
 type XFAStreams struct {
-	Template      *XFAStreamInfo            `json:"template,omitempty"`
-	Datasets      *XFAStreamInfo            `json:"datasets,omitempty"`
-	Config        *XFAStreamInfo            `json:"config,omitempty"`
-	LocaleSet     *XFAStreamInfo            `json:"localeSet,omitempty"`
-	ConnectionSet *XFAStreamInfo            `json:"connectionSet,omitempty"`
-	Stylesheet    *XFAStreamInfo            `json:"stylesheet,omitempty"`
-	XMP           *XFAStreamInfo            `json:"xmp,omitempty"`
-	Signature     *XFAStreamInfo            `json:"signature,omitempty"`
-	SourceSet     *XFAStreamInfo            `json:"sourceSet,omitempty"`
+	Template      *XFAStreamInfo `json:"template,omitempty"`
+	Datasets      *XFAStreamInfo `json:"datasets,omitempty"`
+	Config        *XFAStreamInfo `json:"config,omitempty"`
+	LocaleSet     *XFAStreamInfo `json:"localeSet,omitempty"`
+	ConnectionSet *XFAStreamInfo `json:"connectionSet,omitempty"`
+	Stylesheet    *XFAStreamInfo `json:"stylesheet,omitempty"`
+	XMP           *XFAStreamInfo `json:"xmp,omitempty"`
+	Signature     *XFAStreamInfo `json:"signature,omitempty"`
+	SourceSet     *XFAStreamInfo `json:"sourceSet,omitempty"`
 	// Resources holds any additional XFA packet streams not matched by name above.
 	// These are typically image or font resources referenced via $rr: hrefs in the template.
-	Resources     map[string]*XFAStreamInfo `json:"resources,omitempty"`
+	Resources map[string]*XFAStreamInfo `json:"resources,omitempty"`
 }
 
 // ExtractAllXFAStreams extracts all XFA streams from a PDF without using UniPDF

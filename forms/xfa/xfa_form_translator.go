@@ -477,11 +477,11 @@ type xfaNode struct {
 	Children []*xfaNode // document order; populated for containers
 
 	// Label sources, resolved by resolveInteractiveLabel / resolveDrawText.
-	Caption         string // from <caption><value><text> or <label>
+	Caption          string // from <caption><value><text> or <label>
 	CaptionPlacement string // from <caption placement="left|right|top|bottom|inline">
-	ToolTip         string // from <assist><toolTip> — accessibility annotation (e.g. IMDRF TOC refs)
-	SpeakLabel      string // from <assist><speak>
-	BookmarkName    string // from <extras name="bookmark"><text name="name"> — PDF bookmark label
+	ToolTip          string // from <assist><toolTip> — accessibility annotation (e.g. IMDRF TOC refs)
+	SpeakLabel       string // from <assist><speak>
+	BookmarkName     string // from <extras name="bookmark"><text name="name"> — PDF bookmark label
 
 	// Content
 	Value       string
@@ -506,13 +506,13 @@ type xfaNode struct {
 	Events       []XFAEvent
 
 	// UI-element-specific constraints
-	AllowNeutral         bool   // checkButton allowNeutral="1" → tri-state checkbox
-	MaxChars             *int   // textEdit maxChars → ValidationRules.MaxLength
-	FracDigits           *int   // numericEdit fracDigits (decimal places)
-	LeadDigits           *int   // numericEdit leadDigits (max integer digits)
-	ChoiceListOpen       string // choiceList open: "always"=listbox, "userInteraction"=dropdown
-	ChoiceListMultiSelect bool  // choiceList multiSelect="1"
-	DateTimeSubType      string // "time" when picture starts with TIME{; "datetime" for combined
+	AllowNeutral          bool   // checkButton allowNeutral="1" → tri-state checkbox
+	MaxChars              *int   // textEdit maxChars → ValidationRules.MaxLength
+	FracDigits            *int   // numericEdit fracDigits (decimal places)
+	LeadDigits            *int   // numericEdit leadDigits (max integer digits)
+	ChoiceListOpen        string // choiceList open: "always"=listbox, "userInteraction"=dropdown
+	ChoiceListMultiSelect bool   // choiceList multiSelect="1"
+	DateTimeSubType       string // "time" when picture starts with TIME{; "datetime" for combined
 
 	// Visual / display hints
 	IsLine     bool   // draw <value><line> → separator element
@@ -645,47 +645,47 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 	decoder := xml.NewDecoder(strings.NewReader(xfaXML))
 	decoder.Strict = false
 
-	var currentLeaf        *xfaNode
-	var currentValue       strings.Builder
-	var currentCaption     strings.Builder
-	var currentLabel       strings.Builder
-	var currentDesc        strings.Builder
-	var currentToolTip     strings.Builder
-	var currentSpeak       strings.Builder
-	var currentImageData   strings.Builder
-	var imageContentType   string
+	var currentLeaf *xfaNode
+	var currentValue strings.Builder
+	var currentCaption strings.Builder
+	var currentLabel strings.Builder
+	var currentDesc strings.Builder
+	var currentToolTip strings.Builder
+	var currentSpeak strings.Builder
+	var currentImageData strings.Builder
+	var imageContentType string
 
 	// exData HTML extraction state
 	var exDataContentType string
-	var exDataHTMLBuf     strings.Builder
-	var exDataHasEmbed    bool
+	var exDataHTMLBuf strings.Builder
+	var exDataHasEmbed bool
 
 	// picture element state (for dateTimeEdit subtype detection)
-	var inPicture     bool
+	var inPicture bool
 	var currentPicture strings.Builder
 
-	var inValue           bool
-	var inCaption         bool
+	var inValue bool
+	var inCaption bool
 	var inExclGroupCaption bool // reading the exclGroup's own <caption>, not a child field's
-	var inSubformCaption  bool // reading the <caption> that is a direct child of a subform
-	var inLabel           bool
-	var inDescription     bool
-	var inItems           bool
-	var itemsIsSave       bool
-	var inImage           bool
-	var inToolTip         bool
-	var inAssist          bool
-	var inSpeak           bool
-	var inExData          bool
-	var inCaptionExData   bool // exData nested inside a <caption> — routes to currentCaption
-	var inScript          bool
-	var inVariables       bool   // inside a <variables> element
-	var inVariablesScript bool   // inside a <variables><script> element
+	var inSubformCaption bool   // reading the <caption> that is a direct child of a subform
+	var inLabel bool
+	var inDescription bool
+	var inItems bool
+	var itemsIsSave bool
+	var inImage bool
+	var inToolTip bool
+	var inAssist bool
+	var inSpeak bool
+	var inExData bool
+	var inCaptionExData bool // exData nested inside a <caption> — routes to currentCaption
+	var inScript bool
+	var inVariables bool       // inside a <variables> element
+	var inVariablesScript bool // inside a <variables><script> element
 	var variablesScriptLang string
 
 	// bookmark extras state
 	var inBookmarkExtras bool
-	var inBookmarkName   bool
+	var inBookmarkName bool
 	var currentBookmarkName strings.Builder
 
 	for {
@@ -2993,10 +2993,10 @@ func parseVariablesFunctionRules(funcBody, lang string, baseIndex int) []types.R
 				cond = &types.Condition{Expression: branch.cond}
 			}
 			rules = append(rules, types.Rule{
-				ID:      fmt.Sprintf("rule_var_%d", baseIndex+i+1),
-				Source:  source,
-				Type:    types.RuleTypeVisibility,
-				Actions: actions,
+				ID:        fmt.Sprintf("rule_var_%d", baseIndex+i+1),
+				Source:    source,
+				Type:      types.RuleTypeVisibility,
+				Actions:   actions,
 				Condition: cond,
 			})
 		}
@@ -3008,11 +3008,11 @@ func parseVariablesFunctionRules(funcBody, lang string, baseIndex int) []types.R
 				continue
 			}
 			rule := types.Rule{
-				ID:      fmt.Sprintf("rule_var_%d", baseIndex+i+1),
-				Source:  source,
-				Type:    types.RuleTypeVisibility,
+				ID:        fmt.Sprintf("rule_var_%d", baseIndex+i+1),
+				Source:    source,
+				Type:      types.RuleTypeVisibility,
 				Condition: parsed.condition,
-				Actions: parsed.actions,
+				Actions:   parsed.actions,
 			}
 			if rule.Actions == nil {
 				rule.Actions = []types.Action{}

@@ -16,9 +16,9 @@ const (
 
 // TextBoxStyle configures a drawn text box.
 type TextBoxStyle struct {
-	FontName string    // resource name, e.g. "/F1"
-	FontSize float64   // points; default 10
-	Leading  float64   // line spacing; 0 = auto (1.2 * FontSize)
+	FontName string  // resource name, e.g. "/F1"
+	FontSize float64 // points; default 10
+	Leading  float64 // line spacing; 0 = auto (1.2 * FontSize)
 	Align    TextAlign
 	Color    [3]float64 // RGB text color; zero value = black
 }
