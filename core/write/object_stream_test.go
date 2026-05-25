@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/core/parse"
+	"github.com/benedoc-inc/pdfer/v2/core/parse"
 )
 
 func TestObjectStream_Basic(t *testing.T) {

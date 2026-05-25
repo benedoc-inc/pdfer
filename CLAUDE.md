@@ -56,7 +56,7 @@ pdfer is a pure Go PDF library with zero external dependencies. The codebase fol
 Most operations are available directly from the root package:
 
 ```go
-import "github.com/benedoc-inc/pdfer"
+import "github.com/benedoc-inc/pdfer/v2"
 
 // Encrypt / decrypt
 out, err := pdfer.EncryptPDF(pdfBytes, []byte("password"), nil, false)

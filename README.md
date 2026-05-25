@@ -2,19 +2,19 @@
 
 Pure Go PDF processing library — zero CGO, zero external dependencies.
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/benedoc-inc/pdfer.svg)](https://pkg.go.dev/github.com/benedoc-inc/pdfer)
-[![Go Report Card](https://goreportcard.com/badge/github.com/benedoc-inc/pdfer)](https://goreportcard.com/report/github.com/benedoc-inc/pdfer)
+[![Go Reference](https://pkg.go.dev/badge/github.com/benedoc-inc/pdfer/v2.svg)](https://pkg.go.dev/github.com/benedoc-inc/pdfer/v2)
+[![Go Report Card](https://goreportcard.com/badge/github.com/benedoc-inc/pdfer/v2)](https://goreportcard.com/report/github.com/benedoc-inc/pdfer/v2)
 
 ## Installation
 
 ```bash
-go get github.com/benedoc-inc/pdfer
+go get github.com/benedoc-inc/pdfer/v2
 ```
 
 ## Quick start
 
 ```go
-import "github.com/benedoc-inc/pdfer"
+import "github.com/benedoc-inc/pdfer/v2"
 
 // Merge two PDFs
 out, err := pdfer.MergePDFs([][]byte{a, b}, nil, false)
@@ -248,7 +248,7 @@ if !vr.Conformant {
 ## Creating PDFs from scratch
 
 ```go
-import "github.com/benedoc-inc/pdfer/core/write"
+import "github.com/benedoc-inc/pdfer/v2/core/write"
 
 builder := write.NewSimplePDFBuilder()
 page := builder.AddPage(write.PageSizeLetter)
@@ -308,7 +308,7 @@ layout.BalanceColumns() // align cursors to the lowest column
 ## Parsing PDFs directly
 
 ```go
-import "github.com/benedoc-inc/pdfer/core/parse"
+import "github.com/benedoc-inc/pdfer/v2/core/parse"
 
 pdf, err := parse.OpenWithOptions(pdfBytes, parse.ParseOptions{
     Password: []byte("secret"),

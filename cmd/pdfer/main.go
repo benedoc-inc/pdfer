@@ -11,9 +11,9 @@ import (
 	"log"
 	"os"
 
-	encrypt "github.com/benedoc-inc/pdfer/core/encrypt"
-	"github.com/benedoc-inc/pdfer/forms/xfa"
-	"github.com/benedoc-inc/pdfer/types"
+	encrypt "github.com/benedoc-inc/pdfer/v2/core/encrypt"
+	"github.com/benedoc-inc/pdfer/v2/forms/xfa"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 func main() {

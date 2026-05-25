@@ -40,6 +40,34 @@ jobs:
             exit 1
           fi
 
+      - name: Enforce semantic import versioning
+        run: |
+          VERSION="${{ inputs.version }}"
+          MAJOR="${VERSION#v}"
+          MAJOR="${MAJOR%%.*}"
+          MODULE_PATH=$(awk '/^module / {print $2; exit}' go.mod)
+          if [ "$MAJOR" -ge 2 ]; then
+            EXPECTED_SUFFIX="/v${MAJOR}"
+            case "$MODULE_PATH" in
+              *"$EXPECTED_SUFFIX")
+                ;;
+              *)
+                echo "ERROR: releasing $VERSION but go.mod module path is '$MODULE_PATH'."
+                echo "Go's semantic import versioning requires the path to end in '$EXPECTED_SUFFIX' for major version $MAJOR."
+                echo "Update go.mod and rewrite internal imports before releasing."
+                exit 1
+                ;;
+            esac
+          else
+            case "$MODULE_PATH" in
+              */v[0-9]*)
+                echo "ERROR: releasing $VERSION but go.mod module path '$MODULE_PATH' has a /vN suffix."
+                echo "Only major versions >= 2 should carry a /vN suffix."
+                exit 1
+                ;;
+            esac
+          fi
+
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
