@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (Go ${{ matrix.go }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ['1.21', '1.22', '1.23']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+      - run: go vet ./...
+      - run: go test ./...
+
+  version-guard:
+    name: No hardcoded library version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject literal version string in pdfer.go
+        run: |
+          if grep -nE 'return\s+"v?[0-9]+\.[0-9]+\.[0-9]+"' pdfer.go; then
+            echo ""
+            echo "ERROR: pdfer.go contains a hardcoded version literal."
+            echo "Version() must derive from runtime/debug.ReadBuildInfo()."
+            echo "See CONTRIBUTING.md for the release process."
+            exit 1
+          fi
