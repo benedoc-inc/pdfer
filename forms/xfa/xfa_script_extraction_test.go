@@ -283,3 +283,106 @@ func TestScriptIDStability(t *testing.T) {
 		}
 	}
 }
+
+// TestUnknownEventAndScriptAttrsCaptured verifies that <event> and <script>
+// attributes outside the typed-field set (activity, name, contentType, runAt)
+// land in FormScript.Properties so callers parsing the script body have
+// access to ref/listen targeting and other XFA-spec attrs.
+func TestUnknownEventAndScriptAttrsCaptured(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <field name="watcher">
+      <ui><textEdit/></ui>
+      <event activity="change" name="change" listen="refOnly" ref="someField" id="evt1">
+        <script contentType="application/x-javascript" runAt="client" binding="this" stateless="0" id="scr1">this.rawValue = "x";</script>
+      </event>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	if len(form.Scripts) != 1 {
+		t.Fatalf("expected 1 script, got %d", len(form.Scripts))
+	}
+	s := form.Scripts[0]
+
+	wantPresent := map[string]string{
+		"listen":    "refOnly",
+		"ref":       "someField",
+		"binding":   "this",
+		"stateless": "0",
+	}
+	for k, want := range wantPresent {
+		got, ok := s.Properties[k]
+		if !ok {
+			t.Errorf("Properties[%q] missing", k)
+			continue
+		}
+		if got != want {
+			t.Errorf("Properties[%q] = %v, want %q", k, got, want)
+		}
+	}
+
+	// Both <event> and <script> carry id; share a single flat map, so the
+	// later-seen <script id> wins. The map must at least contain one of them.
+	if _, ok := s.Properties["id"]; !ok {
+		t.Error("Properties[\"id\"] missing")
+	}
+
+	wantAbsent := []string{"activity", "name", "contentType", "runAt"}
+	for _, k := range wantAbsent {
+		if _, ok := s.Properties[k]; ok {
+			t.Errorf("Properties[%q] should not be duplicated from typed field", k)
+		}
+	}
+}
+
+// TestVariablesScriptAttrsCaptured verifies that unknown attributes on a
+// <variables><script> element land in FormScript.Properties.
+func TestVariablesScriptAttrsCaptured(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="form1">
+    <variables>
+      <script name="helpers" contentType="application/x-javascript" id="vars1" url="http://example/lib.js" binding="this">function hi() { return 1; }</script>
+    </variables>
+    <field name="f"><ui><textEdit/></ui></field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+
+	var vs *struct{ id, url, binding string }
+	for _, s := range form.Scripts {
+		if s.Event == "variables" {
+			id, _ := s.Properties["id"].(string)
+			url, _ := s.Properties["url"].(string)
+			binding, _ := s.Properties["binding"].(string)
+			vs = &struct{ id, url, binding string }{id, url, binding}
+			if _, ok := s.Properties["contentType"]; ok {
+				t.Error("Properties[\"contentType\"] should not be duplicated; it's surfaced as Language")
+			}
+			if _, ok := s.Properties["name"]; ok {
+				t.Error("Properties[\"name\"] should not be duplicated; it's surfaced as Name")
+			}
+			break
+		}
+	}
+	if vs == nil {
+		t.Fatal("no variables script found")
+	}
+	if vs.id != "vars1" {
+		t.Errorf("Properties[\"id\"] = %q, want vars1", vs.id)
+	}
+	if vs.url != "http://example/lib.js" {
+		t.Errorf("Properties[\"url\"] = %q, want http://example/lib.js", vs.url)
+	}
+	if vs.binding != "this" {
+		t.Errorf("Properties[\"binding\"] = %q, want this", vs.binding)
+	}
+}

@@ -464,10 +464,11 @@ type xfaTemplateResult struct {
 // the template. OwnerPath is the SOM path of the containing subform; empty
 // for template-level <variables> blocks.
 type variablesScript struct {
-	OwnerPath string
-	Name      string // <script name="...">
-	Lang      string
-	Body      string
+	OwnerPath  string
+	Name       string // <script name="...">
+	Lang       string
+	Body       string
+	Properties map[string]interface{} // unknown <script> attrs (id, url, binding, stateless, …)
 }
 
 // XFAOption represents an option for choice fields
@@ -492,11 +493,12 @@ type XFAValidation struct {
 // It captures the raw <event> and child <script> attributes; bodies are exposed
 // verbatim via FormScript — pdfer does not interpret script semantics.
 type XFAEvent struct {
-	Type  string // <event activity="..."> — "initialize", "change", "click", etc.
-	Name  string // <event name="..."> — Adobe convention is the same word as Type
-	RunAt string // <script runAt="..."> — "client" | "server" | "both"
-	Lang  string // "formcalc" | "javascript" — derived from <script contentType="...">
-	Body  string // verbatim <script> content
+	Type       string // <event activity="..."> — "initialize", "change", "click", etc.
+	Name       string // <event name="..."> — Adobe convention is the same word as Type
+	RunAt      string // <script runAt="..."> — "client" | "server" | "both"
+	Lang       string // "formcalc" | "javascript" — derived from <script contentType="...">
+	Body       string // verbatim <script> content
+	Properties map[string]interface{} // unknown <event>/<script> attrs (listen, ref, id, binding, …)
 }
 
 // ── Label resolution helpers ──────────────────────────────────────────────────
@@ -608,6 +610,7 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 	var variablesScriptLang string
 	var variablesScriptName string
 	var variablesOwnerPath  string
+	var variablesScriptProperties map[string]interface{}
 
 	// bookmark extras state
 	var inBookmarkExtras bool
@@ -956,6 +959,8 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 						ev.Type = attr.Value
 					case "name":
 						ev.Name = attr.Value
+					default:
+						putAttr(&ev.Properties, attr.Name.Local, attr.Value)
 					}
 				}
 				if currentLeaf != nil {
@@ -969,6 +974,7 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 					inVariablesScript = true
 					variablesScriptLang = "formcalc" // XFA default per spec
 					variablesScriptName = ""
+					variablesScriptProperties = nil
 					currentValue.Reset()
 					for _, attr := range se.Attr {
 						switch attr.Name.Local {
@@ -978,6 +984,8 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 							}
 						case "name":
 							variablesScriptName = attr.Value
+						default:
+							putAttr(&variablesScriptProperties, attr.Name.Local, attr.Value)
 						}
 					}
 				} else if currentLeaf != nil && len(currentLeaf.Events) > 0 {
@@ -990,6 +998,8 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 							last.Lang = contentTypeToLang(attr.Value)
 						case "runAt":
 							last.RunAt = attr.Value
+						default:
+							putAttr(&last.Properties, attr.Name.Local, attr.Value)
 						}
 					}
 				} else if top := topOfStack(); top.Kind == xfaKindSubform && len(top.Events) > 0 {
@@ -1002,6 +1012,8 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 							last.Lang = contentTypeToLang(attr.Value)
 						case "runAt":
 							last.RunAt = attr.Value
+						default:
+							putAttr(&last.Properties, attr.Name.Local, attr.Value)
 						}
 					}
 				}
@@ -1244,14 +1256,16 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 					body := currentValue.String()
 					if strings.TrimSpace(body) != "" {
 						res.VariablesScripts = append(res.VariablesScripts, variablesScript{
-							OwnerPath: variablesOwnerPath,
-							Name:      variablesScriptName,
-							Lang:      variablesScriptLang,
-							Body:      body,
+							OwnerPath:  variablesOwnerPath,
+							Name:       variablesScriptName,
+							Lang:       variablesScriptLang,
+							Body:       body,
+							Properties: variablesScriptProperties,
 						})
 					}
 					inVariablesScript = false
 					variablesScriptName = ""
+					variablesScriptProperties = nil
 				} else if currentLeaf != nil && len(currentLeaf.Events) > 0 {
 					last := &currentLeaf.Events[len(currentLeaf.Events)-1]
 					last.Body = currentValue.String()
@@ -1393,12 +1407,13 @@ func buildFormSchema(result *xfaTemplateResult, verbose bool) *types.FormSchema 
 	// are exposed as-is for callers to interpret.
 	for i, vs := range result.VariablesScripts {
 		script := types.FormScript{
-			ID:        formScriptID(vs.OwnerPath, "variables", i),
-			OwnerPath: vs.OwnerPath,
-			Event:     "variables",
-			Name:      vs.Name,
-			Language:  vs.Lang,
-			Body:      vs.Body,
+			ID:         formScriptID(vs.OwnerPath, "variables", i),
+			OwnerPath:  vs.OwnerPath,
+			Event:      "variables",
+			Name:       vs.Name,
+			Language:   vs.Lang,
+			Body:       vs.Body,
+			Properties: vs.Properties,
 		}
 		schema.Scripts = append(schema.Scripts, script)
 	}
@@ -1452,14 +1467,15 @@ func buildFormScripts(events []XFAEvent, ownerPath, ownerID string) []types.Form
 			lang = "formcalc" // XFA default per spec when contentType is absent
 		}
 		out = append(out, types.FormScript{
-			ID:        formScriptID(ownerPath, ev.Type, i),
-			OwnerPath: ownerPath,
-			OwnerID:   ownerID,
-			Event:     ev.Type,
-			Name:      ev.Name,
-			Language:  lang,
-			RunAt:     ev.RunAt,
-			Body:      ev.Body,
+			ID:         formScriptID(ownerPath, ev.Type, i),
+			OwnerPath:  ownerPath,
+			OwnerID:    ownerID,
+			Event:      ev.Type,
+			Name:       ev.Name,
+			Language:   lang,
+			RunAt:      ev.RunAt,
+			Body:       ev.Body,
+			Properties: ev.Properties,
 		})
 	}
 	return out
@@ -2124,6 +2140,15 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// putAttr lazily initialises m and writes value under name. Used to capture
+// unknown <event>/<script> attributes into FormScript.Properties.
+func putAttr(m *map[string]interface{}, name, value string) {
+	if *m == nil {
+		*m = make(map[string]interface{})
+	}
+	(*m)[name] = value
 }
 
 func parseBool(s string) bool {

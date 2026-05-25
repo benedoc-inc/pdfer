@@ -33,7 +33,7 @@ func TestESTAR_NonIVD_Schema(t *testing.T) {
 	if len(schema.Questions) < minNonIVDQuestions {
 		t.Errorf("expected at least %d questions, got %d", minNonIVDQuestions, len(schema.Questions))
 	}
-	t.Logf("NonIVD eSTAR: %d questions, %d sections, %d rules",
+	t.Logf("NonIVD eSTAR: %d questions, %d sections, %d scripts",
 		len(schema.Questions), len(schema.Sections), len(schema.Scripts))
 
 	assertSchemaQuality(t, schema, "NonIVD eSTAR")
@@ -58,7 +58,7 @@ func TestESTAR_IVD_Schema(t *testing.T) {
 	if len(schema.Questions) < minIVDQuestions {
 		t.Errorf("expected at least %d questions, got %d", minIVDQuestions, len(schema.Questions))
 	}
-	t.Logf("IVD eSTAR: %d questions, %d sections, %d rules",
+	t.Logf("IVD eSTAR: %d questions, %d sections, %d scripts",
 		len(schema.Questions), len(schema.Sections), len(schema.Scripts))
 
 	assertSchemaQuality(t, schema, "IVD eSTAR")
@@ -80,7 +80,7 @@ func TestESTAR_PreSTAR_Schema(t *testing.T) {
 	if len(schema.Questions) < minPreSTARQuestions {
 		t.Errorf("expected at least %d questions, got %d", minPreSTARQuestions, len(schema.Questions))
 	}
-	t.Logf("PreSTAR: %d questions, %d sections, %d rules",
+	t.Logf("PreSTAR: %d questions, %d sections, %d scripts",
 		len(schema.Questions), len(schema.Sections), len(schema.Scripts))
 
 	assertSchemaQuality(t, schema, "PreSTAR")

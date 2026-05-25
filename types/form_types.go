@@ -99,6 +99,13 @@ type ValidationRules struct {
 
 // FormScript represents a raw script block extracted from an XFA form.
 // Bodies are exposed verbatim — pdfer does not interpret script semantics.
+//
+// Limitations: scripts attached to XFA nodes that pdfer does not surface in
+// the schema are not extracted. This includes decorative <draw> elements with
+// events (e.g. status indicators), <field> buttons with bind="none" other than
+// AddAttachment, <pageArea>-level events, and individual <field> radio options
+// that are collapsed into an <exclGroup>'s Options. Callers that need full
+// event fidelity should walk the raw XFA XML directly.
 type FormScript struct {
 	ID         string                 `json:"id"`                   // stable: SOM owner path + "#" + event + "[" + index + "]"
 	OwnerPath  string                 `json:"owner_path,omitempty"` // SOM path of containing node (e.g. "form1.section.field"); empty for template-level
@@ -108,5 +115,5 @@ type FormScript struct {
 	Language   string                 `json:"language"`             // "javascript" | "formcalc"; defaults to "formcalc" per XFA spec when contentType is absent
 	RunAt      string                 `json:"run_at,omitempty"`     // client | server | both
 	Body       string                 `json:"body"`                 // verbatim script source
-	Properties map[string]interface{} `json:"properties,omitempty"` // additional <event>/<script> attributes
+	Properties map[string]interface{} `json:"properties,omitempty"` // unknown <event>/<script> attributes (listen, ref, id, binding, stateless, url, …); event and script attrs share this map, so a key set on both is last-write-wins
 }
