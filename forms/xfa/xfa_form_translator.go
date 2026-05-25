@@ -13,15 +13,6 @@ import (
 	"github.com/benedoc-inc/pdfer/types"
 )
 
-// presenceTargetRe matches "Name.presence =" in XFA JavaScript scripts.
-var presenceTargetRe = regexp.MustCompile(`\b([A-Za-z_]\w*)\.presence\s*=`)
-
-// xfaFuncDeclRe matches "function Name(...) {" in JavaScript.
-var xfaFuncDeclRe = regexp.MustCompile(`function\s+(\w+)\s*\([^)]*\)\s*\{`)
-
-// xfaRawValueCondRe extracts a field name from "FieldName.rawValue ==" patterns.
-var xfaRawValueCondRe = regexp.MustCompile(`\b([A-Za-z_]\w*)\.rawValue\s*==`)
-
 // htmlTagRe matches HTML tags for stripping caption exData HTML to plain text.
 var htmlTagRe = regexp.MustCompile(`<[^>]+>`)
 
@@ -50,19 +41,12 @@ func ParseXFAFormWithResources(xfaXML string, resources map[string][]byte, verbo
 	}
 	schema := buildFormSchema(result, verbose)
 	schema.Metadata.TotalPages = extractPageCount(xfaXML)
-	rules, err := extractXFARules(result.Root, verbose)
-	if err != nil && verbose {
-		log.Printf("Warning: Failed to extract XFA rules: %v", err)
-	}
-	// Append field-event rules to any rules already built by buildFormSchema
-	// (subform events, variables function bodies).
-	schema.Rules = append(schema.Rules, rules...)
 	if len(resources) > 0 {
 		resolveImageHRefs(schema, resources)
 	}
 	if verbose {
-		log.Printf("Parsed XFA to FormSchema: %d questions, %d sections, %d rules",
-			len(schema.Questions), len(schema.Sections), len(schema.Rules))
+		log.Printf("Parsed XFA to FormSchema: %d questions, %d sections, %d scripts",
+			len(schema.Questions), len(schema.Sections), len(schema.Scripts))
 	}
 	return schema, nil
 }
@@ -117,7 +101,7 @@ func resolveImageHRefs(schema *types.FormSchema, resources map[string][]byte) {
 // FormToXFA converts a FormSchema to XFA XML
 func FormToXFA(formSchema *types.FormSchema, verbose bool) (string, error) {
 	if verbose {
-		log.Printf("Converting FormSchema to XFA XML: %d questions, %d rules", len(formSchema.Questions), len(formSchema.Rules))
+		log.Printf("Converting FormSchema to XFA XML: %d questions, %d scripts", len(formSchema.Questions), len(formSchema.Scripts))
 	}
 
 	var buf strings.Builder
@@ -143,15 +127,6 @@ func FormToXFA(formSchema *types.FormSchema, verbose bool) (string, error) {
 	for _, question := range formSchema.Questions {
 		if err := encodeQuestionAsField(enc, question); err != nil {
 			return "", fmt.Errorf("failed to encode question %s: %v", question.ID, err)
-		}
-	}
-
-	// Convert rules to events/scripts
-	for _, rule := range formSchema.Rules {
-		if err := encodeRuleAsEvent(enc, rule); err != nil {
-			if verbose {
-				log.Printf("Warning: Failed to encode rule %s: %v", rule.ID, err)
-			}
 		}
 	}
 
@@ -365,66 +340,6 @@ func encodeValidation(enc *xml.Encoder, validation *types.ValidationRules) error
 	return nil
 }
 
-// encodeRuleAsEvent encodes a Rule as an XFA event element
-func encodeRuleAsEvent(enc *xml.Encoder, rule types.Rule) error {
-	// Map rule type to event activity
-	activity := "change" // default
-	switch rule.Type {
-	case types.RuleTypeVisibility:
-		activity = "initialize"
-	case types.RuleTypeCalculate:
-		activity = "change"
-	case types.RuleTypeValidate:
-		activity = "validate"
-	case types.RuleTypeSetValue:
-		activity = "enter"
-	}
-
-	eventStart := xml.StartElement{
-		Name: xml.Name{Local: "event"},
-		Attr: []xml.Attr{
-			{Name: xml.Name{Local: "activity"}, Value: activity},
-		},
-	}
-
-	if err := enc.EncodeToken(eventStart); err != nil {
-		return err
-	}
-
-	// Encode actions as script
-	if len(rule.Actions) > 0 {
-		scriptStart := xml.StartElement{Name: xml.Name{Local: "script"}}
-		if err := enc.EncodeToken(scriptStart); err != nil {
-			return err
-		}
-
-		var scriptBuf strings.Builder
-		for _, action := range rule.Actions {
-			if action.Script != "" {
-				scriptBuf.WriteString(action.Script)
-			} else if action.Expression != "" {
-				scriptBuf.WriteString(action.Expression)
-			}
-		}
-
-		if scriptBuf.Len() > 0 {
-			if err := enc.EncodeToken(xml.CharData(scriptBuf.String())); err != nil {
-				return err
-			}
-		}
-
-		if err := enc.EncodeToken(scriptStart.End()); err != nil {
-			return err
-		}
-	}
-
-	if err := enc.EncodeToken(eventStart.End()); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 // mapResponseTypeToXFA maps ResponseType enum to XFA field type string
 func mapResponseTypeToXFA(responseType types.ResponseType) string {
 	switch responseType {
@@ -529,23 +444,31 @@ type xfaNode struct {
 	ExDataHTML       string // plain text extracted from text/html exData without xfa:embed markers
 
 	PageNumber int
+
+	// QuestionID is the ID assigned to this node's emitted Question.
+	// Set by emitField/emitExclGroup after the question is built; empty otherwise.
+	// Used by buildFormScripts to populate FormScript.OwnerID for field-attached scripts.
+	QuestionID string
 }
 
 // xfaTemplateResult bundles the parse tree with top-level metadata.
 type xfaTemplateResult struct {
-	Root               *xfaNode
-	Title              string
-	Description        string
-	Version            string
-	VariablesFunctions []variablesFuncDef
+	Root             *xfaNode
+	Title            string
+	Description      string
+	Version          string
+	VariablesScripts []variablesScript
 }
 
-// variablesFuncDef holds the body of a JavaScript function extracted from a
-// <variables> script block. These function bodies contain presence-based
-// visibility logic that cannot be attributed to individual field events.
-type variablesFuncDef struct {
-	body string
-	lang string
+// variablesScript holds a <variables><script> block extracted verbatim from
+// the template. OwnerPath is the SOM path of the containing subform; empty
+// for template-level <variables> blocks.
+type variablesScript struct {
+	OwnerPath  string
+	Name       string // <script name="...">
+	Lang       string
+	Body       string
+	Properties map[string]interface{} // unknown <script> attrs (id, url, binding, stateless, …)
 }
 
 // XFAOption represents an option for choice fields
@@ -566,13 +489,16 @@ type XFAValidation struct {
 	ErrorMessage string
 }
 
-// XFAEvent represents an event in XFA (for rules extraction)
+// XFAEvent represents a single <event> attached to a field, exclGroup, or subform.
+// It captures the raw <event> and child <script> attributes; bodies are exposed
+// verbatim via FormScript — pdfer does not interpret script semantics.
 type XFAEvent struct {
-	Type   string // "initialize", "change", "enter", "exit", etc.
-	Script string
-	Lang   string // "formcalc" | "javascript" | "" (auto-detect)
-	Target string
-	Action string
+	Type       string                 // <event activity="..."> — "initialize", "change", "click", etc.
+	Name       string                 // <event name="..."> — Adobe convention is the same word as Type
+	RunAt      string                 // <script runAt="..."> — "client" | "server" | "both"
+	Lang       string                 // "formcalc" | "javascript" — derived from <script contentType="...">
+	Body       string                 // verbatim <script> content
+	Properties map[string]interface{} // unknown <event>/<script> attrs (listen, ref, id, binding, …)
 }
 
 // ── Label resolution helpers ──────────────────────────────────────────────────
@@ -682,6 +608,9 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 	var inVariables bool       // inside a <variables> element
 	var inVariablesScript bool // inside a <variables><script> element
 	var variablesScriptLang string
+	var variablesScriptName string
+	var variablesOwnerPath string
+	var variablesScriptProperties map[string]interface{}
 
 	// bookmark extras state
 	var inBookmarkExtras bool
@@ -724,6 +653,7 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 
 			case "variables":
 				inVariables = true
+				variablesOwnerPath = subformStackPath(nodeStack)
 
 			case "subform", "pageArea":
 				kind := xfaKindSubform
@@ -1022,58 +952,68 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 				}
 
 			case "event":
-				if currentLeaf != nil {
-					ev := XFAEvent{}
-					for _, attr := range se.Attr {
-						switch attr.Name.Local {
-						case "activity":
-							ev.Type = attr.Value
-						case "name":
-							ev.Action = attr.Value
-						}
+				ev := XFAEvent{}
+				for _, attr := range se.Attr {
+					switch attr.Name.Local {
+					case "activity":
+						ev.Type = attr.Value
+					case "name":
+						ev.Name = attr.Value
+					default:
+						putAttr(&ev.Properties, attr.Name.Local, attr.Value)
 					}
+				}
+				if currentLeaf != nil {
 					currentLeaf.Events = append(currentLeaf.Events, ev)
 				} else if top := topOfStack(); top.Kind == xfaKindSubform {
-					ev := XFAEvent{}
-					for _, attr := range se.Attr {
-						switch attr.Name.Local {
-						case "activity":
-							ev.Type = attr.Value
-						case "name":
-							ev.Action = attr.Value
-						}
-					}
 					top.Events = append(top.Events, ev)
 				}
 
 			case "script":
 				if inVariables {
 					inVariablesScript = true
-					variablesScriptLang = "javascript"
+					variablesScriptLang = "formcalc" // XFA default per spec
+					variablesScriptName = ""
+					variablesScriptProperties = nil
 					currentValue.Reset()
 					for _, attr := range se.Attr {
-						if attr.Name.Local == "contentType" {
+						switch attr.Name.Local {
+						case "contentType":
 							if l := contentTypeToLang(attr.Value); l != "" {
 								variablesScriptLang = l
 							}
+						case "name":
+							variablesScriptName = attr.Value
+						default:
+							putAttr(&variablesScriptProperties, attr.Name.Local, attr.Value)
 						}
 					}
 				} else if currentLeaf != nil && len(currentLeaf.Events) > 0 {
 					inScript = true
 					currentValue.Reset()
+					last := &currentLeaf.Events[len(currentLeaf.Events)-1]
 					for _, attr := range se.Attr {
-						if attr.Name.Local == "contentType" {
-							last := &currentLeaf.Events[len(currentLeaf.Events)-1]
+						switch attr.Name.Local {
+						case "contentType":
 							last.Lang = contentTypeToLang(attr.Value)
+						case "runAt":
+							last.RunAt = attr.Value
+						default:
+							putAttr(&last.Properties, attr.Name.Local, attr.Value)
 						}
 					}
 				} else if top := topOfStack(); top.Kind == xfaKindSubform && len(top.Events) > 0 {
 					inScript = true
 					currentValue.Reset()
+					last := &top.Events[len(top.Events)-1]
 					for _, attr := range se.Attr {
-						if attr.Name.Local == "contentType" {
-							last := &top.Events[len(top.Events)-1]
+						switch attr.Name.Local {
+						case "contentType":
 							last.Lang = contentTypeToLang(attr.Value)
+						case "runAt":
+							last.RunAt = attr.Value
+						default:
+							putAttr(&last.Properties, attr.Name.Local, attr.Value)
 						}
 					}
 				}
@@ -1313,18 +1253,25 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 
 			case "script":
 				if inVariablesScript {
-					body := strings.TrimSpace(currentValue.String())
-					if body != "" {
-						res.VariablesFunctions = append(res.VariablesFunctions,
-							extractJSFunctionBodies(body, variablesScriptLang)...)
+					body := currentValue.String()
+					if strings.TrimSpace(body) != "" {
+						res.VariablesScripts = append(res.VariablesScripts, variablesScript{
+							OwnerPath:  variablesOwnerPath,
+							Name:       variablesScriptName,
+							Lang:       variablesScriptLang,
+							Body:       body,
+							Properties: variablesScriptProperties,
+						})
 					}
 					inVariablesScript = false
+					variablesScriptName = ""
+					variablesScriptProperties = nil
 				} else if currentLeaf != nil && len(currentLeaf.Events) > 0 {
 					last := &currentLeaf.Events[len(currentLeaf.Events)-1]
-					last.Script = strings.TrimSpace(currentValue.String())
+					last.Body = currentValue.String()
 				} else if top := topOfStack(); top.Kind == xfaKindSubform && len(top.Events) > 0 {
 					last := &top.Events[len(top.Events)-1]
-					last.Script = strings.TrimSpace(currentValue.String())
+					last.Body = currentValue.String()
 				}
 				inScript = false
 				currentValue.Reset()
@@ -1436,7 +1383,8 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 // ── Schema builder ────────────────────────────────────────────────────────────
 
 // buildFormSchema walks the xfaNode tree and builds a FormSchema with a flat
-// questions list and a hierarchical sections tree.
+// questions list, a hierarchical sections tree, and a flat Scripts slice
+// indexed by Question.Scripts and FormSection.Scripts.
 func buildFormSchema(result *xfaTemplateResult, verbose bool) *types.FormSchema {
 	schema := &types.FormSchema{
 		Metadata: types.FormMetadata{
@@ -1446,7 +1394,6 @@ func buildFormSchema(result *xfaTemplateResult, verbose bool) *types.FormSchema 
 			Version:     result.Version,
 		},
 		Questions: make([]types.Question, 0),
-		Rules:     make([]types.Rule, 0),
 	}
 
 	// Pre-pass: claim preceding draw nodes as labels for unlabeled exclGroups.
@@ -1455,15 +1402,98 @@ func buildFormSchema(result *xfaTemplateResult, verbose bool) *types.FormSchema 
 	var qIdx int
 	schema.Sections = walkSubformChildren(result.Root, nil, schema, &qIdx, false, verbose)
 
-	// Extract visibility rules from <variables> function bodies. These functions
-	// contain presence-based logic that XFA field events delegate to rather than
-	// implementing inline, so they can't be attributed to a single field event.
-	for _, fn := range result.VariablesFunctions {
-		newRules := parseVariablesFunctionRules(fn.body, fn.lang, len(schema.Rules))
-		schema.Rules = append(schema.Rules, newRules...)
+	// Append <variables><script> blocks verbatim as FormScripts. These are
+	// template-wide helper definitions (functions invoked from field events) and
+	// are exposed as-is for callers to interpret.
+	for i, vs := range result.VariablesScripts {
+		script := types.FormScript{
+			ID:         formScriptID(vs.OwnerPath, "variables", i),
+			OwnerPath:  vs.OwnerPath,
+			Event:      "variables",
+			Name:       vs.Name,
+			Language:   vs.Lang,
+			Body:       vs.Body,
+			Properties: vs.Properties,
+		}
+		schema.Scripts = append(schema.Scripts, script)
 	}
 
 	return schema
+}
+
+// subformStackPath joins the names of subform/pageArea nodes on the stack into
+// a dot-separated SOM-style path. Skips the synthetic "_root" node so the
+// returned path matches FormSection.Path values. Returns "" when only _root
+// is on the stack.
+func subformStackPath(stack []*xfaNode) string {
+	parts := make([]string, 0, len(stack))
+	for _, n := range stack {
+		if n.Kind != xfaKindSubform && n.Kind != xfaKindPageArea {
+			continue
+		}
+		if n.Name == "" || n.Name == "_root" {
+			continue
+		}
+		parts = append(parts, n.Name)
+	}
+	return strings.Join(parts, ".")
+}
+
+// formScriptID builds a stable FormScript ID from the owner's SOM path,
+// the event activity, and the event's declaration index.
+func formScriptID(ownerPath, event string, index int) string {
+	prefix := ownerPath
+	if prefix == "" {
+		prefix = "$template"
+	}
+	if event == "" {
+		event = "event"
+	}
+	return fmt.Sprintf("%s#%s[%d]", prefix, event, index)
+}
+
+// buildFormScripts converts a node's []XFAEvent into []FormScript with stable
+// IDs. ownerPath is the SOM path of the owner; ownerID is the Question.ID or
+// FormSection.Path that callers can dereference. Events without a body are
+// skipped — they're empty event declarations that carry no payload.
+func buildFormScripts(events []XFAEvent, ownerPath, ownerID string) []types.FormScript {
+	out := make([]types.FormScript, 0, len(events))
+	for i, ev := range events {
+		if strings.TrimSpace(ev.Body) == "" {
+			continue
+		}
+		lang := ev.Lang
+		if lang == "" {
+			lang = "formcalc" // XFA default per spec when contentType is absent
+		}
+		out = append(out, types.FormScript{
+			ID:         formScriptID(ownerPath, ev.Type, i),
+			OwnerPath:  ownerPath,
+			OwnerID:    ownerID,
+			Event:      ev.Type,
+			Name:       ev.Name,
+			Language:   lang,
+			RunAt:      ev.RunAt,
+			Body:       ev.Body,
+			Properties: ev.Properties,
+		})
+	}
+	return out
+}
+
+// appendScripts appends scripts to schema.Scripts and returns the appended IDs
+// in order. The IDs are suitable for storage in Question.Scripts /
+// FormSection.Scripts.
+func appendScripts(schema *types.FormSchema, scripts []types.FormScript) []string {
+	if len(scripts) == 0 {
+		return nil
+	}
+	ids := make([]string, len(scripts))
+	for i, s := range scripts {
+		ids[i] = s.ID
+	}
+	schema.Scripts = append(schema.Scripts, scripts...)
+	return ids
 }
 
 // subformHasInteractive reports whether node contains at least one field or
@@ -1611,20 +1641,43 @@ func walkSubformChildren(node *xfaNode, path []string, schema *types.FormSchema,
 
 		case xfaKindExclGroup:
 			q := emitExclGroup(child, path, qIdx)
+			child.QuestionID = q.ID
+			attachFieldScripts(&q, child, path, schema)
 			schema.Questions = append(schema.Questions, q)
 
 		case xfaKindField:
 			if q, ok := emitField(child, path, qIdx, verbose); ok {
+				child.QuestionID = q.ID
+				attachFieldScripts(&q, child, path, schema)
 				schema.Questions = append(schema.Questions, q)
 			}
 
 		case xfaKindDraw:
 			if q, ok := emitDraw(child, path, node, qIdx, parentHidden); ok {
+				child.QuestionID = q.ID
+				attachFieldScripts(&q, child, path, schema)
 				schema.Questions = append(schema.Questions, q)
 			}
 		}
 	}
 	return sections
+}
+
+// attachFieldScripts builds FormScripts for any events on the node and records
+// their IDs on the Question. The SOM path of the owner is the parent subform
+// path joined with the node's own name.
+func attachFieldScripts(q *types.Question, node *xfaNode, parentPath []string, schema *types.FormSchema) {
+	if len(node.Events) == 0 {
+		return
+	}
+	owner := node.Name
+	if len(parentPath) > 0 {
+		owner = strings.Join(parentPath, ".") + "." + node.Name
+	}
+	ids := appendScripts(schema, buildFormScripts(node.Events, owner, q.ID))
+	if len(ids) > 0 {
+		q.Scripts = ids
+	}
 }
 
 // buildSection creates a FormSection for a subform node and recurses into its children.
@@ -1633,12 +1686,8 @@ func buildSection(node *xfaNode, parentPath []string, schema *types.FormSchema, 
 	copy(path, parentPath)
 	path[len(path)-1] = node.Name
 
-	// Collect any events on the subform node itself as rules.
-	for _, event := range node.Events {
-		if newRules, err := convertXFAEventToRules(event, node.Name, len(schema.Rules)+1); err == nil {
-			schema.Rules = append(schema.Rules, newRules...)
-		}
-	}
+	sectionPath := strings.Join(path, ".")
+	sectionScriptIDs := appendScripts(schema, buildFormScripts(node.Events, sectionPath, sectionPath))
 
 	startLen := len(schema.Questions)
 	nodeHidden := parentHidden || node.Hidden
@@ -1653,13 +1702,14 @@ func buildSection(node *xfaNode, parentPath []string, schema *types.FormSchema, 
 	}
 	sec := types.FormSection{
 		Name:        node.Name,
-		Path:        strings.Join(path, "."),
+		Path:        sectionPath,
 		Label:       label,
 		Tooltip:     node.ToolTip,
 		Interactive: interactive,
 		Layout:      node.Layout,
 		Width:       node.W,
 		Height:      node.H,
+		Scripts:     sectionScriptIDs,
 	}
 	sec.Children = walkSubformChildren(node, path, schema, qIdx, nodeHidden, verbose)
 	// Record all question IDs added during this section's subtree walk.
@@ -2068,130 +2118,8 @@ func mapXFATypeToResponseTypeEnum(xfaType string) types.ResponseType {
 	}
 }
 
-// ── Rules extraction ──────────────────────────────────────────────────────────
-
-// collectFieldEvents collects all field/exclGroup nodes that have events.
-func collectFieldEvents(node *xfaNode, out *[]*xfaNode) {
-	if (node.Kind == xfaKindField || node.Kind == xfaKindExclGroup) && len(node.Events) > 0 {
-		*out = append(*out, node)
-	}
-	for _, child := range node.Children {
-		collectFieldEvents(child, out)
-	}
-}
-
-// extractXFARules extracts control flow rules from field events in the xfaNode tree.
-func extractXFARules(root *xfaNode, verbose bool) ([]types.Rule, error) {
-	var fieldNodes []*xfaNode
-	collectFieldEvents(root, &fieldNodes)
-
-	rules := make([]types.Rule, 0)
-	ruleIndex := 1
-	for _, node := range fieldNodes {
-		for _, event := range node.Events {
-			newRules, err := convertXFAEventToRules(event, node.Name, ruleIndex)
-			if err != nil {
-				if verbose {
-					log.Printf("Warning: Failed to convert event to rule: %v", err)
-				}
-				continue
-			}
-			rules = append(rules, newRules...)
-			ruleIndex += len(newRules)
-		}
-	}
-	return rules, nil
-}
-
-// convertXFAEventToRules converts an XFA event to one or more Rules.
-// Visibility scripts with if/else branches generate two rules (if-branch + else-branch).
-func convertXFAEventToRules(event XFAEvent, sourceField string, index int) ([]types.Rule, error) {
-	defaultType := types.RuleTypeCalculate
-	switch strings.ToLower(event.Type) {
-	case "validate":
-		defaultType = types.RuleTypeValidate
-	case "calculate":
-		defaultType = types.RuleTypeCalculate
-	case "initialize", "docready":
-		defaultType = types.RuleTypeSetValue
-	}
-
-	if event.Script == "" {
-		return []types.Rule{{
-			ID:      fmt.Sprintf("rule_%d", index),
-			Source:  sourceField,
-			Type:    defaultType,
-			Actions: []types.Action{},
-		}}, nil
-	}
-
-	results := parseXFAScript(event.Script, sourceField, event.Target, event.Lang)
-	out := make([]types.Rule, 0, len(results))
-	for i, parsed := range results {
-		ruleType := defaultType
-		if parsed.ruleType != "" {
-			ruleType = parsed.ruleType
-		}
-		rule := types.Rule{
-			ID:          fmt.Sprintf("rule_%d", index+i),
-			Source:      sourceField,
-			Type:        ruleType,
-			Description: parsed.description,
-			Condition:   parsed.condition,
-			Actions:     parsed.actions,
-		}
-		if rule.Actions == nil {
-			rule.Actions = []types.Action{}
-		}
-		out = append(out, rule)
-	}
-	return out, nil
-}
-
-// scriptParseResult holds the structured result of parsing an XFA script body.
-type scriptParseResult struct {
-	ruleType    types.RuleType
-	condition   *types.Condition
-	actions     []types.Action
-	description string
-}
-
-// parseXFAScript analyses an XFA script (FormCalc or JavaScript) and returns
-// one or more structured results. Visibility scripts with if/else produce two.
-// It always succeeds — unknown scripts return a single ActionTypeExecute action.
-// langHint is from the script element's contentType attribute ("formcalc" | "javascript" | "").
-func parseXFAScript(script, sourceField, targetField, langHint string) []scriptParseResult {
-	s := strings.TrimSpace(script)
-	lang := detectScriptLanguage(s, langHint)
-
-	// Try each pattern family in order of specificity.
-	// Validation is tried before set-value so that scripts containing both
-	// a rawValue reference and return true/false are classified as validation.
-	if rs, ok := tryParseVisibilityScript(s, lang, sourceField, targetField); ok {
-		return rs
-	}
-	if r, ok := tryParseValidationScript(s, lang, sourceField); ok {
-		return []scriptParseResult{r}
-	}
-	if r, ok := tryParseSetValueScript(s, lang, sourceField, targetField); ok {
-		return []scriptParseResult{r}
-	}
-	if r, ok := tryParseCalculateScript(s, lang, sourceField); ok {
-		return []scriptParseResult{r}
-	}
-
-	// Fallback: wrap raw script in an execute action.
-	return []scriptParseResult{{
-		actions: []types.Action{{
-			Type:       types.ActionTypeExecute,
-			Target:     targetField,
-			Script:     script,
-			Expression: script,
-		}},
-	}}
-}
-
 // contentTypeToLang maps a <script contentType="..."> value to "formcalc" or "javascript".
+// Returns "" when the contentType is unknown — callers default to "formcalc" per the XFA spec.
 func contentTypeToLang(ct string) string {
 	switch strings.ToLower(ct) {
 	case "application/x-formcalc":
@@ -2200,570 +2128,6 @@ func contentTypeToLang(ct string) string {
 		return "javascript"
 	}
 	return ""
-}
-
-// detectScriptLanguage returns "formcalc" or "javascript".
-// hint is from the script element's contentType attribute; if non-empty it wins.
-// FormCalc uses `then`/`endif` keywords; JavaScript uses `{`/`}` blocks.
-func detectScriptLanguage(s, hint string) string {
-	if hint == "formcalc" || hint == "javascript" {
-		return hint
-	}
-	lower := strings.ToLower(s)
-	if strings.Contains(lower, "then") && (strings.Contains(lower, "endif") || strings.Contains(lower, "end if")) {
-		return "formcalc"
-	}
-	if strings.Contains(s, "{") && strings.Contains(s, "}") {
-		return "javascript"
-	}
-	// FormCalc uses $ for field references and has no braces.
-	if strings.Contains(s, "$.") || strings.Contains(s, "$parent.") {
-		return "formcalc"
-	}
-	return "javascript"
-}
-
-// tryParseVisibilityScript detects scripts that show or hide one or more fields.
-// Returns 1 result for plain visibility scripts, 2 for if/else (one per branch).
-//
-// FormCalc patterns:
-//
-//	$.presence = "visible" / "hidden" / "invisible"
-//	if (cond) then $.presence = "hidden" else $.presence = "visible" endif
-//
-// JavaScript patterns:
-//
-//	this.presence = "visible"
-//	xfa.resolveNode("fieldName").presence = "hidden"
-//	Name.presence = "hidden"  (dotted-path, eSTAR style)
-func tryParseVisibilityScript(s, lang, sourceField, targetField string) ([]scriptParseResult, bool) {
-	lower := strings.ToLower(s)
-	if !strings.Contains(lower, "presence") {
-		return nil, false
-	}
-
-	cond := extractSimpleCondition(s, lang, sourceField)
-
-	// Attempt if/else split for accurate bidirectional visibility.
-	if cond != nil {
-		if ifBody, elseBody, ok := splitIfElse(s, lang); ok {
-			return buildIfElseVisibilityRules(ifBody, elseBody, cond, sourceField, targetField), true
-		}
-	}
-
-	// Single-branch: extract all targets from the full script.
-	targets := extractAllPresenceTargets(s)
-	if len(targets) == 0 {
-		if targetField != "" {
-			targets = []string{targetField}
-		} else {
-			targets = []string{sourceField}
-		}
-	}
-
-	dominant := dominantActionType(lower)
-	actions := presenceActionsForTargets(s, targets, dominant)
-
-	return []scriptParseResult{{
-		ruleType:  types.RuleTypeVisibility,
-		condition: cond,
-		actions:   actions,
-	}}, true
-}
-
-// buildIfElseVisibilityRules creates two visibility rules from an if/else script.
-func buildIfElseVisibilityRules(ifBody, elseBody string, cond *types.Condition, sourceField, targetField string) []scriptParseResult {
-	ifTargets := extractAllPresenceTargets(ifBody)
-	elseTargets := extractAllPresenceTargets(elseBody)
-
-	if len(ifTargets) == 0 {
-		if targetField != "" {
-			ifTargets = []string{targetField}
-		} else {
-			ifTargets = []string{sourceField}
-		}
-	}
-	if len(elseTargets) == 0 {
-		// Mirror the if-branch targets with inverted action types.
-		elseTargets = ifTargets
-	}
-
-	ifActions := presenceActionsForTargets(ifBody, ifTargets, dominantActionType(strings.ToLower(ifBody)))
-	elseActions := presenceActionsForTargets(elseBody, elseTargets, dominantActionType(strings.ToLower(elseBody)))
-
-	return []scriptParseResult{
-		{ruleType: types.RuleTypeVisibility, condition: cond, actions: ifActions},
-		{ruleType: types.RuleTypeVisibility, condition: invertCondition(cond), actions: elseActions},
-	}
-}
-
-// dominantActionType returns ActionTypeHide if "hidden"/"invisible" appears, else ActionTypeShow.
-func dominantActionType(lower string) types.ActionType {
-	if strings.Contains(lower, `"hidden"`) || strings.Contains(lower, `"invisible"`) ||
-		strings.Contains(lower, "'hidden'") || strings.Contains(lower, "'invisible'") {
-		return types.ActionTypeHide
-	}
-	return types.ActionTypeShow
-}
-
-// presenceActionsForTargets builds an Action slice with per-target show/hide.
-func presenceActionsForTargets(s string, targets []string, dominant types.ActionType) []types.Action {
-	actions := make([]types.Action, 0, len(targets))
-	for _, t := range targets {
-		actions = append(actions, types.Action{
-			Type:   perTargetActionType(s, t, dominant),
-			Target: t,
-		})
-	}
-	return actions
-}
-
-// splitIfElse extracts the if-body and else-body from a conditional script.
-// Returns (ifBody, elseBody, true) if a parseable if/else is found.
-func splitIfElse(s, lang string) (ifBody, elseBody string, ok bool) {
-	lower := strings.ToLower(s)
-	if lang == "formcalc" {
-		thenIdx := strings.Index(lower, " then")
-		if thenIdx < 0 {
-			thenIdx = strings.Index(lower, "\tthen")
-		}
-		endIdx := strings.LastIndex(lower, "endif")
-		if thenIdx < 0 || endIdx < 0 {
-			return
-		}
-		body := s[thenIdx+5 : endIdx]
-		bodyLower := strings.ToLower(body)
-		elseIdx := strings.Index(bodyLower, "\nelse")
-		if elseIdx < 0 {
-			elseIdx = strings.Index(bodyLower, "\r\nelse")
-		}
-		if elseIdx < 0 {
-			return
-		}
-		return strings.TrimSpace(body[:elseIdx]), strings.TrimSpace(body[elseIdx+5:]), true
-	}
-	// JavaScript: find the end of the first { } block then look for "else {"
-	braceOpen := strings.Index(s, "{")
-	if braceOpen < 0 {
-		return
-	}
-	depth := 0
-	for i := braceOpen; i < len(s); i++ {
-		switch s[i] {
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				rest := strings.TrimSpace(s[i+1:])
-				if strings.HasPrefix(strings.ToLower(rest), "else") {
-					// Find { and } of the else block.
-					elseOpen := strings.Index(rest, "{")
-					elseClose := strings.LastIndex(rest, "}")
-					if elseOpen >= 0 && elseClose > elseOpen {
-						return s[braceOpen+1 : i], rest[elseOpen+1 : elseClose], true
-					}
-				}
-				return
-			}
-		}
-	}
-	return
-}
-
-// invertCondition returns the logical inverse of a Condition.
-func invertCondition(c *types.Condition) *types.Condition {
-	if c == nil {
-		return nil
-	}
-	switch c.Operator {
-	case types.OperatorEquals:
-		return &types.Condition{Operator: types.OperatorNotEquals, Expression: c.Expression, Value: c.Value, Children: c.Children}
-	case types.OperatorNotEquals:
-		return &types.Condition{Operator: types.OperatorEquals, Expression: c.Expression, Value: c.Value, Children: c.Children}
-	case types.OperatorGreaterThan:
-		return &types.Condition{Operator: types.OperatorLessOrEqual, Expression: c.Expression, Value: c.Value, Children: c.Children}
-	case types.OperatorLessThan:
-		return &types.Condition{Operator: types.OperatorGreaterOrEqual, Expression: c.Expression, Value: c.Value, Children: c.Children}
-	}
-	return &types.Condition{Logic: types.LogicOpNot, Children: []types.Condition{*c}}
-}
-
-// tryParseSetValueScript detects scripts that assign a value to a field.
-//
-// FormCalc: $.rawValue = "literal" or $.rawValue = fieldRef.rawValue
-// JavaScript: this.rawValue = expr  or  xfa.resolveNode("x").rawValue = expr
-func tryParseSetValueScript(s, lang, sourceField, targetField string) (scriptParseResult, bool) {
-	lower := strings.ToLower(s)
-	if !strings.Contains(lower, "rawvalue") && !strings.Contains(lower, ".value") {
-		return scriptParseResult{}, false
-	}
-	// Must contain an assignment.
-	if !strings.Contains(s, "=") {
-		return scriptParseResult{}, false
-	}
-	// Skip comparisons (== / != / <= / >=).
-	assignIdx := findAssignmentOp(s)
-	if assignIdx == -1 {
-		return scriptParseResult{}, false
-	}
-
-	rhs := strings.TrimSpace(s[assignIdx+1:])
-	// Trim trailing semicolons or statement ends.
-	rhs = strings.TrimRight(rhs, "; \t\n\r")
-
-	target := extractResolveNodeTarget(s)
-	if target == "" {
-		target = targetField
-	}
-	if target == "" {
-		target = sourceField
-	}
-
-	cond := extractSimpleCondition(s, lang, sourceField)
-
-	action := types.Action{
-		Type:       types.ActionTypeSetValue,
-		Target:     target,
-		Expression: rhs,
-		Value:      unquoteLiteral(rhs),
-	}
-
-	return scriptParseResult{
-		ruleType:    types.RuleTypeSetValue,
-		condition:   cond,
-		actions:     []types.Action{action},
-		description: fmt.Sprintf("set %q = %s", target, rhs),
-	}, true
-}
-
-// tryParseValidationScript detects scripts used for validation (return true/false).
-func tryParseValidationScript(s, lang, sourceField string) (scriptParseResult, bool) {
-	lower := strings.ToLower(s)
-	hasReturn := strings.Contains(lower, "return true") || strings.Contains(lower, "return false") ||
-		strings.Contains(lower, "return 1") || strings.Contains(lower, "return 0")
-	hasMessage := strings.Contains(lower, "xfa.host.messageBox") || strings.Contains(lower, "app.alert") ||
-		strings.Contains(lower, "console.print") || strings.Contains(lower, "messagebox")
-	if !hasReturn && !hasMessage {
-		return scriptParseResult{}, false
-	}
-
-	cond := extractSimpleCondition(s, lang, sourceField)
-
-	action := types.Action{
-		Type:       types.ActionTypeValidate,
-		Target:     sourceField,
-		Script:     s,
-		Expression: s,
-	}
-
-	return scriptParseResult{
-		ruleType:    types.RuleTypeValidate,
-		condition:   cond,
-		actions:     []types.Action{action},
-		description: "validate " + sourceField,
-	}, true
-}
-
-// tryParseCalculateScript detects scripts that compute a value (Sum, arithmetic, concat).
-func tryParseCalculateScript(s, lang, sourceField string) (scriptParseResult, bool) {
-	lower := strings.ToLower(s)
-	// FormCalc built-in functions or obvious arithmetic.
-	calcKeywords := []string{"sum(", "count(", "avg(", "min(", "max(", "concat(", "len(", "substr(", "num2str(", "str2num("}
-	isCalc := false
-	for _, kw := range calcKeywords {
-		if strings.Contains(lower, kw) {
-			isCalc = true
-			break
-		}
-	}
-	// JavaScript: typical calculate pattern involves return of an expression.
-	if !isCalc && lang == "javascript" && strings.Contains(lower, "return ") {
-		isCalc = true
-	}
-	if !isCalc {
-		return scriptParseResult{}, false
-	}
-
-	// Extract the expression: look for last `return <expr>` or the whole script.
-	expr := extractReturnExpression(s)
-	if expr == "" {
-		expr = s
-	}
-
-	action := types.Action{
-		Type:       types.ActionTypeCalculate,
-		Target:     sourceField,
-		Expression: expr,
-		Script:     s,
-	}
-
-	return scriptParseResult{
-		ruleType:    types.RuleTypeCalculate,
-		actions:     []types.Action{action},
-		description: fmt.Sprintf("calculate %s", sourceField),
-	}, true
-}
-
-// extractSimpleCondition parses an `if` guard from the script and returns a
-// *Condition for simple comparisons (field == value, field != value, etc.).
-// Returns nil if no parseable condition is present.
-func extractSimpleCondition(s, lang, sourceField string) *types.Condition {
-	// Extract the condition expression from an if-statement.
-	var condExpr string
-	if lang == "formcalc" {
-		// if (expr) then ... endif  OR  if expr then ... endif
-		if i := strings.Index(strings.ToLower(s), "if "); i >= 0 {
-			rest := s[i+3:]
-			// Find the matching "then"
-			thenIdx := strings.Index(strings.ToLower(rest), " then")
-			if thenIdx > 0 {
-				condExpr = strings.TrimSpace(rest[:thenIdx])
-				condExpr = strings.TrimPrefix(condExpr, "(")
-				condExpr = strings.TrimSuffix(condExpr, ")")
-			}
-		}
-	} else {
-		// JavaScript: if (expr) { ... }
-		if i := strings.Index(s, "if ("); i >= 0 {
-			rest := s[i+4:]
-			depth := 1
-			for j := 0; j < len(rest); j++ {
-				if rest[j] == '(' {
-					depth++
-				} else if rest[j] == ')' {
-					depth--
-					if depth == 0 {
-						condExpr = strings.TrimSpace(rest[:j])
-						break
-					}
-				}
-			}
-		} else if i := strings.Index(s, "if("); i >= 0 {
-			rest := s[i+3:]
-			depth := 1
-			for j := 0; j < len(rest); j++ {
-				if rest[j] == '(' {
-					depth++
-				} else if rest[j] == ')' {
-					depth--
-					if depth == 0 {
-						condExpr = strings.TrimSpace(rest[:j])
-						break
-					}
-				}
-			}
-		}
-	}
-
-	if condExpr == "" {
-		return nil
-	}
-
-	// Try to parse a simple binary comparison: lhs op rhs
-	op, lhs, rhs := parseSimpleComparison(condExpr)
-	if op == "" {
-		// Return the condition as a raw expression.
-		return &types.Condition{Expression: condExpr}
-	}
-
-	// Resolve lhs to a field reference where possible.
-	fieldRef := extractFieldRef(lhs, sourceField)
-
-	return &types.Condition{
-		Operator:   op,
-		Expression: condExpr,
-		Value:      unquoteLiteral(rhs),
-		Children: []types.Condition{{
-			Expression: fieldRef,
-		}},
-	}
-}
-
-// parseSimpleComparison splits "lhs op rhs" into parts.
-// Returns empty op if the expression is not a simple binary comparison.
-func parseSimpleComparison(expr string) (types.Operator, string, string) {
-	ops := []struct {
-		sym string
-		op  types.Operator
-	}{
-		{"==", types.OperatorEquals},
-		{"!=", types.OperatorNotEquals},
-		{"<>", types.OperatorNotEquals},
-		{">=", types.OperatorGreaterOrEqual},
-		{"<=", types.OperatorLessOrEqual},
-		{">", types.OperatorGreaterThan},
-		{"<", types.OperatorLessThan},
-	}
-	for _, candidate := range ops {
-		idx := strings.Index(expr, candidate.sym)
-		if idx < 0 {
-			continue
-		}
-		lhs := strings.TrimSpace(expr[:idx])
-		rhs := strings.TrimSpace(expr[idx+len(candidate.sym):])
-		if lhs != "" && rhs != "" {
-			return candidate.op, lhs, rhs
-		}
-	}
-	return "", "", ""
-}
-
-// extractFieldRef converts an XFA field reference token (e.g. "$.rawValue",
-// "this.rawValue", "fieldName.rawValue") into a plain field name.
-func extractFieldRef(token, currentField string) string {
-	t := strings.TrimSpace(token)
-	// $.rawValue / $.value → current field
-	if strings.HasPrefix(t, "$.") || t == "$" {
-		return currentField
-	}
-	// this.rawValue / this.value → current field
-	if strings.HasPrefix(strings.ToLower(t), "this.") || t == "this" {
-		return currentField
-	}
-	// Strip .rawValue / .value suffixes.
-	for _, suffix := range []string{".rawValue", ".value", ".rawvalue"} {
-		if strings.HasSuffix(strings.ToLower(t), suffix) {
-			return t[:len(t)-len(suffix)]
-		}
-	}
-	return t
-}
-
-// extractAllPresenceTargets collects every field name that a script assigns
-// .presence to, handling both xfa.resolveNode("name") and Name.presence= patterns.
-func extractAllPresenceTargets(s string) []string {
-	seen := map[string]bool{}
-	var out []string
-
-	// resolveNode("name").presence pattern — only static string arguments.
-	lower := strings.ToLower(s)
-	for offset := 0; ; {
-		idx := strings.Index(lower[offset:], "resolvenode(")
-		if idx == -1 {
-			break
-		}
-		abs := offset + idx
-		rest := strings.TrimSpace(s[abs+12:])
-		// Skip dynamic expressions — argument must start with a quote.
-		if len(rest) == 0 || (rest[0] != '"' && rest[0] != '\'') {
-			offset = abs + 12
-			continue
-		}
-		quote := rest[0]
-		rest = rest[1:]
-		end := strings.IndexByte(rest, quote)
-		if end == -1 {
-			offset = abs + 12
-			continue
-		}
-		name := rest[:end]
-		// Strip leading SOM path (e.g. "xfa.form.root.Section.field" → "field").
-		if dot := strings.LastIndex(name, "."); dot >= 0 {
-			name = name[dot+1:]
-		}
-		if name != "" && !seen[name] {
-			seen[name] = true
-			out = append(out, name)
-		}
-		offset = abs + 12
-	}
-
-	// Name.presence = pattern (identifier followed by .presence)
-	for _, m := range presenceTargetRe.FindAllStringSubmatch(s, -1) {
-		name := m[1]
-		// Exclude XFA built-ins that are never field names.
-		if name == "this" || name == "xfa" || name == "event" || name == "xfaForm" {
-			continue
-		}
-		if !seen[name] {
-			seen[name] = true
-			out = append(out, name)
-		}
-	}
-	return out
-}
-
-// perTargetActionType determines whether a script shows or hides a specific
-// named target by looking for "target.presence = '...'" nearby.
-func perTargetActionType(s, target string, fallback types.ActionType) types.ActionType {
-	re := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(target) + `\.presence\s*=\s*["'](\w+)["']`)
-	m := re.FindStringSubmatch(s)
-	if m == nil {
-		return fallback
-	}
-	v := strings.ToLower(m[1])
-	if v == "hidden" || v == "invisible" || v == "inactive" {
-		return types.ActionTypeHide
-	}
-	return types.ActionTypeShow
-}
-
-// extractResolveNodeTarget parses `xfa.resolveNode("fieldName")` and returns fieldName.
-// Only handles static string arguments; returns "" for dynamic expressions.
-func extractResolveNodeTarget(s string) string {
-	lower := strings.ToLower(s)
-	idx := strings.Index(lower, "resolvenode(")
-	if idx == -1 {
-		return ""
-	}
-	rest := strings.TrimSpace(s[idx+12:])
-	if len(rest) == 0 || (rest[0] != '"' && rest[0] != '\'') {
-		return ""
-	}
-	quote := rest[0]
-	rest = rest[1:]
-	end := strings.IndexByte(rest, quote)
-	if end == -1 {
-		return ""
-	}
-	name := rest[:end]
-	// Strip leading SOM path.
-	if dot := strings.LastIndex(name, "."); dot >= 0 {
-		name = name[dot+1:]
-	}
-	return name
-}
-
-// extractReturnExpression finds the last `return <expr>` in a script and
-// returns the expression part.
-func extractReturnExpression(s string) string {
-	lower := strings.ToLower(s)
-	idx := strings.LastIndex(lower, "return ")
-	if idx == -1 {
-		return ""
-	}
-	expr := strings.TrimSpace(s[idx+7:])
-	// Trim trailing statement terminators.
-	expr = strings.TrimRight(expr, "; \t\n\r")
-	// Take only the first line.
-	if nl := strings.IndexAny(expr, "\n\r"); nl > 0 {
-		expr = strings.TrimSpace(expr[:nl])
-	}
-	return strings.TrimRight(expr, ";")
-}
-
-// findAssignmentOp returns the index of a bare `=` that is not part of
-// `==`, `!=`, `<=`, or `>=`. Returns -1 if none found.
-func findAssignmentOp(s string) int {
-	for i := 1; i < len(s)-1; i++ {
-		if s[i] == '=' && s[i-1] != '!' && s[i-1] != '<' && s[i-1] != '>' && s[i-1] != '=' && s[i+1] != '=' {
-			return i
-		}
-	}
-	return -1
-}
-
-// unquoteLiteral strips surrounding " or ' from a string literal.
-// Returns nil if the value is not a string literal.
-func unquoteLiteral(s string) interface{} {
-	s = strings.TrimSpace(s)
-	if len(s) >= 2 {
-		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
-			return s[1 : len(s)-1]
-		}
-	}
-	return nil
 }
 
 // Helper functions
@@ -2776,6 +2140,15 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// putAttr lazily initialises m and writes value under name. Used to capture
+// unknown <event>/<script> attributes into FormScript.Properties.
+func putAttr(m *map[string]interface{}, name, value string) {
+	if *m == nil {
+		*m = make(map[string]interface{})
+	}
+	(*m)[name] = value
 }
 
 func parseBool(s string) bool {
@@ -2820,206 +2193,4 @@ func extractPageCount(xfaXML string) int {
 		pageCount = strings.Count(xfaXML, "<pageSet")
 	}
 	return pageCount
-}
-
-// ── Variables function rule extraction ───────────────────────────────────────
-
-// extractJSFunctionBodies parses function definitions from a JavaScript block
-// and returns each function's body (content between the outer braces).
-func extractJSFunctionBodies(script, lang string) []variablesFuncDef {
-	var out []variablesFuncDef
-	matches := xfaFuncDeclRe.FindAllStringSubmatchIndex(script, -1)
-	for _, m := range matches {
-		// m[1]-1 is the position of '{' ending the function signature.
-		braceStart := m[1] - 1
-		if braceStart < 0 || braceStart >= len(script) || script[braceStart] != '{' {
-			continue
-		}
-		end := matchingBraceJS(script, braceStart)
-		if end < 0 {
-			continue
-		}
-		body := script[braceStart+1 : end]
-		if strings.TrimSpace(body) != "" {
-			out = append(out, variablesFuncDef{body: body, lang: lang})
-		}
-	}
-	return out
-}
-
-// matchingBraceJS returns the index of the closing '}' that matches the '{' at
-// position start. Returns -1 if not found.
-func matchingBraceJS(s string, start int) int {
-	depth := 0
-	for i := start; i < len(s); i++ {
-		switch s[i] {
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				return i
-			}
-		}
-	}
-	return -1
-}
-
-// matchingParenJS returns the index of the closing ')' matching the '(' at start.
-func matchingParenJS(s string, start int) int {
-	depth := 0
-	for i := start; i < len(s); i++ {
-		switch s[i] {
-		case '(':
-			depth++
-		case ')':
-			depth--
-			if depth == 0 {
-				return i
-			}
-		}
-	}
-	return -1
-}
-
-// ifChainBranch is a single branch of an if/else-if*/else? chain.
-type ifChainBranch struct {
-	cond string // raw JS condition expression; empty for the final else branch
-	body string // body of the branch (content between { and })
-}
-
-// splitJSIfElseChain splits a JavaScript if/else-if*/else? chain into branches.
-// Returns nil if the script doesn't start with an if statement.
-func splitJSIfElseChain(s string) []ifChainBranch {
-	var branches []ifChainBranch
-	rest := strings.TrimSpace(s)
-
-	for {
-		lower := strings.ToLower(rest)
-		if !strings.HasPrefix(lower, "if") {
-			break
-		}
-		// Require "if (" or "if(" — not "ifdef" etc.
-		if len(rest) > 2 && rest[2] != '(' && rest[2] != ' ' && rest[2] != '\t' {
-			break
-		}
-
-		// Find condition in ( ... )
-		parenStart := strings.Index(rest, "(")
-		if parenStart < 0 {
-			break
-		}
-		parenEnd := matchingParenJS(rest, parenStart)
-		if parenEnd < 0 {
-			break
-		}
-		cond := strings.TrimSpace(rest[parenStart+1 : parenEnd])
-
-		// Find the body block { ... }
-		braceStart := strings.Index(rest[parenEnd:], "{")
-		if braceStart < 0 {
-			break
-		}
-		braceStart += parenEnd
-		braceEnd := matchingBraceJS(rest, braceStart)
-		if braceEnd < 0 {
-			break
-		}
-		body := rest[braceStart+1 : braceEnd]
-		branches = append(branches, ifChainBranch{cond: cond, body: body})
-		rest = strings.TrimSpace(rest[braceEnd+1:])
-
-		// Check for else / else if
-		lower = strings.ToLower(rest)
-		if !strings.HasPrefix(lower, "else") {
-			break
-		}
-		rest = strings.TrimSpace(rest[4:]) // consume "else"
-		lower = strings.ToLower(rest)
-		if strings.HasPrefix(lower, "if") {
-			// else if — continue the loop
-			continue
-		}
-		// Final else { ... }
-		if strings.HasPrefix(lower, "{") {
-			braceEnd2 := matchingBraceJS(rest, 0)
-			if braceEnd2 >= 0 {
-				branches = append(branches, ifChainBranch{body: rest[1:braceEnd2]})
-			}
-		}
-		break
-	}
-
-	return branches
-}
-
-// parseVariablesFunctionRules extracts visibility rules from a <variables>
-// function body. The function body typically contains an if/else-if chain
-// keyed on a radio-button or select field's rawValue.
-func parseVariablesFunctionRules(funcBody, lang string, baseIndex int) []types.Rule {
-	lower := strings.ToLower(funcBody)
-	if !strings.Contains(lower, "presence") {
-		return nil
-	}
-
-	var branches []ifChainBranch
-	if lang == "javascript" || lang == "" {
-		branches = splitJSIfElseChain(strings.TrimSpace(funcBody))
-	}
-
-	var source string
-	if len(branches) > 0 && branches[0].cond != "" {
-		if m := xfaRawValueCondRe.FindStringSubmatch(branches[0].cond); m != nil {
-			source = m[1]
-		}
-	}
-
-	var rules []types.Rule
-
-	if len(branches) > 0 {
-		// Generate one rule per branch with the exact condition.
-		for i, branch := range branches {
-			targets := extractAllPresenceTargets(branch.body)
-			if len(targets) == 0 {
-				continue
-			}
-			actions := presenceActionsForTargets(branch.body, targets,
-				dominantActionType(strings.ToLower(branch.body)))
-			if len(actions) == 0 {
-				continue
-			}
-			var cond *types.Condition
-			if branch.cond != "" {
-				cond = &types.Condition{Expression: branch.cond}
-			}
-			rules = append(rules, types.Rule{
-				ID:        fmt.Sprintf("rule_var_%d", baseIndex+i+1),
-				Source:    source,
-				Type:      types.RuleTypeVisibility,
-				Actions:   actions,
-				Condition: cond,
-			})
-		}
-	} else {
-		// Fallback: no multi-branch parse — use tryParseVisibilityScript on the whole body.
-		results := parseXFAScript(funcBody, source, "", lang)
-		for i, parsed := range results {
-			if parsed.ruleType != types.RuleTypeVisibility {
-				continue
-			}
-			rule := types.Rule{
-				ID:        fmt.Sprintf("rule_var_%d", baseIndex+i+1),
-				Source:    source,
-				Type:      types.RuleTypeVisibility,
-				Condition: parsed.condition,
-				Actions:   parsed.actions,
-			}
-			if rule.Actions == nil {
-				rule.Actions = []types.Action{}
-			}
-			rules = append(rules, rule)
-		}
-	}
-
-	return rules
 }

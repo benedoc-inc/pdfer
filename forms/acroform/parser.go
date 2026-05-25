@@ -301,7 +301,6 @@ func (af *AcroForm) ToFormSchema() *types.FormSchema {
 			FormType: "AcroForm",
 		},
 		Questions: make([]types.Question, 0),
-		Rules:     make([]types.Rule, 0),
 	}
 
 	for _, field := range af.Fields {

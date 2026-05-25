@@ -1243,73 +1243,6 @@ func TestPresenceVisibleField(t *testing.T) {
 	}
 }
 
-func TestMultiTargetVisibilityScript(t *testing.T) {
-	script := `if (this.rawValue == "1") {
-	IMDRF.presence = "visible";
-	USA.presence = "hidden";
-	CDN.presence = "hidden";
-}`
-	results, ok := tryParseVisibilityScript(script, "javascript", "AppType", "")
-	if !ok {
-		t.Fatal("tryParseVisibilityScript should have matched")
-	}
-	result := results[0]
-	if result.ruleType != types.RuleTypeVisibility {
-		t.Errorf("ruleType = %q, want visibility", result.ruleType)
-	}
-	if len(result.actions) != 3 {
-		t.Fatalf("actions count = %d, want 3; got %+v", len(result.actions), result.actions)
-	}
-
-	byTarget := map[string]types.ActionType{}
-	for _, a := range result.actions {
-		byTarget[a.Target] = a.Type
-	}
-	if byTarget["IMDRF"] != types.ActionTypeShow {
-		t.Errorf("IMDRF action = %q, want show", byTarget["IMDRF"])
-	}
-	if byTarget["USA"] != types.ActionTypeHide {
-		t.Errorf("USA action = %q, want hide", byTarget["USA"])
-	}
-	if byTarget["CDN"] != types.ActionTypeHide {
-		t.Errorf("CDN action = %q, want hide", byTarget["CDN"])
-	}
-}
-
-func TestThisPresenceFallback(t *testing.T) {
-	// Script only uses "this.presence" — no named external targets.
-	// Should fall back to sourceField.
-	script := `this.presence = "hidden";`
-	results, ok := tryParseVisibilityScript(script, "javascript", "myField", "")
-	if !ok {
-		t.Fatal("tryParseVisibilityScript should have matched")
-	}
-	result := results[0]
-	if len(result.actions) != 1 {
-		t.Fatalf("actions count = %d, want 1", len(result.actions))
-	}
-	if result.actions[0].Target != "myField" {
-		t.Errorf("action target = %q, want myField", result.actions[0].Target)
-	}
-	if result.actions[0].Type != types.ActionTypeHide {
-		t.Errorf("action type = %q, want hide", result.actions[0].Type)
-	}
-}
-
-func TestPerTargetActionType(t *testing.T) {
-	script := `IMDRF.presence = "visible"; USA.presence = "hidden";`
-	if got := perTargetActionType(script, "IMDRF", types.ActionTypeHide); got != types.ActionTypeShow {
-		t.Errorf("IMDRF: got %q, want show", got)
-	}
-	if got := perTargetActionType(script, "USA", types.ActionTypeShow); got != types.ActionTypeHide {
-		t.Errorf("USA: got %q, want hide", got)
-	}
-	// Unknown target falls back to the provided default.
-	if got := perTargetActionType(script, "OTHER", types.ActionTypeShow); got != types.ActionTypeShow {
-		t.Errorf("OTHER: got %q, want show (fallback)", got)
-	}
-}
-
 // ── Rendering improvement tests ───────────────────────────────────────────────
 
 // TestPositionProperties verifies that x/y/w/h attributes on fields and subforms
@@ -1954,38 +1887,25 @@ func TestPresenceAttrImageEmitted(t *testing.T) {
 	}
 }
 
-// TestVariablesBlockRulesExtracted verifies that <variables><script> function
-// bodies with presence-based if/else-if chains are extracted as visibility rules.
-func TestVariablesBlockRulesExtracted(t *testing.T) {
-	xfaXML := `<template>
-  <variables>
-    <script name="Functions" contentType="application/x-javascript">
+// TestVariablesBlockExtracted verifies that <variables><script> blocks are
+// exposed verbatim as FormScripts on the schema. pdfer no longer interprets
+// the body; callers can parse the JavaScript themselves.
+func TestVariablesBlockExtracted(t *testing.T) {
+	body := `
       function AutoPopulate() {
         if (AppType.rawValue == "0") {
           SectionA.presence = "visible";
-          SectionB.presence = "hidden";
-          SectionC.presence = "hidden";
         } else if (AppType.rawValue == "1") {
-          SectionA.presence = "hidden";
           SectionB.presence = "visible";
-          SectionC.presence = "hidden";
-        } else if (AppType.rawValue == "2") {
-          SectionA.presence = "hidden";
-          SectionB.presence = "hidden";
-          SectionC.presence = "visible";
         }
       }
-    </script>
+    `
+	xfaXML := `<template>
+  <variables>
+    <script name="Functions" contentType="application/x-javascript">` + body + `</script>
   </variables>
   <subform name="Page1">
-    <exclGroup name="AppType">
-      <field name="opt0"><ui><checkButton/></ui><items><text>A</text></items><items save="1"><text>0</text></items></field>
-      <field name="opt1"><ui><checkButton/></ui><items><text>B</text></items><items save="1"><text>1</text></items></field>
-      <field name="opt2"><ui><checkButton/></ui><items><text>C</text></items><items save="1"><text>2</text></items></field>
-    </exclGroup>
-    <subform name="SectionA"><field name="FieldA"><ui><textEdit/></ui><caption><value><text>Field A</text></value></caption></field></subform>
-    <subform name="SectionB"><field name="FieldB"><ui><textEdit/></ui><caption><value><text>Field B</text></value></caption></field></subform>
-    <subform name="SectionC"><field name="FieldC"><ui><textEdit/></ui><caption><value><text>Field C</text></value></caption></field></subform>
+    <field name="anchor"><ui><textEdit/></ui></field>
   </subform>
 </template>`
 
@@ -1993,31 +1913,25 @@ func TestVariablesBlockRulesExtracted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseXFAForm() error = %v", err)
 	}
-	if len(form.Rules) != 3 {
-		t.Fatalf("expected 3 rules from variables block, got %d: %+v", len(form.Rules), form.Rules)
-	}
-	// Rule 0: AppType == "0" → SectionA show, SectionB hide, SectionC hide
-	r0 := form.Rules[0]
-	if r0.Type != types.RuleTypeVisibility {
-		t.Errorf("rule 0 type = %v", r0.Type)
-	}
-	if r0.Condition == nil || r0.Condition.Expression != `AppType.rawValue == "0"` {
-		t.Errorf("rule 0 condition = %+v", r0.Condition)
-	}
-	// Rule 1: AppType == "1" → SectionB show
-	r1 := form.Rules[1]
-	if r1.Condition == nil || r1.Condition.Expression != `AppType.rawValue == "1"` {
-		t.Errorf("rule 1 condition = %+v", r1.Condition)
-	}
-	// Verify rule 1 shows SectionB
-	var found bool
-	for _, a := range r1.Actions {
-		if a.Type == types.ActionTypeShow && a.Target == "SectionB" {
-			found = true
+
+	var variablesScripts []types.FormScript
+	for _, s := range form.Scripts {
+		if s.Event == "variables" {
+			variablesScripts = append(variablesScripts, s)
 		}
 	}
-	if !found {
-		t.Errorf("rule 1 actions don't include show SectionB: %+v", r1.Actions)
+	if len(variablesScripts) != 1 {
+		t.Fatalf("expected 1 variables script, got %d: %+v", len(variablesScripts), variablesScripts)
+	}
+	s := variablesScripts[0]
+	if s.Name != "Functions" {
+		t.Errorf("script name = %q, want %q", s.Name, "Functions")
+	}
+	if s.Language != "javascript" {
+		t.Errorf("language = %q, want javascript", s.Language)
+	}
+	if s.Body != body {
+		t.Errorf("body not preserved verbatim:\n got: %q\nwant: %q", s.Body, body)
 	}
 }
 

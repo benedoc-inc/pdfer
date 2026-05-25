@@ -99,7 +99,7 @@ func TestXFARoundTrip(t *testing.T) {
 			t.Logf("Warning: Failed to parse template as form: %v", err)
 		} else {
 			xfaData.Form = form
-			t.Logf("Parsed form: %d questions, %d rules", len(form.Questions), len(form.Rules))
+			t.Logf("Parsed form: %d questions, %d scripts", len(form.Questions), len(form.Scripts))
 		}
 	}
 
