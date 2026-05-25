@@ -427,7 +427,7 @@ func buildPage2(p *write.PageBuilder) {
 // buildPage3WithForm draws the field-type catalog labels AND places the AcroForm
 // widget annotations in a single pass so positions can never drift apart.
 func buildPage3WithForm(p *write.PageBuilder, fb *acroform.FormBuilder) {
-	const pg = 2   // 0-based page index
+	const pg = 2 // 0-based page index
 	const lx = 72.0
 	const rx = 316.0
 	const lw = 222.0

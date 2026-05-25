@@ -4,12 +4,12 @@ package write
 // It tracks the current Y cursor in each column so callers can place
 // content (text boxes, tables, images) sequentially within columns.
 type ColumnLayout struct {
-	page      *PageBuilder
-	cols      int
-	colX      []float64 // left edge of each column
-	colWidth  float64   // width of each column (uniform)
-	cursorY   []float64 // current top-of-content Y for each column (decreases as content is added)
-	top       float64   // initial top Y
+	page     *PageBuilder
+	cols     int
+	colX     []float64 // left edge of each column
+	colWidth float64   // width of each column (uniform)
+	cursorY  []float64 // current top-of-content Y for each column (decreases as content is added)
+	top      float64   // initial top Y
 }
 
 // NewColumnLayout creates a column layout within [x, x+width] starting at y.

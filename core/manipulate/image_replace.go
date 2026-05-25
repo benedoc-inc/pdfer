@@ -166,12 +166,12 @@ func (m *PDFManipulator) replaceImageStream(objNum int, newData []byte, format s
 			}
 			streamBytes = buf.Bytes()
 			newDictEntries = map[string]string{
-				"/Filter":         "/FlateDecode",
-				"/ColorSpace":     "/DeviceRGB",
+				"/Filter":           "/FlateDecode",
+				"/ColorSpace":       "/DeviceRGB",
 				"/BitsPerComponent": "8",
-				"/Length":         strconv.Itoa(len(streamBytes)),
-				"/Width":          strconv.Itoa(w),
-				"/Height":         strconv.Itoa(h),
+				"/Length":           strconv.Itoa(len(streamBytes)),
+				"/Width":            strconv.Itoa(w),
+				"/Height":           strconv.Itoa(h),
 			}
 		}
 

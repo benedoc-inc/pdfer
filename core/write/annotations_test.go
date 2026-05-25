@@ -379,9 +379,9 @@ func TestAnnotation_AppearanceStreams(t *testing.T) {
 	qp := write.RectToQuadPoints(72, 710, 300, 722)
 
 	cases := []struct {
-		name   string
-		annot  *write.AnnotationBuilder
-		hasAP  bool
+		name  string
+		annot *write.AnnotationBuilder
+		hasAP bool
 	}{
 		{"Square", write.NewSquareAnnotation(72, 600, 300, 700).WithColor(1, 0, 0).WithBorderWidth(2), true},
 		{"Circle", write.NewCircleAnnotation(72, 500, 200, 580).WithColor(0, 0, 1), true},
