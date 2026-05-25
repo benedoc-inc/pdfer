@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // DeriveEncryptionKey derives the encryption key from password

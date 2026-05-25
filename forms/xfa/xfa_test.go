@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/core/encrypt"
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/core/encrypt"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 func TestDecompressStream(t *testing.T) {

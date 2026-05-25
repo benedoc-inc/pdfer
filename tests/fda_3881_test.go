@@ -5,9 +5,9 @@ import (
 	"os"
 	"testing"
 
-	pdfer "github.com/benedoc-inc/pdfer"
-	"github.com/benedoc-inc/pdfer/forms"
-	"github.com/benedoc-inc/pdfer/forms/xfa"
+	pdfer "github.com/benedoc-inc/pdfer/v2"
+	"github.com/benedoc-inc/pdfer/v2/forms"
+	"github.com/benedoc-inc/pdfer/v2/forms/xfa"
 )
 
 // TestFDA3881_Detection verifies that Form 3881 is correctly identified as an XFA form.

@@ -3,7 +3,7 @@ package manipulate
 import (
 	"fmt"
 
-	"github.com/benedoc-inc/pdfer/core/write"
+	"github.com/benedoc-inc/pdfer/v2/core/write"
 )
 
 // ConvertToPDFA converts a PDF to PDF/A format.

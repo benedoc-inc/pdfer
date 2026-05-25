@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // SetMetadata creates an Info dictionary object with the provided metadata
