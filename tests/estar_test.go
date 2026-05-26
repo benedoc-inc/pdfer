@@ -226,7 +226,25 @@ func assertFillWorks(t *testing.T, pdfBytes []byte, filename string) {
 	if !bytes.HasPrefix(filled, []byte("%PDF-")) {
 		t.Errorf("Fill(%s) output does not start with %%PDF- header", filename)
 	}
-	t.Logf("%s fill: %d fields set, output %d bytes", filename, count, len(filled))
+
+	// Round-trip: re-extracting the form from the filled output must succeed
+	// and yield a schema of comparable size. This catches cross-reference
+	// table corruption (xref offsets pointing into stream content) and stream
+	// dictionary corruption (lost /Filter entries) that earlier broke Adobe
+	// without showing up in a %PDF- prefix check.
+	refilled, err := pdfer.ExtractForm(filled, nil, false)
+	if err != nil {
+		t.Fatalf("Fill(%s) output is not re-parseable: %v", filename, err)
+	}
+	refilledSchema := refilled.Schema()
+	if refilledSchema == nil {
+		t.Fatalf("Fill(%s) output has nil schema on re-extract", filename)
+	}
+	if len(refilledSchema.Questions) < len(schema.Questions)*9/10 {
+		t.Errorf("Fill(%s): re-extracted schema has %d questions, expected ~%d (lost more than 10%% — likely structural corruption)",
+			filename, len(refilledSchema.Questions), len(schema.Questions))
+	}
+	t.Logf("%s fill: %d fields set, output %d bytes, re-extracted %d questions", filename, count, len(filled), len(refilledSchema.Questions))
 }
 
 // readESTARPDF loads an eSTAR fixture PDF from tests/resources/ and skips
