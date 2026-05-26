@@ -18,8 +18,8 @@ jobs:
       matrix:
         go: ['1.21', '1.22', '1.23']
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version: ${{ matrix.go }}
       - run: go vet ./...
@@ -29,8 +29,8 @@ jobs:
     name: gofmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.22'
       - name: Check formatting
@@ -46,7 +46,7 @@ jobs:
     name: No hardcoded library version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Reject literal version string in pdfer.go
         run: |
           if grep -nE 'return\s+"v?[0-9]+\.[0-9]+\.[0-9]+"' pdfer.go; then
