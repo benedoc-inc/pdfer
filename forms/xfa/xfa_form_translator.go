@@ -420,6 +420,12 @@ type xfaNode struct {
 	Validation   *XFAValidation
 	Events       []XFAEvent
 
+	// OptionEvents is parallel to Options on exclGroup nodes: one []XFAEvent per
+	// flattened option <field>. Lets per-option event scripts (originally hung off
+	// the individual <field> inside an <exclGroup>) survive the flatten so they
+	// can still be surfaced as FormScripts.
+	OptionEvents [][]XFAEvent
+
 	// UI-element-specific constraints
 	AllowNeutral          bool   // checkButton allowNeutral="1" → tri-state checkbox
 	MaxChars              *int   // textEdit maxChars → ValidationRules.MaxLength
@@ -444,11 +450,6 @@ type xfaNode struct {
 	ExDataHTML       string // plain text extracted from text/html exData without xfa:embed markers
 
 	PageNumber int
-
-	// QuestionID is the ID assigned to this node's emitted Question.
-	// Set by emitField/emitExclGroup after the question is built; empty otherwise.
-	// Used by buildFormScripts to populate FormScript.OwnerID for field-attached scripts.
-	QuestionID string
 }
 
 // xfaTemplateResult bundles the parse tree with top-level metadata.
@@ -965,7 +966,7 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 				}
 				if currentLeaf != nil {
 					currentLeaf.Events = append(currentLeaf.Events, ev)
-				} else if top := topOfStack(); top.Kind == xfaKindSubform {
+				} else if top := topOfStack(); top.Kind == xfaKindSubform || top.Kind == xfaKindPageArea || top.Kind == xfaKindExclGroup {
 					top.Events = append(top.Events, ev)
 				}
 
@@ -1002,7 +1003,7 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 							putAttr(&last.Properties, attr.Name.Local, attr.Value)
 						}
 					}
-				} else if top := topOfStack(); top.Kind == xfaKindSubform && len(top.Events) > 0 {
+				} else if top := topOfStack(); (top.Kind == xfaKindSubform || top.Kind == xfaKindPageArea || top.Kind == xfaKindExclGroup) && len(top.Events) > 0 {
 					inScript = true
 					currentValue.Reset()
 					last := &top.Events[len(top.Events)-1]
@@ -1155,6 +1156,9 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 							optValue = currentLeaf.Name
 						}
 						top.Options = append(top.Options, XFAOption{Label: optLabel, Value: optValue})
+						// Preserve per-option events (parallel slice) so they can still
+						// surface as FormScripts even though the option <field> is flattened.
+						top.OptionEvents = append(top.OptionEvents, currentLeaf.Events)
 						// draws inside exclGroup are decorative labels — fall through and discard
 					} else if top.Kind != xfaKindExclGroup {
 						top.Children = append(top.Children, currentLeaf)
@@ -1269,7 +1273,7 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 				} else if currentLeaf != nil && len(currentLeaf.Events) > 0 {
 					last := &currentLeaf.Events[len(currentLeaf.Events)-1]
 					last.Body = currentValue.String()
-				} else if top := topOfStack(); top.Kind == xfaKindSubform && len(top.Events) > 0 {
+				} else if top := topOfStack(); (top.Kind == xfaKindSubform || top.Kind == xfaKindPageArea || top.Kind == xfaKindExclGroup) && len(top.Events) > 0 {
 					last := &top.Events[len(top.Events)-1]
 					last.Body = currentValue.String()
 				}
@@ -1402,6 +1406,15 @@ func buildFormSchema(result *xfaTemplateResult, verbose bool) *types.FormSchema 
 	var qIdx int
 	schema.Sections = walkSubformChildren(result.Root, nil, schema, &qIdx, false, verbose)
 
+	// Extract every <script> body in the template — including those on nodes
+	// pdfer doesn't emit as a Question or FormSection (event-bearing <draw>s,
+	// bind="none" non-AddAttachment buttons, <pageArea>s, per-option events
+	// inside an <exclGroup>). OwnerID is filled in by the back-ref pass below
+	// when the owner happens to also be a Question/Section; orphan scripts keep
+	// OwnerID empty and rely on OwnerPath for correlation.
+	extractAllScripts(result.Root, schema)
+	populateScriptBackRefs(schema)
+
 	// Append <variables><script> blocks verbatim as FormScripts. These are
 	// template-wide helper definitions (functions invoked from field events) and
 	// are exposed as-is for callers to interpret.
@@ -1481,19 +1494,123 @@ func buildFormScripts(events []XFAEvent, ownerPath, ownerID string) []types.Form
 	return out
 }
 
-// appendScripts appends scripts to schema.Scripts and returns the appended IDs
-// in order. The IDs are suitable for storage in Question.Scripts /
-// FormSection.Scripts.
-func appendScripts(schema *types.FormSchema, scripts []types.FormScript) []string {
-	if len(scripts) == 0 {
-		return nil
+// extractAllScripts walks the entire xfaNode tree and emits a FormScript for
+// every event-bearing node — regardless of whether pdfer also surfaces that
+// node as a Question or FormSection. OwnerPath is the SOM path of the owning
+// node. OwnerID is left blank here and filled in by populateScriptBackRefs
+// when the owner also became a Question/Section; it stays empty for orphan
+// scripts (event-bearing <draw>s, bind="none" non-AddAttachment buttons,
+// <pageArea>s, and per-option events flattened out of an <exclGroup>).
+func extractAllScripts(root *xfaNode, schema *types.FormSchema) {
+	var walk func(*xfaNode, []string)
+	walk = func(node *xfaNode, parentPath []string) {
+		var nodePath []string
+		if node.Name != "" && node.Name != "_root" {
+			nodePath = make([]string, len(parentPath)+1)
+			copy(nodePath, parentPath)
+			nodePath[len(parentPath)] = node.Name
+		} else {
+			nodePath = parentPath
+		}
+		somPath := strings.Join(nodePath, ".")
+
+		if len(node.Events) > 0 {
+			schema.Scripts = append(schema.Scripts, buildFormScripts(node.Events, somPath, "")...)
+		}
+
+		// Per-option events on exclGroup — Options and OptionEvents are parallel
+		// slices populated when child <field>s are flattened into the group.
+		if node.Kind == xfaKindExclGroup {
+			for i, optEvents := range node.OptionEvents {
+				if i >= len(node.Options) || len(optEvents) == 0 {
+					continue
+				}
+				optPath := somPath
+				if v := node.Options[i].Value; v != "" {
+					if optPath == "" {
+						optPath = v
+					} else {
+						optPath = optPath + "." + v
+					}
+				}
+				schema.Scripts = append(schema.Scripts, buildFormScripts(optEvents, optPath, "")...)
+			}
+		}
+
+		for _, child := range node.Children {
+			walk(child, nodePath)
+		}
 	}
-	ids := make([]string, len(scripts))
-	for i, s := range scripts {
-		ids[i] = s.ID
+	walk(root, nil)
+}
+
+// populateScriptBackRefs indexes schema.Scripts by OwnerPath and fills in the
+// Question.Scripts / FormSection.Scripts back-references, plus the script's
+// OwnerID, whenever its owner happens to be an emitted Question or Section.
+// Orphan scripts keep an empty OwnerID and rely solely on OwnerPath.
+func populateScriptBackRefs(schema *types.FormSchema) {
+	if len(schema.Scripts) == 0 {
+		return
 	}
-	schema.Scripts = append(schema.Scripts, scripts...)
-	return ids
+	byPath := make(map[string][]int)
+	for i, s := range schema.Scripts {
+		if s.OwnerPath == "" {
+			continue
+		}
+		byPath[s.OwnerPath] = append(byPath[s.OwnerPath], i)
+	}
+	if len(byPath) == 0 {
+		return
+	}
+	qByID := make(map[string]*types.Question, len(schema.Questions))
+	for i := range schema.Questions {
+		qByID[schema.Questions[i].ID] = &schema.Questions[i]
+	}
+	covered := make(map[string]bool)
+
+	assign := func(ownerPath, ownerID string) []string {
+		idxs, ok := byPath[ownerPath]
+		if !ok {
+			return nil
+		}
+		ids := make([]string, len(idxs))
+		for i, idx := range idxs {
+			schema.Scripts[idx].OwnerID = ownerID
+			ids[i] = schema.Scripts[idx].ID
+		}
+		return ids
+	}
+
+	var walkSections func([]types.FormSection)
+	walkSections = func(secs []types.FormSection) {
+		for i := range secs {
+			sec := &secs[i]
+			sec.Scripts = assign(sec.Path, sec.Path)
+			for _, qID := range sec.Questions {
+				q := qByID[qID]
+				if q == nil {
+					continue
+				}
+				covered[qID] = true
+				somPath := q.Name
+				if sec.Path != "" {
+					somPath = sec.Path + "." + q.Name
+				}
+				q.Scripts = assign(somPath, q.ID)
+			}
+			walkSections(sec.Children)
+		}
+	}
+	walkSections(schema.Sections)
+
+	// Root-level questions (no enclosing section) — their SOM path is just Name.
+	for i := range schema.Questions {
+		q := &schema.Questions[i]
+		if covered[q.ID] {
+			continue
+		}
+		q.Scripts = assign(q.Name, q.ID)
+	}
 }
 
 // subformHasInteractive reports whether node contains at least one field or
@@ -1641,43 +1758,20 @@ func walkSubformChildren(node *xfaNode, path []string, schema *types.FormSchema,
 
 		case xfaKindExclGroup:
 			q := emitExclGroup(child, path, qIdx)
-			child.QuestionID = q.ID
-			attachFieldScripts(&q, child, path, schema)
 			schema.Questions = append(schema.Questions, q)
 
 		case xfaKindField:
 			if q, ok := emitField(child, path, qIdx, verbose); ok {
-				child.QuestionID = q.ID
-				attachFieldScripts(&q, child, path, schema)
 				schema.Questions = append(schema.Questions, q)
 			}
 
 		case xfaKindDraw:
 			if q, ok := emitDraw(child, path, node, qIdx, parentHidden); ok {
-				child.QuestionID = q.ID
-				attachFieldScripts(&q, child, path, schema)
 				schema.Questions = append(schema.Questions, q)
 			}
 		}
 	}
 	return sections
-}
-
-// attachFieldScripts builds FormScripts for any events on the node and records
-// their IDs on the Question. The SOM path of the owner is the parent subform
-// path joined with the node's own name.
-func attachFieldScripts(q *types.Question, node *xfaNode, parentPath []string, schema *types.FormSchema) {
-	if len(node.Events) == 0 {
-		return
-	}
-	owner := node.Name
-	if len(parentPath) > 0 {
-		owner = strings.Join(parentPath, ".") + "." + node.Name
-	}
-	ids := appendScripts(schema, buildFormScripts(node.Events, owner, q.ID))
-	if len(ids) > 0 {
-		q.Scripts = ids
-	}
 }
 
 // buildSection creates a FormSection for a subform node and recurses into its children.
@@ -1687,7 +1781,6 @@ func buildSection(node *xfaNode, parentPath []string, schema *types.FormSchema, 
 	path[len(path)-1] = node.Name
 
 	sectionPath := strings.Join(path, ".")
-	sectionScriptIDs := appendScripts(schema, buildFormScripts(node.Events, sectionPath, sectionPath))
 
 	startLen := len(schema.Questions)
 	nodeHidden := parentHidden || node.Hidden
@@ -1709,7 +1802,6 @@ func buildSection(node *xfaNode, parentPath []string, schema *types.FormSchema, 
 		Layout:      node.Layout,
 		Width:       node.W,
 		Height:      node.H,
-		Scripts:     sectionScriptIDs,
 	}
 	sec.Children = walkSubformChildren(node, path, schema, qIdx, nodeHidden, verbose)
 	// Record all question IDs added during this section's subtree walk.

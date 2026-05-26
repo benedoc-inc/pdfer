@@ -386,3 +386,210 @@ func TestVariablesScriptAttrsCaptured(t *testing.T) {
 		t.Errorf("Properties[\"binding\"] = %q, want this", vs.binding)
 	}
 }
+
+// findScript returns the first FormScript matching the given OwnerPath and
+// event activity, or nil if none is found.
+func findScript(scripts []types.FormScript, ownerPath, event string) *types.FormScript {
+	for i := range scripts {
+		if scripts[i].OwnerPath == ownerPath && scripts[i].Event == event {
+			return &scripts[i]
+		}
+	}
+	return nil
+}
+
+// TestPageAreaEventExtracted verifies that <pageArea> events are surfaced as
+// FormScripts with the pageArea's SOM path as OwnerPath. pageAreas are not
+// emitted as Sections, so OwnerID is empty (orphan).
+func TestPageAreaEventExtracted(t *testing.T) {
+	body := `xfa.host.messageBox("page rendered");`
+	xfaXML := `<template>
+  <subform name="form1">
+    <pageArea name="Master">
+      <event activity="ready">
+        <script contentType="application/x-javascript">` + body + `</script>
+      </event>
+    </pageArea>
+    <subform name="Page1">
+      <field name="anchor"><ui><textEdit/></ui></field>
+    </subform>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	s := findScript(form.Scripts, "form1.Master", "ready")
+	if s == nil {
+		t.Fatalf("no script with OwnerPath=form1.Master event=ready; got %+v", form.Scripts)
+	}
+	if s.Body != body {
+		t.Errorf("body = %q, want %q", s.Body, body)
+	}
+	if s.OwnerID != "" {
+		t.Errorf("OwnerID = %q, want empty (pageArea is not a Question/Section)", s.OwnerID)
+	}
+}
+
+// TestBindNoneButtonScriptExtracted verifies that a bind="none" button that is
+// not an AddAttachment (e.g. "Help Text" / "Show Intro" UI triggers) still
+// contributes its click-handler script to FormSchema.Scripts, even though the
+// button itself is not emitted as a Question.
+func TestBindNoneButtonScriptExtracted(t *testing.T) {
+	body := `xfa.host.messageBox("?-hint");`
+	xfaXML := `<template>
+  <subform name="Page1">
+    <field name="helpBtn">
+      <ui><button/></ui>
+      <caption><value><text>Help Text</text></value></caption>
+      <bind match="none"/>
+      <event activity="click">
+        <script contentType="application/x-javascript">` + body + `</script>
+      </event>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	for _, q := range form.Questions {
+		if q.Name == "helpBtn" {
+			t.Fatalf("bind=none non-AddAttachment button should not be emitted as Question; got %+v", q)
+		}
+	}
+	s := findScript(form.Scripts, "Page1.helpBtn", "click")
+	if s == nil {
+		t.Fatalf("no orphan script for Page1.helpBtn click; got %+v", form.Scripts)
+	}
+	if s.Body != body {
+		t.Errorf("body = %q, want %q", s.Body, body)
+	}
+	if s.OwnerID != "" {
+		t.Errorf("OwnerID = %q, want empty (button is not emitted as Question)", s.OwnerID)
+	}
+}
+
+// TestDrawEventScriptExtracted verifies that event-bearing <draw> elements
+// (status indicators with dynamic show/hide handlers) still surface their
+// scripts as orphan FormScripts even though the draw itself is suppressed.
+func TestDrawEventScriptExtracted(t *testing.T) {
+	body := `this.presence = "hidden";`
+	xfaXML := `<template>
+  <subform name="Page1">
+    <draw name="statusOk">
+      <value><text>Required Question Complete</text></value>
+      <event activity="initialize">
+        <script contentType="application/x-javascript">` + body + `</script>
+      </event>
+    </draw>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	for _, q := range form.Questions {
+		if q.Name == "statusOk" {
+			t.Fatalf("event-bearing draw should not be emitted as Question; got %+v", q)
+		}
+	}
+	s := findScript(form.Scripts, "Page1.statusOk", "initialize")
+	if s == nil {
+		t.Fatalf("no orphan script for Page1.statusOk initialize; got %+v", form.Scripts)
+	}
+	if s.Body != body {
+		t.Errorf("body = %q, want %q", s.Body, body)
+	}
+	if s.OwnerID != "" {
+		t.Errorf("OwnerID = %q, want empty (draw is not emitted as Question)", s.OwnerID)
+	}
+}
+
+// TestExclGroupOptionScriptsExtracted verifies that per-option <event>
+// blocks (defined on the individual radio-option <field>s inside an
+// <exclGroup>) are preserved as distinct FormScripts. Each option's script
+// must have its own OwnerPath (exclGroup SOM path + "." + option value) and
+// remain an orphan, while the exclGroup itself (which IS a Question) gets
+// its own script back-ref via the standard Question.Scripts mechanism.
+func TestExclGroupOptionScriptsExtracted(t *testing.T) {
+	bodyA := `xfa.host.messageBox("A selected");`
+	bodyB := `xfa.host.messageBox("B selected");`
+	groupBody := `xfa.host.messageBox("group changed");`
+	xfaXML := `<template>
+  <subform name="Page1">
+    <exclGroup name="choice">
+      <event activity="change">
+        <script contentType="application/x-javascript">` + groupBody + `</script>
+      </event>
+      <field name="optA">
+        <ui><radioButton/></ui>
+        <caption><value><text>A</text></value></caption>
+        <items><text>a</text></items>
+        <event activity="click">
+          <script contentType="application/x-javascript">` + bodyA + `</script>
+        </event>
+      </field>
+      <field name="optB">
+        <ui><radioButton/></ui>
+        <caption><value><text>B</text></value></caption>
+        <items><text>b</text></items>
+        <event activity="click">
+          <script contentType="application/x-javascript">` + bodyB + `</script>
+        </event>
+      </field>
+    </exclGroup>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+
+	var choiceQ *types.Question
+	for i := range form.Questions {
+		if form.Questions[i].Name == "choice" {
+			choiceQ = &form.Questions[i]
+		}
+	}
+	if choiceQ == nil {
+		t.Fatalf("exclGroup 'choice' question missing")
+	}
+
+	groupScript := findScript(form.Scripts, "Page1.choice", "change")
+	if groupScript == nil {
+		t.Fatalf("no script with OwnerPath=Page1.choice event=change; got %+v", form.Scripts)
+	}
+	if groupScript.Body != groupBody {
+		t.Errorf("group body = %q, want %q", groupScript.Body, groupBody)
+	}
+	if groupScript.OwnerID != choiceQ.ID {
+		t.Errorf("group OwnerID = %q, want question ID %q", groupScript.OwnerID, choiceQ.ID)
+	}
+
+	scriptA := findScript(form.Scripts, "Page1.choice.a", "click")
+	if scriptA == nil {
+		t.Fatalf("no per-option script with OwnerPath=Page1.choice.a; got %+v", form.Scripts)
+	}
+	if scriptA.Body != bodyA {
+		t.Errorf("option A body = %q, want %q", scriptA.Body, bodyA)
+	}
+	if scriptA.OwnerID != "" {
+		t.Errorf("option A OwnerID = %q, want empty (orphan)", scriptA.OwnerID)
+	}
+
+	scriptB := findScript(form.Scripts, "Page1.choice.b", "click")
+	if scriptB == nil {
+		t.Fatalf("no per-option script with OwnerPath=Page1.choice.b; got %+v", form.Scripts)
+	}
+	if scriptB.Body != bodyB {
+		t.Errorf("option B body = %q, want %q", scriptB.Body, bodyB)
+	}
+	if scriptB.OwnerID != "" {
+		t.Errorf("option B OwnerID = %q, want empty (orphan)", scriptB.OwnerID)
+	}
+}

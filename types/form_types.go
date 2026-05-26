@@ -100,12 +100,11 @@ type ValidationRules struct {
 // FormScript represents a raw script block extracted from an XFA form.
 // Bodies are exposed verbatim — pdfer does not interpret script semantics.
 //
-// Limitations: scripts attached to XFA nodes that pdfer does not surface in
-// the schema are not extracted. This includes decorative <draw> elements with
-// events (e.g. status indicators), <field> buttons with bind="none" other than
-// AddAttachment, <pageArea>-level events, and individual <field> radio options
-// that are collapsed into an <exclGroup>'s Options. Callers that need full
-// event fidelity should walk the raw XFA XML directly.
+// Scripts whose owner node is not emitted as a Question or FormSection (e.g.
+// event-bearing <draw> elements, bind="none" non-AddAttachment buttons,
+// <pageArea> events, individual radio options collapsed into an <exclGroup>)
+// appear here with OwnerPath set and OwnerID empty. Callers that need to
+// correlate orphan scripts must inspect OwnerPath directly.
 type FormScript struct {
 	ID         string                 `json:"id"`                   // stable: SOM owner path + "#" + event + "[" + index + "]"
 	OwnerPath  string                 `json:"owner_path,omitempty"` // SOM path of containing node (e.g. "form1.section.field"); empty for template-level
