@@ -4,6 +4,7 @@ package forms
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"regexp"
 
@@ -283,7 +284,11 @@ func decryptForXFA(pdfBytes []byte, password []byte, verbose bool) ([]byte, erro
 		// dropped /Encrypt, leaving /Crypt in the filter list makes
 		// readers reject the stream ("Can't revert non decrypt streams").
 		// Strip it from the dict portion before re-emitting.
-		body = xfaStripCryptInDict(body)
+		stripped, stripErr := xfaStripCryptInDict(body)
+		if stripErr != nil {
+			return nil, fmt.Errorf("decrypt: obj %d: %w", n, stripErr)
+		}
+		body = stripped
 		dictBytes, streamBytes := xfaSplitContent(body)
 		if streamBytes != nil {
 			w.SetRawStreamObject(n, dictBytes, streamBytes)
@@ -321,44 +326,58 @@ var xfaFilterRE = regexp.MustCompile(`/Filter\s*(/Crypt\b|\[[^\]]*\])`)
 // applies xfaStripCryptFilter to it. Scoping the regex to the dict portion
 // avoids matching byte sequences that happen to spell "/Filter[/Crypt]"
 // inside binary stream data.
-func xfaStripCryptInDict(body []byte) []byte {
+func xfaStripCryptInDict(body []byte) ([]byte, error) {
 	dictEnd := len(body)
 	if i := bytes.Index(body, []byte("stream")); i >= 0 {
 		dictEnd = i
 	}
-	stripped := xfaStripCryptFilter(body[:dictEnd])
+	stripped, err := xfaStripCryptFilter(body[:dictEnd])
+	if err != nil {
+		return nil, err
+	}
 	if len(stripped) == dictEnd {
 		// No change — return original to avoid allocation.
-		return body
+		return body, nil
 	}
 	out := make([]byte, 0, len(stripped)+(len(body)-dictEnd))
 	out = append(out, stripped...)
 	out = append(out, body[dictEnd:]...)
-	return out
+	return out, nil
 }
+
+// ErrCryptFilterDecodeParmsConflict is returned by xfaStripCryptFilter when a
+// stream dict contains both /Filter[/Crypt /Other...] and an array-form
+// /DecodeParms entry. Per PDF 7.4.1 the two arrays are positionally aligned,
+// so dropping /Crypt from /Filter would shift the parametrisation of every
+// remaining filter by one — a bug we can't fix without also rewriting the
+// /DecodeParms array. The eSTAR templates this code targets never combine
+// /Crypt with other filters, so this case is unreachable in practice; we
+// error rather than silently miscoding it for future inputs.
+var ErrCryptFilterDecodeParmsConflict = errors.New("stream dict has /Filter array with /Crypt plus other filters and an array-form /DecodeParms; dropping /Crypt would misalign /DecodeParms (not supported)")
 
 // xfaStripCryptFilter removes /Crypt from a stream dict's /Filter entry now
 // that the stream bytes are plaintext (and /Encrypt is gone from the trailer).
 // Returns dictBytes unchanged when /Filter contains no /Crypt.
 //
-// Note: filter arrays and the optional /DecodeParms array are positionally
-// aligned per PDF 7.4.1. If /Crypt is the first filter, its matching
-// /DecodeParms slot (typically null/empty) should be dropped too — we leave
-// /DecodeParms alone because the eSTAR templates we've encountered set
-// /DecodeParms only when there's also a non-Crypt filter to parametrise.
-func xfaStripCryptFilter(dictBytes []byte) []byte {
+// Returns ErrCryptFilterDecodeParmsConflict when /Crypt is one of several
+// entries in a /Filter array and the dict also has an array-form
+// /DecodeParms — we'd need to drop the matching /DecodeParms slot too, which
+// this implementation doesn't do.
+func xfaStripCryptFilter(dictBytes []byte) ([]byte, error) {
 	m := xfaFilterRE.FindSubmatchIndex(dictBytes)
 	if m == nil {
-		return dictBytes
+		return dictBytes, nil
 	}
 	value := dictBytes[m[2]:m[3]]
 	if bytes.Equal(bytes.TrimSpace(value), []byte("/Crypt")) {
-		// Bare-name form: drop the whole /Filter entry.
-		return append(append([]byte{}, dictBytes[:m[0]]...), dictBytes[m[1]:]...)
+		// Bare-name form: drop the whole /Filter entry. Any /DecodeParms
+		// becomes an orphan but that's not a correctness hazard — readers
+		// ignore /DecodeParms without a corresponding /Filter.
+		return append(append([]byte{}, dictBytes[:m[0]]...), dictBytes[m[1]:]...), nil
 	}
 	// Array form: split contents, drop any /Crypt name.
 	if value[0] != '[' {
-		return dictBytes
+		return dictBytes, nil
 	}
 	inner := value[1 : len(value)-1]
 	kept := make([][]byte, 0)
@@ -366,6 +385,12 @@ func xfaStripCryptFilter(dictBytes []byte) []byte {
 		if !bytes.Equal(name, []byte("/Crypt")) {
 			kept = append(kept, name)
 		}
+	}
+	if len(kept) > 0 && xfaDecodeParmsArrayRE.Match(dictBytes) {
+		// /Crypt + other filters + array-form /DecodeParms = positional
+		// misalignment after we drop /Crypt. Refuse rather than ship a
+		// stream whose parametrisation has shifted by one slot.
+		return nil, ErrCryptFilterDecodeParmsConflict
 	}
 	var replacement []byte
 	switch len(kept) {
@@ -391,8 +416,14 @@ func xfaStripCryptFilter(dictBytes []byte) []byte {
 	out = append(out, dictBytes[:m[0]]...)
 	out = append(out, replacement...)
 	out = append(out, dictBytes[m[1]:]...)
-	return out
+	return out, nil
 }
+
+// xfaDecodeParmsArrayRE matches an array-form /DecodeParms entry, which is
+// the case where positional alignment with /Filter matters. A dict-form
+// (`/DecodeParms <<...>>`) implies a single filter so /Crypt arithmetic
+// doesn't apply.
+var xfaDecodeParmsArrayRE = regexp.MustCompile(`/DecodeParms\s*\[`)
 
 func xfaSplitContent(content []byte) (dictBytes, streamBytes []byte) {
 	for _, sep := range [][]byte{[]byte("\nstream\r\n"), []byte("\nstream\n")} {

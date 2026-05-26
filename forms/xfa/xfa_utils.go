@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/flate"
 	"compress/zlib"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -947,21 +948,37 @@ func ReplaceStreamInPDF(pdfBytes []byte, streamObjNum int, newStream []byte, ver
 		// targets the xref table's new location; shiftXRefOffsets then reads
 		// that updated pointer to find and rewrite the entries.
 		result = shiftStartXRef(result, delta)
-		result = shiftXRefOffsets(result, pivot, delta)
+		shifted, err := shiftXRefOffsets(result, pivot, delta)
+		if err != nil {
+			return nil, fmt.Errorf("ReplaceStreamInPDF stream %d: %w", streamObjNum, err)
+		}
+		result = shifted
 	}
 
 	return result, nil
 }
 
+// ErrXRefStreamUnsupported is returned by ReplaceStreamInPDF when the input
+// PDF stores its cross-reference table as a stream (PDF 1.5+) rather than a
+// classical text xref table. We can patch the offsets in a text xref table
+// but not in a binary xref stream; producing output anyway would silently
+// point readers into the middle of binary streams. See issue #12 for the
+// follow-up that lifts this restriction by switching XFA fill to incremental
+// updates.
+var ErrXRefStreamUnsupported = errors.New("input PDF uses a cross-reference stream; ReplaceStreamInPDF only supports classical xref tables")
+
 // shiftXRefOffsets walks the classical (text) xref table in pdfBytes and adds
 // delta to every in-use ('n') entry whose recorded offset is greater than
 // pivot — i.e. every object that physically moved when bytes were inserted or
 // removed earlier in the file. Free ('f') entries are skipped because their
-// offset field encodes the next free object number, not a file offset. If the
-// PDF uses a cross-reference stream (no text xref between `startxref` and
-// `trailer`), this function is a no-op and the caller is responsible for
-// handling that case.
-func shiftXRefOffsets(pdfBytes []byte, pivot, delta int64) []byte {
+// offset field encodes the next free object number, not a file offset.
+//
+// Returns ErrXRefStreamUnsupported when the PDF uses a cross-reference
+// stream. We deliberately error rather than no-op: a no-op leaves stale
+// offsets in the xref stream and produces files that look fine until a
+// reader actually walks the xref, at which point it lands in the middle of
+// a binary stream.
+func shiftXRefOffsets(pdfBytes []byte, pivot, delta int64) ([]byte, error) {
 	tail := pdfBytes
 	if len(tail) > 256 {
 		tail = tail[len(tail)-256:]
@@ -969,20 +986,22 @@ func shiftXRefOffsets(pdfBytes []byte, pivot, delta int64) []byte {
 	re := regexp.MustCompile(`startxref\s+(\d+)`)
 	loc := re.FindSubmatchIndex(tail)
 	if loc == nil {
-		return pdfBytes
+		return nil, fmt.Errorf("shiftXRefOffsets: startxref not found in tail")
 	}
 	xrefOff, err := strconv.ParseInt(string(tail[loc[2]:loc[3]]), 10, 64)
-	if err != nil || xrefOff < 0 || xrefOff >= int64(len(pdfBytes)) {
-		return pdfBytes
+	if err != nil {
+		return nil, fmt.Errorf("shiftXRefOffsets: parse startxref: %w", err)
+	}
+	if xrefOff < 0 || xrefOff >= int64(len(pdfBytes)) {
+		return nil, fmt.Errorf("shiftXRefOffsets: startxref offset %d out of bounds (len %d)", xrefOff, len(pdfBytes))
 	}
 	xrefBody := pdfBytes[xrefOff:]
 	if !bytes.HasPrefix(bytes.TrimLeft(xrefBody, " \t\r\n"), []byte("xref")) {
-		// Cross-reference stream — caller must handle.
-		return pdfBytes
+		return nil, ErrXRefStreamUnsupported
 	}
 	trailerRel := bytes.Index(xrefBody, []byte("trailer"))
 	if trailerRel < 0 {
-		return pdfBytes
+		return nil, fmt.Errorf("shiftXRefOffsets: trailer keyword not found after xref")
 	}
 	out := make([]byte, len(pdfBytes))
 	copy(out, pdfBytes)
@@ -1001,7 +1020,7 @@ func shiftXRefOffsets(pdfBytes []byte, pivot, delta int64) []byte {
 		newStr := fmt.Sprintf("%010d", old+delta)
 		copy(section[offStart:offEnd], newStr)
 	}
-	return out
+	return out, nil
 }
 
 // shiftStartXRef adjusts the startxref offset near the end of a PDF by delta bytes.

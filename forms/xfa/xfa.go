@@ -479,7 +479,7 @@ func UpdateXFAInPDF(pdfBytes []byte, formData types.FormData, encryptInfo *types
 	// Update PDF with new stream
 	updatedPDF, err := ReplaceStreamInPDF(pdfBytes, streamObjNum, updatedStream, verbose)
 	if err != nil {
-		return nil, fmt.Errorf("error replacing stream: %v", err)
+		return nil, fmt.Errorf("error replacing stream: %w", err)
 	}
 
 	return updatedPDF, nil
