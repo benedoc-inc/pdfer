@@ -278,6 +278,12 @@ func decryptForXFA(pdfBytes []byte, password []byte, verbose bool) ([]byte, erro
 		if n == rootNum {
 			body = xfaRemoveEncryptRef(body)
 		}
+		// /Filter[/Crypt] tells readers to decrypt the stream with the
+		// document encryption key. After we've decrypted the bytes and
+		// dropped /Encrypt, leaving /Crypt in the filter list makes
+		// readers reject the stream ("Can't revert non decrypt streams").
+		// Strip it from the dict portion before re-emitting.
+		body = xfaStripCryptInDict(body)
 		dictBytes, streamBytes := xfaSplitContent(body)
 		if streamBytes != nil {
 			w.SetRawStreamObject(n, dictBytes, streamBytes)
@@ -298,6 +304,94 @@ var xfaEncryptRefRE = regexp.MustCompile(`/Encrypt\s+\d+\s+\d+\s+R`)
 
 func xfaRemoveEncryptRef(b []byte) []byte {
 	return xfaEncryptRefRE.ReplaceAll(b, nil)
+}
+
+// Matches the /Filter entry of a stream dict, in any of these forms:
+//
+//	/Filter/Crypt                         (bare name, only /Crypt)
+//	/Filter [/Crypt]                      (single-element array)
+//	/Filter [/Crypt /FlateDecode ...]     (array with /Crypt plus codecs)
+//
+// We don't try to handle the bare-name + extra-filters case because PDF syntax
+// requires an array there — a bare /Filter only ever names one filter.
+var xfaFilterRE = regexp.MustCompile(`/Filter\s*(/Crypt\b|\[[^\]]*\])`)
+
+// xfaStripCryptInDict locates the dict portion of an object body (everything
+// before the "stream" keyword, or the whole body for non-stream objects) and
+// applies xfaStripCryptFilter to it. Scoping the regex to the dict portion
+// avoids matching byte sequences that happen to spell "/Filter[/Crypt]"
+// inside binary stream data.
+func xfaStripCryptInDict(body []byte) []byte {
+	dictEnd := len(body)
+	if i := bytes.Index(body, []byte("stream")); i >= 0 {
+		dictEnd = i
+	}
+	stripped := xfaStripCryptFilter(body[:dictEnd])
+	if len(stripped) == dictEnd {
+		// No change — return original to avoid allocation.
+		return body
+	}
+	out := make([]byte, 0, len(stripped)+(len(body)-dictEnd))
+	out = append(out, stripped...)
+	out = append(out, body[dictEnd:]...)
+	return out
+}
+
+// xfaStripCryptFilter removes /Crypt from a stream dict's /Filter entry now
+// that the stream bytes are plaintext (and /Encrypt is gone from the trailer).
+// Returns dictBytes unchanged when /Filter contains no /Crypt.
+//
+// Note: filter arrays and the optional /DecodeParms array are positionally
+// aligned per PDF 7.4.1. If /Crypt is the first filter, its matching
+// /DecodeParms slot (typically null/empty) should be dropped too — we leave
+// /DecodeParms alone because the eSTAR templates we've encountered set
+// /DecodeParms only when there's also a non-Crypt filter to parametrise.
+func xfaStripCryptFilter(dictBytes []byte) []byte {
+	m := xfaFilterRE.FindSubmatchIndex(dictBytes)
+	if m == nil {
+		return dictBytes
+	}
+	value := dictBytes[m[2]:m[3]]
+	if bytes.Equal(bytes.TrimSpace(value), []byte("/Crypt")) {
+		// Bare-name form: drop the whole /Filter entry.
+		return append(append([]byte{}, dictBytes[:m[0]]...), dictBytes[m[1]:]...)
+	}
+	// Array form: split contents, drop any /Crypt name.
+	if value[0] != '[' {
+		return dictBytes
+	}
+	inner := value[1 : len(value)-1]
+	kept := make([][]byte, 0)
+	for _, name := range bytes.Fields(inner) {
+		if !bytes.Equal(name, []byte("/Crypt")) {
+			kept = append(kept, name)
+		}
+	}
+	var replacement []byte
+	switch len(kept) {
+	case 0:
+		// /Filter[/Crypt] — drop /Filter entirely.
+		replacement = nil
+	case 1:
+		// Single remaining filter: emit as bare name (more compatible).
+		replacement = append([]byte("/Filter"), kept[0]...)
+	default:
+		var buf bytes.Buffer
+		buf.WriteString("/Filter[")
+		for i, name := range kept {
+			if i > 0 {
+				buf.WriteByte(' ')
+			}
+			buf.Write(name)
+		}
+		buf.WriteByte(']')
+		replacement = buf.Bytes()
+	}
+	out := make([]byte, 0, len(dictBytes))
+	out = append(out, dictBytes[:m[0]]...)
+	out = append(out, replacement...)
+	out = append(out, dictBytes[m[1]:]...)
+	return out
 }
 
 func xfaSplitContent(content []byte) (dictBytes, streamBytes []byte) {

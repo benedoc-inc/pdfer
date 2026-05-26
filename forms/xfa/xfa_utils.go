@@ -916,29 +916,92 @@ func ReplaceStreamInPDF(pdfBytes []byte, streamObjNum int, newStream []byte, ver
 	}
 
 	streamEnd := streamStart + endstreamPos
-	afterStream := pdfBytes[streamEnd:]
 
-	// Reconstruct PDF: before length + new length + between length and stream + new stream + after stream
-	beforeLength := pdfBytes[:lengthStart]
-	betweenLengthAndStream := pdfBytes[lengthEnd:streamStart]
-
-	result := append(beforeLength, []byte(newLength)...)
-	result = append(result, betweenLengthAndStream...)
+	// Reconstruct PDF: before length + new length + between length and stream
+	// + new stream + after stream. Allocate a fresh buffer sized to the final
+	// length; appending slices of pdfBytes to a slice of pdfBytes shares the
+	// backing array, so each append mutates the source bytes the next append
+	// reads — silently corrupting the dict (e.g. dropping the '/' between
+	// /Length and /Type) and overwriting following objects' headers.
+	finalLen := lengthStart + len(newLength) + (streamStart - lengthEnd) + len(newStream) + (len(pdfBytes) - streamEnd)
+	result := make([]byte, 0, finalLen)
+	result = append(result, pdfBytes[:lengthStart]...)
+	result = append(result, []byte(newLength)...)
+	result = append(result, pdfBytes[lengthEnd:streamStart]...)
 	result = append(result, newStream...)
-	result = append(result, afterStream...)
+	result = append(result, pdfBytes[streamEnd:]...)
 
 	if verbose {
 		log.Printf("Replaced stream %d: old length %s, new length %d", streamObjNum, string(pdfBytes[lengthStart:lengthEnd]), len(newStream))
 	}
 
-	// Update startxref so PDF readers can find the cross-reference table after
-	// the byte shift caused by the stream size change.
+	// Every byte after the modified stream's start (streamObjMatch[0]) shifts
+	// by delta. The startxref offset and every xref-table entry pointing past
+	// that pivot must be updated, otherwise readers walk into the middle of
+	// binary streams and fail with errors like Adobe's "XML parsing error: no
+	// element found" near the tail of the file.
 	delta := int64(len(result)) - int64(len(pdfBytes))
 	if delta != 0 {
+		pivot := int64(streamObjMatch[0])
+		// Order matters: shiftStartXRef rewrites the startxref pointer so it
+		// targets the xref table's new location; shiftXRefOffsets then reads
+		// that updated pointer to find and rewrite the entries.
 		result = shiftStartXRef(result, delta)
+		result = shiftXRefOffsets(result, pivot, delta)
 	}
 
 	return result, nil
+}
+
+// shiftXRefOffsets walks the classical (text) xref table in pdfBytes and adds
+// delta to every in-use ('n') entry whose recorded offset is greater than
+// pivot — i.e. every object that physically moved when bytes were inserted or
+// removed earlier in the file. Free ('f') entries are skipped because their
+// offset field encodes the next free object number, not a file offset. If the
+// PDF uses a cross-reference stream (no text xref between `startxref` and
+// `trailer`), this function is a no-op and the caller is responsible for
+// handling that case.
+func shiftXRefOffsets(pdfBytes []byte, pivot, delta int64) []byte {
+	tail := pdfBytes
+	if len(tail) > 256 {
+		tail = tail[len(tail)-256:]
+	}
+	re := regexp.MustCompile(`startxref\s+(\d+)`)
+	loc := re.FindSubmatchIndex(tail)
+	if loc == nil {
+		return pdfBytes
+	}
+	xrefOff, err := strconv.ParseInt(string(tail[loc[2]:loc[3]]), 10, 64)
+	if err != nil || xrefOff < 0 || xrefOff >= int64(len(pdfBytes)) {
+		return pdfBytes
+	}
+	xrefBody := pdfBytes[xrefOff:]
+	if !bytes.HasPrefix(bytes.TrimLeft(xrefBody, " \t\r\n"), []byte("xref")) {
+		// Cross-reference stream — caller must handle.
+		return pdfBytes
+	}
+	trailerRel := bytes.Index(xrefBody, []byte("trailer"))
+	if trailerRel < 0 {
+		return pdfBytes
+	}
+	out := make([]byte, len(pdfBytes))
+	copy(out, pdfBytes)
+	section := out[xrefOff : xrefOff+int64(trailerRel)]
+	entryRE := regexp.MustCompile(`(?m)^(\d{10}) (\d{5}) ([nf])`)
+	for _, m := range entryRE.FindAllSubmatchIndex(section, -1) {
+		if section[m[6]] != 'n' {
+			continue
+		}
+		offStart, offEnd := m[2], m[3]
+		old, perr := strconv.ParseInt(string(section[offStart:offEnd]), 10, 64)
+		if perr != nil || old <= pivot {
+			continue
+		}
+		// Preserve the fixed 10-digit width that the xref format requires.
+		newStr := fmt.Sprintf("%010d", old+delta)
+		copy(section[offStart:offEnd], newStr)
+	}
+	return out
 }
 
 // shiftStartXRef adjusts the startxref offset near the end of a PDF by delta bytes.
