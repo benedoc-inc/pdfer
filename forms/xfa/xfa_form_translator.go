@@ -426,6 +426,12 @@ type xfaNode struct {
 	// can still be surfaced as FormScripts.
 	OptionEvents [][]XFAEvent
 
+	// OptionFieldNames is parallel to Options on exclGroup nodes: the SOM-addressable
+	// name attribute of each flattened option <field>. Used to build the per-option
+	// script OwnerPath as "group.fieldName" (real SOM), independent of the option's
+	// data value (which may contain arbitrary text from <items>).
+	OptionFieldNames []string
+
 	// UI-element-specific constraints
 	AllowNeutral          bool   // checkButton allowNeutral="1" → tri-state checkbox
 	MaxChars              *int   // textEdit maxChars → ValidationRules.MaxLength
@@ -1156,9 +1162,11 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 							optValue = currentLeaf.Name
 						}
 						top.Options = append(top.Options, XFAOption{Label: optLabel, Value: optValue})
-						// Preserve per-option events (parallel slice) so they can still
-						// surface as FormScripts even though the option <field> is flattened.
+						// Preserve per-option events and the field's SOM-addressable name
+						// (parallel slices) so they can still surface as FormScripts with
+						// a real SOM OwnerPath even though the option <field> is flattened.
 						top.OptionEvents = append(top.OptionEvents, currentLeaf.Events)
+						top.OptionFieldNames = append(top.OptionFieldNames, currentLeaf.Name)
 						// draws inside exclGroup are decorative labels — fall through and discard
 					} else if top.Kind != xfaKindExclGroup {
 						top.Children = append(top.Children, currentLeaf)
@@ -1518,20 +1526,26 @@ func extractAllScripts(root *xfaNode, schema *types.FormSchema) {
 			schema.Scripts = append(schema.Scripts, buildFormScripts(node.Events, somPath, "")...)
 		}
 
-		// Per-option events on exclGroup — Options and OptionEvents are parallel
-		// slices populated when child <field>s are flattened into the group.
+		// Per-option events on exclGroup — OptionEvents and OptionFieldNames are
+		// parallel slices populated when child <field>s are flattened into the
+		// group. The field's name is the SOM-addressable identifier ("group.optA"),
+		// independent of the option's data value (which may contain arbitrary
+		// text from <items>).
 		if node.Kind == xfaKindExclGroup {
 			for i, optEvents := range node.OptionEvents {
-				if i >= len(node.Options) || len(optEvents) == 0 {
+				if len(optEvents) == 0 {
 					continue
 				}
-				optPath := somPath
-				if v := node.Options[i].Value; v != "" {
-					if optPath == "" {
-						optPath = v
-					} else {
-						optPath = optPath + "." + v
-					}
+				fieldName := ""
+				if i < len(node.OptionFieldNames) {
+					fieldName = node.OptionFieldNames[i]
+				}
+				if fieldName == "" {
+					continue
+				}
+				optPath := fieldName
+				if somPath != "" {
+					optPath = somPath + "." + fieldName
 				}
 				schema.Scripts = append(schema.Scripts, buildFormScripts(optEvents, optPath, "")...)
 			}
@@ -1562,11 +1576,6 @@ func populateScriptBackRefs(schema *types.FormSchema) {
 	if len(byPath) == 0 {
 		return
 	}
-	qByID := make(map[string]*types.Question, len(schema.Questions))
-	for i := range schema.Questions {
-		qByID[schema.Questions[i].ID] = &schema.Questions[i]
-	}
-	covered := make(map[string]bool)
 
 	assign := func(ownerPath, ownerID string) []string {
 		idxs, ok := byPath[ownerPath]
@@ -1581,35 +1590,31 @@ func populateScriptBackRefs(schema *types.FormSchema) {
 		return ids
 	}
 
+	// First, assign section-owned scripts and record each question's containing
+	// section path so the question pass can compute its full SOM path.
+	qSectionPath := make(map[string]string, len(schema.Questions))
 	var walkSections func([]types.FormSection)
 	walkSections = func(secs []types.FormSection) {
 		for i := range secs {
 			sec := &secs[i]
 			sec.Scripts = assign(sec.Path, sec.Path)
 			for _, qID := range sec.Questions {
-				q := qByID[qID]
-				if q == nil {
-					continue
-				}
-				covered[qID] = true
-				somPath := q.Name
-				if sec.Path != "" {
-					somPath = sec.Path + "." + q.Name
-				}
-				q.Scripts = assign(somPath, q.ID)
+				qSectionPath[qID] = sec.Path
 			}
 			walkSections(sec.Children)
 		}
 	}
 	walkSections(schema.Sections)
 
-	// Root-level questions (no enclosing section) — their SOM path is just Name.
+	// Single pass over questions: full SOM path = sectionPath + "." + Name,
+	// or just Name for questions not enclosed in any section.
 	for i := range schema.Questions {
 		q := &schema.Questions[i]
-		if covered[q.ID] {
-			continue
+		somPath := q.Name
+		if sp := qSectionPath[q.ID]; sp != "" {
+			somPath = sp + "." + q.Name
 		}
-		q.Scripts = assign(q.Name, q.ID)
+		q.Scripts = assign(somPath, q.ID)
 	}
 }
 

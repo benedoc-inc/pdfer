@@ -512,9 +512,14 @@ func TestDrawEventScriptExtracted(t *testing.T) {
 // TestExclGroupOptionScriptsExtracted verifies that per-option <event>
 // blocks (defined on the individual radio-option <field>s inside an
 // <exclGroup>) are preserved as distinct FormScripts. Each option's script
-// must have its own OwnerPath (exclGroup SOM path + "." + option value) and
-// remain an orphan, while the exclGroup itself (which IS a Question) gets
+// must have its own OwnerPath (exclGroup SOM path + "." + option field name)
+// and remain an orphan, while the exclGroup itself (which IS a Question) gets
 // its own script back-ref via the standard Question.Scripts mechanism.
+//
+// The field <items> values ("a", "b") deliberately differ from the field
+// names ("optA", "optB") to assert that the SOM OwnerPath is keyed by the
+// field's name (real SOM) rather than the option's data value (which can
+// contain arbitrary text).
 func TestExclGroupOptionScriptsExtracted(t *testing.T) {
 	bodyA := `xfa.host.messageBox("A selected");`
 	bodyB := `xfa.host.messageBox("B selected");`
@@ -571,9 +576,9 @@ func TestExclGroupOptionScriptsExtracted(t *testing.T) {
 		t.Errorf("group OwnerID = %q, want question ID %q", groupScript.OwnerID, choiceQ.ID)
 	}
 
-	scriptA := findScript(form.Scripts, "Page1.choice.a", "click")
+	scriptA := findScript(form.Scripts, "Page1.choice.optA", "click")
 	if scriptA == nil {
-		t.Fatalf("no per-option script with OwnerPath=Page1.choice.a; got %+v", form.Scripts)
+		t.Fatalf("no per-option script with OwnerPath=Page1.choice.optA; got %+v", form.Scripts)
 	}
 	if scriptA.Body != bodyA {
 		t.Errorf("option A body = %q, want %q", scriptA.Body, bodyA)
@@ -582,14 +587,71 @@ func TestExclGroupOptionScriptsExtracted(t *testing.T) {
 		t.Errorf("option A OwnerID = %q, want empty (orphan)", scriptA.OwnerID)
 	}
 
-	scriptB := findScript(form.Scripts, "Page1.choice.b", "click")
+	scriptB := findScript(form.Scripts, "Page1.choice.optB", "click")
 	if scriptB == nil {
-		t.Fatalf("no per-option script with OwnerPath=Page1.choice.b; got %+v", form.Scripts)
+		t.Fatalf("no per-option script with OwnerPath=Page1.choice.optB; got %+v", form.Scripts)
 	}
 	if scriptB.Body != bodyB {
 		t.Errorf("option B body = %q, want %q", scriptB.Body, bodyB)
 	}
 	if scriptB.OwnerID != "" {
 		t.Errorf("option B OwnerID = %q, want empty (orphan)", scriptB.OwnerID)
+	}
+
+	// Negative assertion: the OLD path (keyed by option <items> value) must
+	// NOT appear, to lock in the SOM-correct field-name keying.
+	if s := findScript(form.Scripts, "Page1.choice.a", "click"); s != nil {
+		t.Errorf("per-option script should NOT use option value as path key; got %+v", s)
+	}
+}
+
+// TestNestedSubformFieldBackRef verifies that a field inside a deeply nested
+// subform gets its Question.Scripts back-reference populated, and the script's
+// OwnerID resolves to the Question.ID. Specifically locks in that the SOM
+// path computed by extractAllScripts (parent walk of named nodes) matches the
+// path computed by populateScriptBackRefs (sec.Path + "." + q.Name) for
+// arbitrary nesting depth.
+func TestNestedSubformFieldBackRef(t *testing.T) {
+	body := `xfa.host.messageBox("deep");`
+	xfaXML := `<template>
+  <subform name="form1">
+    <subform name="outer">
+      <subform name="inner">
+        <field name="deepField">
+          <ui><textEdit/></ui>
+          <event activity="change">
+            <script contentType="application/x-javascript">` + body + `</script>
+          </event>
+        </field>
+      </subform>
+    </subform>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+
+	var deepQ *types.Question
+	for i := range form.Questions {
+		if form.Questions[i].Name == "deepField" {
+			deepQ = &form.Questions[i]
+		}
+	}
+	if deepQ == nil {
+		t.Fatalf("deepField question missing; got %+v", form.Questions)
+	}
+
+	wantPath := "form1.outer.inner.deepField"
+	s := findScript(form.Scripts, wantPath, "change")
+	if s == nil {
+		t.Fatalf("no script with OwnerPath=%s; got %+v", wantPath, form.Scripts)
+	}
+	if s.OwnerID != deepQ.ID {
+		t.Errorf("OwnerID = %q, want question ID %q (back-ref must resolve through nested sections)", s.OwnerID, deepQ.ID)
+	}
+	if len(deepQ.Scripts) != 1 || deepQ.Scripts[0] != s.ID {
+		t.Errorf("Question.Scripts = %v, want [%q]", deepQ.Scripts, s.ID)
 	}
 }

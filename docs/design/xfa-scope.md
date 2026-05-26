@@ -123,6 +123,18 @@ questions that exist. Scripts on filtered nodes appear in the flat list with
 populated to point at Element IDs for the orphan cases listed above —
 giving every script a typed owner reference.
 
+**Stability contract for orphan signaling.** The set of "orphan" scripts
+(`OwnerID == ""`) is *expected to shrink* as `FormSchema.Elements` and
+further typed collections land. The semantic of the empty-`OwnerID` signal
+is stable — "the owner is not currently a typed entity in this schema" —
+but the *enumeration* of orphan cases is not. Consumers that audit orphans
+(e.g. "scripts I cannot attach to anything I render") will see their orphan
+set get smaller over time, which is the intended direction; consumers that
+hard-code today's four orphan cases as a permanent classification will
+break. `FormScript`'s doc comment captures this; callers should treat
+`OwnerID != ""` as "dereferenceable by ID in some typed collection" without
+caring which one.
+
 ### 2. Surface event-bearing and `bind="none"` nodes via a parallel `Elements` collection
 
 **Problem.** `emitField` currently drops `bind="none"` button nodes as "UI

@@ -100,11 +100,16 @@ type ValidationRules struct {
 // FormScript represents a raw script block extracted from an XFA form.
 // Bodies are exposed verbatim — pdfer does not interpret script semantics.
 //
-// Scripts whose owner node is not emitted as a Question or FormSection (e.g.
+// OwnerID is non-empty iff the owning node is surfaced as a typed schema
+// entity (today: Question or FormSection) that callers can dereference by ID.
+// Scripts whose owner is not currently typed in the schema appear with
+// OwnerPath set and OwnerID empty — at time of writing, these include
 // event-bearing <draw> elements, bind="none" non-AddAttachment buttons,
-// <pageArea> events, individual radio options collapsed into an <exclGroup>)
-// appear here with OwnerPath set and OwnerID empty. Callers that need to
-// correlate orphan scripts must inspect OwnerPath directly.
+// <pageArea> events, and individual radio options collapsed into an
+// <exclGroup>. The set of orphan cases will shrink as more node types become
+// typed (see docs/design/xfa-scope.md §2). Callers should treat OwnerID empty
+// as "not currently dereferenceable" rather than a permanent classification,
+// and rely on OwnerPath when they need owner-keyed addressing in either case.
 type FormScript struct {
 	ID         string                 `json:"id"`                   // stable: SOM owner path + "#" + event + "[" + index + "]"
 	OwnerPath  string                 `json:"owner_path,omitempty"` // SOM path of containing node (e.g. "form1.section.field"); empty for template-level
