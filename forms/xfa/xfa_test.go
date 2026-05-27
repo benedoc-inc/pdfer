@@ -3,6 +3,7 @@ package xfa
 import (
 	"bytes"
 	"compress/flate"
+	"compress/zlib"
 	"os"
 	"path/filepath"
 	"testing"
@@ -86,6 +87,36 @@ func TestCompressStream(t *testing.T) {
 	}
 	if !bytes.Equal(smallDecompressed, smallOriginal) {
 		t.Errorf("Round-trip with small data: decompressed = %q, want %q", smallDecompressed, smallOriginal)
+	}
+}
+
+// TestCompressStreamProducesZlibNotRawDeflate locks in PDF /FlateDecode
+// compatibility. CompressStream must emit RFC 1950 zlib format (with the
+// two-byte header and Adler-32 trailer), not RFC 1951 raw deflate. Acrobat
+// rejects raw deflate inside a /FlateDecode stream and silently abandons
+// dynamic XFA rendering — the form hangs on the "Please wait..." wrapper
+// page indefinitely. Foxit and our own DecompressStream accept either form,
+// so a round-trip test alone does not catch the regression.
+func TestCompressStreamProducesZlibNotRawDeflate(t *testing.T) {
+	in := bytes.Repeat([]byte("PDF dynamic XFA datasets stream content. "), 64)
+	out, err := CompressStream(in)
+	if err != nil {
+		t.Fatalf("CompressStream: %v", err)
+	}
+	// Strict assertion: the output must parse as a zlib stream. zlib.NewReader
+	// validates the two-byte header (CMF*256+FLG divisible by 31) and the
+	// Adler-32 trailer; raw deflate output fails the header check.
+	zr, err := zlib.NewReader(bytes.NewReader(out))
+	if err != nil {
+		t.Fatalf("CompressStream output is not valid zlib (likely raw deflate, breaks Acrobat): %v\nfirst 8 bytes: % x", err, out[:min(8, len(out))])
+	}
+	defer zr.Close()
+	var dec bytes.Buffer
+	if _, err := dec.ReadFrom(zr); err != nil {
+		t.Fatalf("zlib decompress failed: %v", err)
+	}
+	if !bytes.Equal(dec.Bytes(), in) {
+		t.Fatalf("round-trip mismatch")
 	}
 }
 
