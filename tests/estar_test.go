@@ -2,9 +2,12 @@ package tests
 
 import (
 	"bytes"
+	"compress/zlib"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
+	"strconv"
 	"testing"
 
 	pdfer "github.com/benedoc-inc/pdfer/v2"
@@ -351,6 +354,94 @@ func hexDecode(s []byte) []byte {
 		out[i] = b
 	}
 	return out
+}
+
+// TestESTAR_NonIVD_Fill_DatasetsStreamFilterMatchesContent guards against a
+// past Adobe-only regression where Fill rewrote the XFA datasets stream as
+// plaintext XML while leaving /Filter/FlateDecode in the stream dict. The
+// output reparsed fine in pdfer (which treats /Filter as a hint and
+// fall-through-decodes), but Adobe Reader / Acrobat tried to inflate the
+// plaintext, failed, and got stuck on the dynamic XFA "Please wait..."
+// wrapper page indefinitely. The fix: compress on write iff the dict says
+// FlateDecode. The test must look at the *raw* bytes between stream /
+// endstream — not at the data Extract returns — because Extract silently
+// inflates either way.
+func TestESTAR_NonIVD_Fill_DatasetsStreamFilterMatchesContent(t *testing.T) {
+	pdfBytes := readESTARPDF(t, "nonivd_estar.pdf")
+
+	form, err := pdfer.ExtractForm(pdfBytes, nil, false)
+	if err != nil {
+		t.Fatalf("ExtractForm: %v", err)
+	}
+
+	// Empty data exercises the exact "no-change round-trip" path the user
+	// hit in production.
+	filled, err := form.Fill(pdfBytes, pdfer.FormData{}, nil, false)
+	if err != nil {
+		t.Fatalf("Fill: %v", err)
+	}
+
+	dict, raw := findDatasetsRawStream(t, filled)
+	if !bytes.Contains(dict, []byte("/FlateDecode")) {
+		t.Fatalf("expected /FlateDecode in datasets stream dict (test premise broken), got: %s", string(dict))
+	}
+	// Strict: PDF /FlateDecode is RFC 1950 zlib (header + deflate + Adler-32),
+	// not RFC 1951 raw deflate. Acrobat enforces this and hangs on the
+	// "Please wait..." page when the bytes are raw deflate; Foxit silently
+	// falls back. zlib.NewReader returning an error here would mean we've
+	// regressed to raw-deflate output.
+	zr, err := zlib.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("datasets /FlateDecode stream is not valid zlib (likely raw deflate — Acrobat will reject): %v\nfirst 8 bytes: % x",
+			err, raw[:min(8, len(raw))])
+	}
+	if _, err := io.ReadAll(zr); err != nil {
+		zr.Close()
+		t.Fatalf("zlib decode of datasets stream failed: %v", err)
+	}
+	zr.Close()
+}
+
+// findDatasetsRawStream locates the object that holds the XFA datasets packet
+// and returns its raw (still-encoded) dict and stream bytes. We have to walk
+// the XFA array in AcroForm rather than guessing object numbers because Fill
+// is free to renumber.
+func findDatasetsRawStream(t *testing.T, pdfBytes []byte) (dict, stream []byte) {
+	t.Helper()
+	xfaArrRE := regexp.MustCompile(`/XFA\s*\[([^\]]*)\]`)
+	arr := xfaArrRE.FindSubmatch(pdfBytes)
+	if arr == nil {
+		t.Fatalf("XFA array not found in output")
+	}
+	pairRE := regexp.MustCompile(`\((datasets)\)\s*(\d+)\s+(\d+)\s+R`)
+	pair := pairRE.FindSubmatch(arr[1])
+	if pair == nil {
+		t.Fatalf("datasets entry not found in XFA array: %s", string(arr[1]))
+	}
+	objNum, _ := strconv.Atoi(string(pair[2]))
+	headerRE := regexp.MustCompile(`(?m)^` + strconv.Itoa(objNum) + `\s+\d+\s+obj`)
+	hdr := headerRE.FindIndex(pdfBytes)
+	if hdr == nil {
+		t.Fatalf("object header for datasets obj %d not found", objNum)
+	}
+	streamKW := bytes.Index(pdfBytes[hdr[0]:], []byte("stream"))
+	if streamKW < 0 {
+		t.Fatalf("stream keyword not found for datasets obj %d", objNum)
+	}
+	dict = pdfBytes[hdr[0] : hdr[0]+streamKW]
+	dataStart := hdr[0] + streamKW + len("stream")
+	for dataStart < len(pdfBytes) && (pdfBytes[dataStart] == '\r' || pdfBytes[dataStart] == '\n') {
+		dataStart++
+	}
+	endKW := bytes.Index(pdfBytes[dataStart:], []byte("endstream"))
+	if endKW < 0 {
+		t.Fatalf("endstream not found for datasets obj %d", objNum)
+	}
+	streamEnd := dataStart + endKW
+	for streamEnd > dataStart && (pdfBytes[streamEnd-1] == '\r' || pdfBytes[streamEnd-1] == '\n') {
+		streamEnd--
+	}
+	return dict, pdfBytes[dataStart:streamEnd]
 }
 
 // readESTARPDF loads an eSTAR fixture PDF from tests/resources/ and skips
