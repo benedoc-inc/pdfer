@@ -22,6 +22,25 @@ func stripHTMLTags(s string) string {
 	return strings.Join(strings.Fields(plain), " ")
 }
 
+// htmlBlockSep is an in-buffer sentinel inserted at HTML block-level boundaries
+// inside <exData contentType="text/html"> so we can split the accumulated text
+// back into title/description chunks at close time. ASCII Record Separator —
+// will never appear in legitimate PDF caption text.
+const htmlBlockSep = "\x1e"
+
+// splitHTMLBlocks splits exData buffer content on htmlBlockSep, strips tags and
+// whitespace from each chunk, and returns the non-empty results in order.
+func splitHTMLBlocks(s string) []string {
+	parts := strings.Split(s, htmlBlockSep)
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if t := stripHTMLTags(part); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 // ParseXFAForm parses raw XFA XML and converts it to a strongly-typed FormSchema.
 func ParseXFAForm(xfaXML string, verbose bool) (*types.FormSchema, error) {
 	return ParseXFAFormWithResources(xfaXML, nil, verbose)
@@ -448,12 +467,13 @@ type xfaNode struct {
 	FontWeight string // from <font weight="bold|normal">
 
 	// Draw classification flags — set at parse time, used in emitDraw.
-	ImageData        string
-	ImageContentType string
-	ImageHRef        string // href attribute value (e.g. "$rr:logo.jpeg"); empty for inline images
-	HasPresenceAttr  bool   // explicit presence= attr → script-managed status indicator, suppress
-	HasExData        bool   // contains <exData>
-	ExDataHTML       string // plain text extracted from text/html exData without xfa:embed markers
+	ImageData         string
+	ImageContentType  string
+	ImageHRef         string // href attribute value (e.g. "$rr:logo.jpeg"); empty for inline images
+	HasPresenceAttr   bool   // explicit presence= attr → script-managed status indicator, suppress
+	HasExData         bool   // contains <exData>
+	ExDataHTML        string // first block of plain text extracted from text/html exData without xfa:embed markers
+	ExDataDescription string // remaining blocks (paragraphs 2+) joined by "\n"; used as a Description fallback when no explicit <desc> is present
 
 	PageNumber int
 }
@@ -638,8 +658,9 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 
 		switch se := token.(type) {
 		case xml.StartElement:
-			// When inside exData HTML content, only detect xfa:embed markers and skip
-			// all XFA element processing to avoid false-positive state transitions.
+			// When inside exData HTML content, only detect xfa:embed markers and
+			// record block boundaries; skip all XFA element processing to avoid
+			// false-positive state transitions.
 			if inExData {
 				for _, attr := range se.Attr {
 					if attr.Name.Local == "embed" {
@@ -1112,8 +1133,14 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 			}
 
 		case xml.EndElement:
-			// When inside exData HTML content, only process the closing </exData> tag.
+			// When inside exData HTML content, only process the closing </exData> tag;
+			// for every other tag, write a block sentinel if it's a block-level element
+			// so caption title/subtitle paragraphs survive as separable chunks.
 			if inExData && se.Name.Local != "exData" {
+				switch strings.ToLower(se.Name.Local) {
+				case "p", "div", "li", "br", "h1", "h2", "h3", "h4", "h5", "h6":
+					exDataHTMLBuf.WriteString(htmlBlockSep)
+				}
 				break
 			}
 			localName := se.Name.Local
@@ -1315,15 +1342,29 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 
 			case "exData":
 				// Extract plain text from text/html exData that has no xfa:embed page-counter markers.
+				// Block boundaries (</p>, </div>, <br/>, etc.) were stamped into the buffer with
+				// htmlBlockSep during parsing, so we can split title/description chunks here.
 				if currentLeaf != nil && exDataContentType == "text/html" && !exDataHasEmbed {
-					text := strings.TrimSpace(exDataHTMLBuf.String())
-					if text != "" {
+					blocks := splitHTMLBlocks(exDataHTMLBuf.String())
+					if len(blocks) > 0 {
+						first := blocks[0]
+						var rest string
+						if len(blocks) > 1 {
+							rest = strings.Join(blocks[1:], "\n")
+						}
 						if inCaptionExData {
-							// Caption exData: route stripped plain text into currentCaption so
-							// resolveInteractiveLabel can pick it up as Caption.
-							currentCaption.WriteString(stripHTMLTags(text))
+							// Caption exData: first block becomes the field label via currentCaption;
+							// any remaining paragraphs are routed to ExDataDescription so an explicit
+							// <desc> still wins at emit time via firstNonEmpty(Description, ExDataDescription).
+							currentCaption.WriteString(first)
+							if rest != "" && currentLeaf.ExDataDescription == "" {
+								currentLeaf.ExDataDescription = rest
+							}
 						} else {
-							currentLeaf.ExDataHTML = text
+							currentLeaf.ExDataHTML = first
+							if rest != "" && currentLeaf.ExDataDescription == "" {
+								currentLeaf.ExDataDescription = rest
+							}
 						}
 					}
 				}
@@ -1853,6 +1894,11 @@ func collectSectionContent(node *xfaNode) []string {
 			}
 			text := firstNonEmpty(child.ExDataHTML, child.Default, child.Value)
 			if text != "" {
+				// ExDataHTML now holds only the first block; rejoin the remainder
+				// so non-interactive section content retains the full text.
+				if child.ExDataHTML != "" && child.ExDataDescription != "" {
+					text = text + "\n" + child.ExDataDescription
+				}
 				result = append(result, text)
 			}
 		case xfaKindSubform:
@@ -1988,15 +2034,16 @@ func emitDraw(node *xfaNode, path []string, parent *xfaNode, qIdx *int, parentHi
 		}
 		props["content_type"] = node.ImageContentType
 		return types.Question{
-			ID:         sanitizeFieldIDWithIndex(node.Name, *qIdx),
-			Name:       node.Name,
-			Label:      resolveInteractiveLabel(node),
-			Type:       types.ResponseTypeImage,
-			ReadOnly:   true,
-			Hidden:     parentHidden || node.Hidden,
-			Section:    sectionName(path),
-			PageNumber: node.PageNumber,
-			Properties: props,
+			ID:          sanitizeFieldIDWithIndex(node.Name, *qIdx),
+			Name:        node.Name,
+			Label:       resolveInteractiveLabel(node),
+			Description: firstNonEmpty(node.Description, node.ExDataDescription),
+			Type:        types.ResponseTypeImage,
+			ReadOnly:    true,
+			Hidden:      parentHidden || node.Hidden,
+			Section:     sectionName(path),
+			PageNumber:  node.PageNumber,
+			Properties:  props,
 		}, true
 	}
 
@@ -2020,14 +2067,15 @@ func emitDraw(node *xfaNode, path []string, parent *xfaNode, qIdx *int, parentHi
 	*qIdx++
 	props := buildNodeProperties(node)
 	return types.Question{
-		ID:         sanitizeFieldIDWithIndex(node.Name, *qIdx),
-		Name:       node.Name,
-		Label:      displayText,
-		Type:       types.ResponseTypeDisplay,
-		ReadOnly:   true,
-		Section:    sectionName(path),
-		PageNumber: node.PageNumber,
-		Properties: props,
+		ID:          sanitizeFieldIDWithIndex(node.Name, *qIdx),
+		Name:        node.Name,
+		Label:       displayText,
+		Description: firstNonEmpty(node.Description, node.ExDataDescription),
+		Type:        types.ResponseTypeDisplay,
+		ReadOnly:    true,
+		Section:     sectionName(path),
+		PageNumber:  node.PageNumber,
+		Properties:  props,
 	}, true
 }
 
@@ -2045,7 +2093,7 @@ func convertNodeToQuestion(node *xfaNode, index int, section string, verbose boo
 		ID:          sanitizeFieldIDWithIndex(node.Name, index),
 		Name:        node.Name,
 		Label:       resolveDisplayLabel(node),
-		Description: node.Description,
+		Description: firstNonEmpty(node.Description, node.ExDataDescription),
 		Type:        mapXFAUITypeToResponseType(node.UIType, ""),
 		Required:    node.Required,
 		ReadOnly:    node.ReadOnly,
