@@ -1939,6 +1939,8 @@ func TestVariablesBlockExtracted(t *testing.T) {
 // AddAttachment button fields (bind="none") is treated as interactive. These
 // buttons are emitted as file questions and must cause their containing section
 // to appear in the navigation — they are not data-bound but they are user-facing.
+// AddAttachment is also NOT emitted as a generic bind="none" FormElement; it
+// stays in Questions so consumers iterating input controls find it there.
 func TestAddAttachmentSectionInteractive(t *testing.T) {
 	xfaXML := `<template>
   <subform name="CoverLetter">
@@ -1969,6 +1971,13 @@ func TestAddAttachmentSectionInteractive(t *testing.T) {
 	}
 	if fileQ.Type != types.ResponseTypeFile {
 		t.Errorf("CLAddAttachment110 type = %q, want %q", fileQ.Type, types.ResponseTypeFile)
+	}
+
+	// AddAttachment must NOT also appear in Elements — it lives in Questions.
+	for _, el := range form.Elements {
+		if el.OwnerPath == "CoverLetter.AttachmentSlot.CLAddAttachment110" {
+			t.Errorf("AddAttachment should not appear in Elements; got %+v", el)
+		}
 	}
 
 	// CoverLetter section must be marked interactive so it appears in nav.

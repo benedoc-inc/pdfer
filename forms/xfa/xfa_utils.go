@@ -843,25 +843,23 @@ func DecompressStream(streamBytes []byte) ([]byte, bool, error) {
 	return streamBytes, false, nil
 }
 
-// CompressStream compresses data using FlateDecode
+// CompressStream compresses data for a PDF /FlateDecode stream. PDF readers
+// (RFC 3778 §3.3.3 / PDF 1.7 §7.4.4) decode /FlateDecode as RFC 1950 zlib
+// format — the two-byte zlib header plus deflate payload plus four-byte
+// Adler-32 trailer. Raw RFC 1951 deflate (no header) is *not* the same thing.
+// Foxit accepts raw deflate as a fallback when the zlib header check fails;
+// Acrobat does not, and silently abandons dynamic XFA rendering — the form
+// stays stuck on the "Please wait..." wrapper page. Emit zlib format.
 func CompressStream(data []byte) ([]byte, error) {
 	var buf bytes.Buffer
-	writer, err := flate.NewWriter(&buf, flate.DefaultCompression)
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = writer.Write(data)
-	if err != nil {
+	writer := zlib.NewWriter(&buf)
+	if _, err := writer.Write(data); err != nil {
 		writer.Close()
 		return nil, err
 	}
-
-	err = writer.Close()
-	if err != nil {
+	if err := writer.Close(); err != nil {
 		return nil, err
 	}
-
 	return buf.Bytes(), nil
 }
 

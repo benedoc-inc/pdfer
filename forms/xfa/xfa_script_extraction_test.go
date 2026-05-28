@@ -399,8 +399,8 @@ func findScript(scripts []types.FormScript, ownerPath, event string) *types.Form
 }
 
 // TestPageAreaEventExtracted verifies that <pageArea> events are surfaced as
-// FormScripts with the pageArea's SOM path as OwnerPath. pageAreas are not
-// emitted as Sections, so OwnerID is empty (orphan).
+// FormScripts with the pageArea's SOM path as OwnerPath. pageAreas surface as
+// FormElements (role "pageArea"), so OwnerID resolves to the element ID.
 func TestPageAreaEventExtracted(t *testing.T) {
 	body := `xfa.host.messageBox("page rendered");`
 	xfaXML := `<template>
@@ -427,15 +427,15 @@ func TestPageAreaEventExtracted(t *testing.T) {
 	if s.Body != body {
 		t.Errorf("body = %q, want %q", s.Body, body)
 	}
-	if s.OwnerID != "" {
-		t.Errorf("OwnerID = %q, want empty (pageArea is not a Question/Section)", s.OwnerID)
+	if s.OwnerID != "form1.Master" {
+		t.Errorf("OwnerID = %q, want form1.Master (pageArea is a typed Element)", s.OwnerID)
 	}
 }
 
-// TestBindNoneButtonScriptExtracted verifies that a bind="none" button that is
-// not an AddAttachment (e.g. "Help Text" / "Show Intro" UI triggers) still
-// contributes its click-handler script to FormSchema.Scripts, even though the
-// button itself is not emitted as a Question.
+// TestBindNoneButtonScriptExtracted verifies that a bind="none" button (e.g.
+// "Help Text" / "Show Intro" UI triggers) contributes its click-handler script
+// to FormSchema.Scripts. The button itself surfaces as a FormElement, so the
+// script's OwnerID resolves to the element ID rather than staying empty.
 func TestBindNoneButtonScriptExtracted(t *testing.T) {
 	body := `xfa.host.messageBox("?-hint");`
 	xfaXML := `<template>
@@ -457,24 +457,25 @@ func TestBindNoneButtonScriptExtracted(t *testing.T) {
 	}
 	for _, q := range form.Questions {
 		if q.Name == "helpBtn" {
-			t.Fatalf("bind=none non-AddAttachment button should not be emitted as Question; got %+v", q)
+			t.Fatalf("bind=none button should not be emitted as Question; got %+v", q)
 		}
 	}
 	s := findScript(form.Scripts, "Page1.helpBtn", "click")
 	if s == nil {
-		t.Fatalf("no orphan script for Page1.helpBtn click; got %+v", form.Scripts)
+		t.Fatalf("no script for Page1.helpBtn click; got %+v", form.Scripts)
 	}
 	if s.Body != body {
 		t.Errorf("body = %q, want %q", s.Body, body)
 	}
-	if s.OwnerID != "" {
-		t.Errorf("OwnerID = %q, want empty (button is not emitted as Question)", s.OwnerID)
+	if s.OwnerID != "Page1.helpBtn" {
+		t.Errorf("OwnerID = %q, want Page1.helpBtn (button is a typed Element)", s.OwnerID)
 	}
 }
 
 // TestDrawEventScriptExtracted verifies that event-bearing <draw> elements
 // (status indicators with dynamic show/hide handlers) still surface their
-// scripts as orphan FormScripts even though the draw itself is suppressed.
+// scripts even though the draw itself is suppressed from Questions. The draw
+// surfaces as a FormElement, so the script's OwnerID resolves to the element.
 func TestDrawEventScriptExtracted(t *testing.T) {
 	body := `this.presence = "hidden";`
 	xfaXML := `<template>
@@ -499,13 +500,13 @@ func TestDrawEventScriptExtracted(t *testing.T) {
 	}
 	s := findScript(form.Scripts, "Page1.statusOk", "initialize")
 	if s == nil {
-		t.Fatalf("no orphan script for Page1.statusOk initialize; got %+v", form.Scripts)
+		t.Fatalf("no script for Page1.statusOk initialize; got %+v", form.Scripts)
 	}
 	if s.Body != body {
 		t.Errorf("body = %q, want %q", s.Body, body)
 	}
-	if s.OwnerID != "" {
-		t.Errorf("OwnerID = %q, want empty (draw is not emitted as Question)", s.OwnerID)
+	if s.OwnerID != "Page1.statusOk" {
+		t.Errorf("OwnerID = %q, want Page1.statusOk (draw is a typed Element)", s.OwnerID)
 	}
 }
 
@@ -653,5 +654,279 @@ func TestNestedSubformFieldBackRef(t *testing.T) {
 	}
 	if len(deepQ.Scripts) != 1 || deepQ.Scripts[0] != s.ID {
 		t.Errorf("Question.Scripts = %v, want [%q]", deepQ.Scripts, s.ID)
+	}
+}
+
+// findElement returns the first FormElement matching the given OwnerPath, or
+// nil if none is found.
+func findElement(elements []types.FormElement, ownerPath string) *types.FormElement {
+	for i := range elements {
+		if elements[i].OwnerPath == ownerPath {
+			return &elements[i]
+		}
+	}
+	return nil
+}
+
+// TestBindNoneButtonElement verifies that a bind="none" non-AddAttachment button
+// (a Help Text / Show Intro UI trigger) surfaces as a FormElement with role
+// "button" and that its click-handler script's OwnerID resolves to the element.
+func TestBindNoneButtonElement(t *testing.T) {
+	body := `xfa.host.messageBox("?-hint");`
+	xfaXML := `<template>
+  <subform name="Page1">
+    <field name="helpBtn">
+      <ui><button/></ui>
+      <caption><value><text>Help Text</text></value></caption>
+      <bind match="none"/>
+      <event activity="click">
+        <script contentType="application/x-javascript">` + body + `</script>
+      </event>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+
+	el := findElement(form.Elements, "Page1.helpBtn")
+	if el == nil {
+		t.Fatalf("no element with OwnerPath=Page1.helpBtn; got %+v", form.Elements)
+	}
+	if el.Role != "button" {
+		t.Errorf("Role = %q, want button", el.Role)
+	}
+	if el.Label != "Help Text" {
+		t.Errorf("Label = %q, want %q", el.Label, "Help Text")
+	}
+	if _, ok := el.Properties["xfa_role"]; ok {
+		t.Errorf("non-AddAttachment button should not carry xfa_role=attachment; got %+v", el.Properties)
+	}
+	if el.Section != "Page1" {
+		t.Errorf("Section = %q, want Page1", el.Section)
+	}
+	if el.PageNumber != 1 {
+		t.Errorf("PageNumber = %d, want 1 (parser default for fields)", el.PageNumber)
+	}
+	if el.Hidden {
+		t.Errorf("Hidden = true, want false (no presence attr on button or ancestor subform)")
+	}
+
+	s := findScript(form.Scripts, "Page1.helpBtn", "click")
+	if s == nil {
+		t.Fatalf("no script for Page1.helpBtn click; got %+v", form.Scripts)
+	}
+	if s.OwnerID != el.ID {
+		t.Errorf("script OwnerID = %q, want element ID %q", s.OwnerID, el.ID)
+	}
+	if len(el.Scripts) != 1 || el.Scripts[0] != s.ID {
+		t.Errorf("element.Scripts = %v, want [%q]", el.Scripts, s.ID)
+	}
+}
+
+// TestEventBearingDrawElement verifies that an event-bearing <draw> (status
+// indicator with a dynamic show/hide handler) surfaces as a FormElement with
+// role "draw" and its initialize script resolves to the element.
+func TestEventBearingDrawElement(t *testing.T) {
+	body := `this.presence = "hidden";`
+	xfaXML := `<template>
+  <subform name="Page1">
+    <draw name="statusOk">
+      <value><text>Required Question Complete</text></value>
+      <event activity="initialize">
+        <script contentType="application/x-javascript">` + body + `</script>
+      </event>
+    </draw>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+
+	el := findElement(form.Elements, "Page1.statusOk")
+	if el == nil {
+		t.Fatalf("no element with OwnerPath=Page1.statusOk; got %+v", form.Elements)
+	}
+	if el.Role != "draw" {
+		t.Errorf("Role = %q, want draw", el.Role)
+	}
+	if el.Section != "Page1" {
+		t.Errorf("Section = %q, want Page1", el.Section)
+	}
+
+	s := findScript(form.Scripts, "Page1.statusOk", "initialize")
+	if s == nil {
+		t.Fatalf("no script for Page1.statusOk initialize; got %+v", form.Scripts)
+	}
+	if s.OwnerID != el.ID {
+		t.Errorf("script OwnerID = %q, want element ID %q", s.OwnerID, el.ID)
+	}
+	if len(el.Scripts) != 1 || el.Scripts[0] != s.ID {
+		t.Errorf("element.Scripts = %v, want [%q]", el.Scripts, s.ID)
+	}
+}
+
+// TestPageAreaElement verifies that <pageArea> nodes surface as FormElements
+// with role "pageArea" and that pageArea events resolve to the element ID.
+func TestPageAreaElement(t *testing.T) {
+	body := `xfa.host.messageBox("page rendered");`
+	xfaXML := `<template>
+  <subform name="form1">
+    <pageArea name="Master">
+      <event activity="ready">
+        <script contentType="application/x-javascript">` + body + `</script>
+      </event>
+    </pageArea>
+    <subform name="Page1">
+      <field name="anchor"><ui><textEdit/></ui></field>
+    </subform>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+
+	el := findElement(form.Elements, "form1.Master")
+	if el == nil {
+		t.Fatalf("no element with OwnerPath=form1.Master; got %+v", form.Elements)
+	}
+	if el.Role != "pageArea" {
+		t.Errorf("Role = %q, want pageArea", el.Role)
+	}
+	// pageAreas are page templates, not page-bound nodes; Section/PageNumber are
+	// intentionally not populated (mirrors walkSubformChildren skipping them).
+	if el.Section != "" {
+		t.Errorf("Section = %q, want empty (pageAreas are not sections)", el.Section)
+	}
+	if el.PageNumber != 0 {
+		t.Errorf("PageNumber = %d, want 0 (pageArea is a template, not a page)", el.PageNumber)
+	}
+
+	s := findScript(form.Scripts, "form1.Master", "ready")
+	if s == nil {
+		t.Fatalf("no script for form1.Master ready; got %+v", form.Scripts)
+	}
+	if s.OwnerID != el.ID {
+		t.Errorf("script OwnerID = %q, want element ID %q", s.OwnerID, el.ID)
+	}
+	if len(el.Scripts) != 1 || el.Scripts[0] != s.ID {
+		t.Errorf("element.Scripts = %v, want [%q]", el.Scripts, s.ID)
+	}
+}
+
+// TestAddAttachmentStaysQuestion verifies that AddAttachment buttons remain in
+// Questions as ResponseTypeFile and do NOT appear in Elements. File uploads are
+// semantically user input (just on a non-dataset binding path), and consumers
+// iterating Questions to render input controls expect to find them there.
+func TestAddAttachmentStaysQuestion(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="CoverLetter">
+    <field name="CLAddAttachment110">
+      <ui><button/></ui>
+      <caption><value><text>Add Attachment</text></value></caption>
+      <bind match="none"/>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+
+	var fileQ *types.Question
+	for i := range form.Questions {
+		if form.Questions[i].Name == "CLAddAttachment110" {
+			fileQ = &form.Questions[i]
+		}
+	}
+	if fileQ == nil {
+		t.Fatalf("AddAttachment button missing from Questions; got %+v", form.Questions)
+	}
+	if fileQ.Type != types.ResponseTypeFile {
+		t.Errorf("Type = %q, want %q", fileQ.Type, types.ResponseTypeFile)
+	}
+
+	if el := findElement(form.Elements, "CoverLetter.CLAddAttachment110"); el != nil {
+		t.Errorf("AddAttachment should not appear in Elements; got %+v", el)
+	}
+}
+
+// TestElementHiddenPropagation verifies that a button nested under a subform
+// declared presence="hidden" reports Hidden=true on the FormElement — mirroring
+// how walkSubformChildren propagates parentHidden into Question.Hidden.
+func TestElementHiddenPropagation(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Outer" presence="hidden">
+    <subform name="Inner">
+      <field name="helpBtn">
+        <ui><button/></ui>
+        <caption><value><text>Hidden Help</text></value></caption>
+        <bind match="none"/>
+        <event activity="click">
+          <script contentType="application/x-javascript">noop;</script>
+        </event>
+      </field>
+    </subform>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	el := findElement(form.Elements, "Outer.Inner.helpBtn")
+	if el == nil {
+		t.Fatalf("no element with OwnerPath=Outer.Inner.helpBtn; got %+v", form.Elements)
+	}
+	if !el.Hidden {
+		t.Errorf("Hidden = false, want true (ancestor subform is presence=hidden)")
+	}
+	if el.Section != "Inner" {
+		t.Errorf("Section = %q, want Inner (nearest enclosing subform)", el.Section)
+	}
+}
+
+// TestEventBearingImageDrawProperties verifies that an event-bearing image draw
+// (dynamic stamp / signature) preserves its image data on the FormElement.
+// emitDraw short-circuits on len(Events) > 0 before its image branch, so this
+// data would otherwise be lost; extractAllElements mirrors the image plumbing.
+func TestEventBearingImageDrawProperties(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <draw name="dynStamp">
+      <ui><imageEdit/></ui>
+      <value>
+        <image contentType="image/png" href="stamp.png">aGVsbG8=</image>
+      </value>
+      <event activity="initialize">
+        <script contentType="application/x-javascript">show();</script>
+      </event>
+    </draw>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	el := findElement(form.Elements, "Page1.dynStamp")
+	if el == nil {
+		t.Fatalf("no element with OwnerPath=Page1.dynStamp; got %+v", form.Elements)
+	}
+	if got, want := el.Properties["image_data"], "aGVsbG8="; got != want {
+		t.Errorf("Properties[image_data] = %v, want %q", got, want)
+	}
+	if got, want := el.Properties["image_href"], "stamp.png"; got != want {
+		t.Errorf("Properties[image_href] = %v, want %q", got, want)
+	}
+	if got, want := el.Properties["content_type"], "image/png"; got != want {
+		t.Errorf("Properties[content_type] = %v, want %q", got, want)
 	}
 }

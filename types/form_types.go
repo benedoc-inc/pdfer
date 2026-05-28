@@ -6,7 +6,25 @@ type FormSchema struct {
 	Metadata  FormMetadata  `json:"metadata"`
 	Questions []Question    `json:"questions"`
 	Sections  []FormSection `json:"sections,omitempty"` // hierarchical section tree (XFA only)
+	Elements  []FormElement `json:"elements,omitempty"` // non-question template nodes (buttons, dynamic draws, pageAreas) — XFA only
 	Scripts   []FormScript  `json:"scripts,omitempty"`  // raw <script> blocks extracted verbatim; callers parse them themselves
+}
+
+// FormElement is a non-question template node surfaced alongside Questions so
+// orphan FormScripts have a typed owner to dereference and downstream renderers
+// can render help-text buttons, dynamic draws, and pageArea events without
+// consulting the raw XFA DOM. ID equals OwnerPath — SOM paths are unique within
+// a template.
+type FormElement struct {
+	ID         string                 `json:"id"`
+	OwnerPath  string                 `json:"owner_path"`
+	Role       string                 `json:"role"` // "button" | "draw" | "pageArea"
+	Label      string                 `json:"label,omitempty"`
+	Hidden     bool                   `json:"hidden,omitempty"`      // static presence != "visible" on this node or an ancestor subform
+	PageNumber int                    `json:"page_number,omitempty"` // field/draw "page" attribute; 0 for pageAreas and unannotated nodes
+	Section    string                 `json:"section,omitempty"`     // nearest enclosing subform name; empty for pageAreas and top-level nodes
+	Properties map[string]interface{} `json:"properties,omitempty"`
+	Scripts    []string               `json:"scripts,omitempty"` // FormScript IDs
 }
 
 // FormSection is a node in the XFA subform hierarchy.
@@ -14,7 +32,7 @@ type FormSchema struct {
 // the flat Questions slice on FormSchema is the canonical store.
 type FormSection struct {
 	Name        string        `json:"name"`
-	Path        string        `json:"path"`              // dot-separated path from root, e.g. "form1.section2.sub"
+	Path        string        `json:"path"`              // SOM-style dot-path from root, e.g. "form1.section2.sub"; same-named siblings carry "[i]" suffixes (XFA only)
 	Label       string        `json:"label,omitempty"`   // human-readable label from XFA subform caption; empty when not specified
 	Tooltip     string        `json:"tooltip,omitempty"` // accessibility tooltip (e.g. IMDRF TOC chapter references)
 	Interactive bool          `json:"interactive"`       // true if the section contains any data-bound fields
@@ -40,6 +58,7 @@ type FormMetadata struct {
 type Question struct {
 	ID          string                 `json:"id"`                    // Unique identifier
 	Name        string                 `json:"name"`                  // Field name from PDF
+	SOMSegment  string                 `json:"som_segment,omitempty"` // XFA only: SOM-formatted name segment (includes "[i]" when same-named siblings exist). Append to parent section's Path to get the full SOM path.
 	Label       string                 `json:"label,omitempty"`       // Display label/question text
 	Description string                 `json:"description,omitempty"` // Help text or description
 	Type        ResponseType           `json:"type"`                  // Response type
@@ -51,7 +70,7 @@ type Question struct {
 	Hidden      bool                   `json:"hidden"`                // Is field initially hidden?
 	Properties  map[string]interface{} `json:"properties,omitempty"`  // Additional properties (position, size, etc.)
 	PageNumber  int                    `json:"page_number,omitempty"` // Which page the field appears on
-	Section     string                 `json:"section,omitempty"`     // Parent subform / section name
+	Section     string                 `json:"section,omitempty"`     // Parent subform / section name; matches the parent FormSection.Path's last segment (may include "[i]" for XFA same-named-sibling disambiguation)
 	Scripts     []string               `json:"scripts,omitempty"`     // FormScript IDs for events on this field, in declaration order
 }
 
@@ -101,15 +120,13 @@ type ValidationRules struct {
 // Bodies are exposed verbatim — pdfer does not interpret script semantics.
 //
 // OwnerID is non-empty iff the owning node is surfaced as a typed schema
-// entity (today: Question or FormSection) that callers can dereference by ID.
-// Scripts whose owner is not currently typed in the schema appear with
-// OwnerPath set and OwnerID empty — at time of writing, these include
-// event-bearing <draw> elements, bind="none" non-AddAttachment buttons,
-// <pageArea> events, and individual radio options collapsed into an
-// <exclGroup>. The set of orphan cases will shrink as more node types become
-// typed (see docs/design/xfa-scope.md §2). Callers should treat OwnerID empty
-// as "not currently dereferenceable" rather than a permanent classification,
-// and rely on OwnerPath when they need owner-keyed addressing in either case.
+// entity (Question, FormSection, or FormElement) that callers can dereference
+// by ID. Scripts whose owner is not currently typed in the schema appear with
+// OwnerPath set and OwnerID empty — at time of writing, the remaining orphan
+// case is individual radio options collapsed into an <exclGroup> (the
+// exclGroup itself is the typed owner). Callers should treat OwnerID empty as
+// "not currently dereferenceable" rather than a permanent classification, and
+// rely on OwnerPath when they need owner-keyed addressing in either case.
 type FormScript struct {
 	ID         string                 `json:"id"`                   // stable: SOM owner path + "#" + event + "[" + index + "]"
 	OwnerPath  string                 `json:"owner_path,omitempty"` // SOM path of containing node (e.g. "form1.section.field"); empty for template-level

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 
+	"github.com/benedoc-inc/pdfer/v2/core/encrypt"
 	"github.com/benedoc-inc/pdfer/v2/core/parse"
 	"github.com/benedoc-inc/pdfer/v2/core/write"
 	"github.com/benedoc-inc/pdfer/v2/forms/acroform"
@@ -301,6 +302,23 @@ func decryptForXFA(pdfBytes []byte, password []byte, verbose bool) ([]byte, erro
 		var infoNum int
 		fmt.Sscanf(trailer.InfoRef, "%d", &infoNum)
 		w.SetInfo(infoNum)
+	}
+	// Preserve the source file's /ID[0] in the output trailer. PDF 1.5+
+	// inputs (including eSTAR) keep their /ID inside the cross-reference
+	// stream's dict, not a classical `trailer` block. PDFWriter emits a
+	// classical trailer over direct objects, so without explicit
+	// preservation here readers see no /ID at all — even though the source
+	// had one. Per PDF 1.7 §14.4, /ID[0] is the permanent identifier and
+	// should remain stable across edits of the same logical document, so
+	// downstream tools (signatures, dedup, asset tracking) that key on it
+	// keep working. We don't have a clean way to derive a new /ID[1] (the
+	// "modified" identifier), so SetEncryption duplicates /ID[0] into both
+	// slots — the convention the spec suggests when /ID[1] is unknown.
+	//
+	// Not required for Acrobat or Foxit to render — they ignore /ID — but
+	// it's a real ecosystem regression for tools downstream of pdfer.
+	if fileID := encrypt.ExtractFileID(pdfBytes, verbose); len(fileID) > 0 {
+		w.SetEncryption(nil, fileID)
 	}
 	return w.Bytes()
 }
