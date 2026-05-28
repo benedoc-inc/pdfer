@@ -1585,20 +1585,17 @@ func extractAllScripts(root *xfaNode, schema *types.FormSchema) {
 // presence from enclosing subforms so a button in a hidden subform reports
 // Hidden=true.
 //
-// The ID is the node's dot-joined ancestor path, dereferenceable by orphan
-// FormScripts via OwnerPath equality.
+// The ID is the node's SOM path (dot-joined ancestor segments, with "[i]"
+// suffixes disambiguating same-named siblings — see somSegment), dereferenceable
+// by orphan FormScripts via OwnerPath equality.
 func extractAllElements(root *xfaNode, schema *types.FormSchema) {
-	var walk func(node *xfaNode, parentPath []string, section string, parentHidden bool)
-	walk = func(node *xfaNode, parentPath []string, section string, parentHidden bool) {
-		var nodePath []string
+	var walk func(node, parent *xfaNode, parentPath []string, section string, parentHidden bool)
+	walk = func(node, parent *xfaNode, parentPath []string, section string, parentHidden bool) {
+		nodePath := parentPath
 		if node.Name != "" && node.Name != "_root" {
-			nodePath = make([]string, len(parentPath)+1)
-			copy(nodePath, parentPath)
-			nodePath[len(parentPath)] = node.Name
-		} else {
-			nodePath = parentPath
+			nodePath = somAppend(parentPath, somSegment(parent, node))
 		}
-		somPath := strings.Join(nodePath, ".")
+		somPath := somJoin(nodePath)
 
 		switch node.Kind {
 		case xfaKindField:
@@ -1683,10 +1680,10 @@ func extractAllElements(root *xfaNode, schema *types.FormSchema) {
 			childHidden = parentHidden || node.Hidden
 		}
 		for _, child := range node.Children {
-			walk(child, nodePath, childSection, childHidden)
+			walk(child, node, nodePath, childSection, childHidden)
 		}
 	}
-	walk(root, nil, "", false)
+	walk(root, nil, nil, "", false)
 }
 
 // populateScriptBackRefs indexes schema.Scripts by OwnerPath and fills in the
