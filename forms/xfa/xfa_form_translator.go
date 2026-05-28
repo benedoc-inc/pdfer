@@ -468,10 +468,12 @@ type xfaTemplateResult struct {
 }
 
 // variablesScript holds a <variables><script> block extracted verbatim from
-// the template. OwnerPath is the SOM path of the containing subform; empty
-// for template-level <variables> blocks.
+// the template. OwnerStack is a snapshot of the subform/pageArea stack at the
+// time the <variables> element opened; the SOM OwnerPath is resolved from it
+// after parse completes (subformStackPath needs fully-populated Children to
+// disambiguate same-named siblings). Empty stack ⇒ template-level block.
 type variablesScript struct {
-	OwnerPath  string
+	OwnerStack []*xfaNode
 	Name       string // <script name="...">
 	Lang       string
 	Body       string
@@ -616,7 +618,7 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 	var inVariablesScript bool // inside a <variables><script> element
 	var variablesScriptLang string
 	var variablesScriptName string
-	var variablesOwnerPath string
+	var variablesOwnerStack []*xfaNode
 	var variablesScriptProperties map[string]interface{}
 
 	// bookmark extras state
@@ -660,7 +662,7 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 
 			case "variables":
 				inVariables = true
-				variablesOwnerPath = subformStackPath(nodeStack)
+				variablesOwnerStack = append([]*xfaNode(nil), nodeStack...)
 
 			case "subform", "pageArea":
 				kind := xfaKindSubform
@@ -1268,7 +1270,7 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 					body := currentValue.String()
 					if strings.TrimSpace(body) != "" {
 						res.VariablesScripts = append(res.VariablesScripts, variablesScript{
-							OwnerPath:  variablesOwnerPath,
+							OwnerStack: variablesOwnerStack,
 							Name:       variablesScriptName,
 							Lang:       variablesScriptLang,
 							Body:       body,
@@ -1431,9 +1433,10 @@ func buildFormSchema(result *xfaTemplateResult, verbose bool) *types.FormSchema 
 	// template-wide helper definitions (functions invoked from field events) and
 	// are exposed as-is for callers to interpret.
 	for i, vs := range result.VariablesScripts {
+		ownerPath := subformStackPath(vs.OwnerStack)
 		script := types.FormScript{
-			ID:         formScriptID(vs.OwnerPath, "variables", i),
-			OwnerPath:  vs.OwnerPath,
+			ID:         formScriptID(ownerPath, "variables", i),
+			OwnerPath:  ownerPath,
 			Event:      "variables",
 			Name:       vs.Name,
 			Language:   vs.Lang,
@@ -1449,19 +1452,27 @@ func buildFormSchema(result *xfaTemplateResult, verbose bool) *types.FormSchema 
 // subformStackPath joins the names of subform/pageArea nodes on the stack into
 // a dot-separated SOM-style path. Skips the synthetic "_root" node so the
 // returned path matches FormSection.Path values. Returns "" when only _root
-// is on the stack.
+// is on the stack. Same-named siblings receive "[i]" suffixes via somSegment.
+//
+// Must be called after parsing completes — somSegment counts siblings against
+// each parent's Children slice, which only finalizes on close-tag. Mid-parse
+// callers should snapshot the stack and resolve here later.
 func subformStackPath(stack []*xfaNode) string {
 	parts := make([]string, 0, len(stack))
-	for _, n := range stack {
+	for i, n := range stack {
 		if n.Kind != xfaKindSubform && n.Kind != xfaKindPageArea {
 			continue
 		}
 		if n.Name == "" || n.Name == "_root" {
 			continue
 		}
-		parts = append(parts, n.Name)
+		var parent *xfaNode
+		if i > 0 {
+			parent = stack[i-1]
+		}
+		parts = append(parts, somSegment(parent, n))
 	}
-	return strings.Join(parts, ".")
+	return somJoin(parts)
 }
 
 // formScriptID builds a stable FormScript ID from the owner's SOM path,
@@ -1514,17 +1525,13 @@ func buildFormScripts(events []XFAEvent, ownerPath, ownerID string) []types.Form
 // scripts (event-bearing <draw>s, bind="none" non-AddAttachment buttons,
 // <pageArea>s, and per-option events flattened out of an <exclGroup>).
 func extractAllScripts(root *xfaNode, schema *types.FormSchema) {
-	var walk func(*xfaNode, []string)
-	walk = func(node *xfaNode, parentPath []string) {
-		var nodePath []string
+	var walk func(node, parent *xfaNode, parentPath []string)
+	walk = func(node, parent *xfaNode, parentPath []string) {
+		nodePath := parentPath
 		if node.Name != "" && node.Name != "_root" {
-			nodePath = make([]string, len(parentPath)+1)
-			copy(nodePath, parentPath)
-			nodePath[len(parentPath)] = node.Name
-		} else {
-			nodePath = parentPath
+			nodePath = somAppend(parentPath, somSegment(parent, node))
 		}
-		somPath := strings.Join(nodePath, ".")
+		somPath := somJoin(nodePath)
 
 		if len(node.Events) > 0 {
 			schema.Scripts = append(schema.Scripts, buildFormScripts(node.Events, somPath, "")...)
@@ -1534,32 +1541,28 @@ func extractAllScripts(root *xfaNode, schema *types.FormSchema) {
 		// parallel slices populated when child <field>s are flattened into the
 		// group. The field's name is the SOM-addressable identifier ("group.optA"),
 		// independent of the option's data value (which may contain arbitrary
-		// text from <items>).
+		// text from <items>). Same-named option fields are disambiguated by
+		// somSegmentFromSiblingNames (the underlying *xfaNode is discarded at
+		// flatten time, so we recover the index from the parallel name slice).
 		if node.Kind == xfaKindExclGroup {
 			for i, optEvents := range node.OptionEvents {
 				if len(optEvents) == 0 {
 					continue
 				}
-				fieldName := ""
-				if i < len(node.OptionFieldNames) {
-					fieldName = node.OptionFieldNames[i]
-				}
-				if fieldName == "" {
+				seg := somSegmentFromSiblingNames(node.OptionFieldNames, i)
+				if seg == "" {
 					continue
 				}
-				optPath := fieldName
-				if somPath != "" {
-					optPath = somPath + "." + fieldName
-				}
+				optPath := somJoin(somAppend(nodePath, seg))
 				schema.Scripts = append(schema.Scripts, buildFormScripts(optEvents, optPath, "")...)
 			}
 		}
 
 		for _, child := range node.Children {
-			walk(child, nodePath)
+			walk(child, node, nodePath)
 		}
 	}
-	walk(root, nil)
+	walk(root, nil, nil)
 }
 
 // extractAllElements walks the entire xfaNode tree and emits a FormElement for
@@ -1735,13 +1738,20 @@ func populateScriptBackRefs(schema *types.FormSchema) {
 	}
 	walkSections(schema.Sections)
 
-	// Single pass over questions: full SOM path = sectionPath + "." + Name,
-	// or just Name for questions not enclosed in any section.
+	// Single pass over questions: full SOM path = sectionPath + "." + SOMSegment,
+	// or just SOMSegment for questions not enclosed in any section. SOMSegment
+	// includes "[i]" disambiguation when same-named siblings exist; falling back
+	// to Name preserves correlation for entries populated before XFA SOM tracking
+	// (today: AcroForm questions, which never have scripts anyway).
 	for i := range schema.Questions {
 		q := &schema.Questions[i]
-		somPath := q.Name
+		seg := q.SOMSegment
+		if seg == "" {
+			seg = q.Name
+		}
+		somPath := seg
 		if sp := qSectionPath[q.ID]; sp != "" {
-			somPath = sp + "." + q.Name
+			somPath = sp + "." + seg
 		}
 		q.Scripts = assign(somPath, q.ID)
 	}
@@ -1885,28 +1895,32 @@ func isPlaceholderCaption(s string) bool {
 // walkSubformChildren iterates node.Children, emits questions to schema, and
 // returns the FormSection slice for sections found at this level.
 // parentHidden=true propagates hidden state from ancestor subforms.
+// node is the parent subform; its Children are walked here. SOM segments for
+// each emitted question/section are derived via somSegment(node, child) so
+// same-named siblings are disambiguated with "[i]".
 func walkSubformChildren(node *xfaNode, path []string, schema *types.FormSchema, qIdx *int, parentHidden bool, verbose bool) []types.FormSection {
 	var sections []types.FormSection
 	for _, child := range node.Children {
+		seg := somSegment(node, child)
 		switch child.Kind {
 		case xfaKindPageArea:
 			// Page templates — isolated from main form content.
 
 		case xfaKindSubform:
-			sec := buildSection(child, path, schema, qIdx, parentHidden, verbose)
+			sec := buildSection(child, node, path, schema, qIdx, parentHidden, verbose)
 			sections = append(sections, sec)
 
 		case xfaKindExclGroup:
-			q := emitExclGroup(child, path, qIdx)
+			q := emitExclGroup(child, path, seg, qIdx)
 			schema.Questions = append(schema.Questions, q)
 
 		case xfaKindField:
-			if q, ok := emitField(child, path, qIdx, verbose); ok {
+			if q, ok := emitField(child, path, seg, qIdx, verbose); ok {
 				schema.Questions = append(schema.Questions, q)
 			}
 
 		case xfaKindDraw:
-			if q, ok := emitDraw(child, path, node, qIdx, parentHidden); ok {
+			if q, ok := emitDraw(child, path, node, seg, qIdx, parentHidden); ok {
 				schema.Questions = append(schema.Questions, q)
 			}
 		}
@@ -1915,12 +1929,10 @@ func walkSubformChildren(node *xfaNode, path []string, schema *types.FormSchema,
 }
 
 // buildSection creates a FormSection for a subform node and recurses into its children.
-func buildSection(node *xfaNode, parentPath []string, schema *types.FormSchema, qIdx *int, parentHidden bool, verbose bool) types.FormSection {
-	path := make([]string, len(parentPath)+1)
-	copy(path, parentPath)
-	path[len(path)-1] = node.Name
-
-	sectionPath := strings.Join(path, ".")
+// parent is the subform that owns node, used to disambiguate same-named siblings.
+func buildSection(node, parent *xfaNode, parentPath []string, schema *types.FormSchema, qIdx *int, parentHidden bool, verbose bool) types.FormSection {
+	path := somAppend(parentPath, somSegment(parent, node))
+	sectionPath := somJoin(path)
 
 	startLen := len(schema.Questions)
 	nodeHidden := parentHidden || node.Hidden
@@ -2000,11 +2012,14 @@ func collectSectionContent(node *xfaNode) []string {
 }
 
 // emitExclGroup emits an XFA exclGroup as a radio-button question.
-func emitExclGroup(node *xfaNode, path []string, qIdx *int) types.Question {
+// somSeg is the node's SOM-formatted name segment (with "[i]" when needed),
+// stored on the Question so script back-refs can stitch a unique SOM path.
+func emitExclGroup(node *xfaNode, path []string, somSeg string, qIdx *int) types.Question {
 	*qIdx++
 	q := types.Question{
 		ID:         sanitizeFieldIDWithIndex(node.Name, *qIdx),
 		Name:       node.Name,
+		SOMSegment: somSeg,
 		Label:      resolveDisplayLabel(node),
 		Type:       types.ResponseTypeRadio,
 		Section:    sectionName(path),
@@ -2025,7 +2040,8 @@ func emitExclGroup(node *xfaNode, path []string, qIdx *int) types.Question {
 
 // emitField emits a <field> node as a Question. Returns (question, true) if the
 // field should appear in the output, (zero, false) if it should be skipped.
-func emitField(node *xfaNode, path []string, qIdx *int, verbose bool) (types.Question, bool) {
+// somSeg is the node's SOM-formatted name segment (with "[i]" when needed).
+func emitField(node *xfaNode, path []string, somSeg string, qIdx *int, verbose bool) (types.Question, bool) {
 	if node.Bind == "none" {
 		// Non-data-bound field — UI trigger, display label, or file upload.
 		if node.UIType == "button" {
@@ -2043,6 +2059,7 @@ func emitField(node *xfaNode, path []string, qIdx *int, verbose bool) (types.Que
 				return types.Question{
 					ID:         sanitizeFieldIDWithIndex(node.Name, *qIdx),
 					Name:       node.Name,
+					SOMSegment: somSeg,
 					Label:      label,
 					Type:       types.ResponseTypeFile,
 					Section:    sectionName(path),
@@ -2060,6 +2077,7 @@ func emitField(node *xfaNode, path []string, qIdx *int, verbose bool) (types.Que
 		return types.Question{
 			ID:         sanitizeFieldIDWithIndex(node.Name, *qIdx),
 			Name:       node.Name,
+			SOMSegment: somSeg,
 			Label:      displayText,
 			Type:       types.ResponseTypeDisplay,
 			ReadOnly:   true,
@@ -2069,13 +2087,16 @@ func emitField(node *xfaNode, path []string, qIdx *int, verbose bool) (types.Que
 	}
 	// Data-bound interactive field.
 	*qIdx++
-	return convertNodeToQuestion(node, *qIdx, sectionName(path), verbose), true
+	q := convertNodeToQuestion(node, *qIdx, sectionName(path), verbose)
+	q.SOMSegment = somSeg
+	return q, true
 }
 
 // emitDraw emits a <draw> node as a Question. Returns (question, true) if the
 // draw should be rendered, (zero, false) if it should be suppressed.
-// parent is the subform node that owns this draw.
-func emitDraw(node *xfaNode, path []string, parent *xfaNode, qIdx *int, parentHidden bool) (types.Question, bool) {
+// parent is the subform node that owns this draw. somSeg is the node's
+// SOM-formatted name segment (with "[i]" when needed).
+func emitDraw(node *xfaNode, path []string, parent *xfaNode, somSeg string, qIdx *int, parentHidden bool) (types.Question, bool) {
 	// Structural classification — each check corresponds to a distinct entity type.
 	if node.Caption == "\x00consumed" {
 		return types.Question{}, false // claimed as exclGroup label
@@ -2102,6 +2123,7 @@ func emitDraw(node *xfaNode, path []string, parent *xfaNode, qIdx *int, parentHi
 		return types.Question{
 			ID:         sanitizeFieldIDWithIndex(node.Name, *qIdx),
 			Name:       node.Name,
+			SOMSegment: somSeg,
 			Type:       types.ResponseTypeSeparator,
 			ReadOnly:   true,
 			Hidden:     parentHidden || node.Hidden,
@@ -2129,6 +2151,7 @@ func emitDraw(node *xfaNode, path []string, parent *xfaNode, qIdx *int, parentHi
 		return types.Question{
 			ID:         sanitizeFieldIDWithIndex(node.Name, *qIdx),
 			Name:       node.Name,
+			SOMSegment: somSeg,
 			Label:      resolveInteractiveLabel(node),
 			Type:       types.ResponseTypeImage,
 			ReadOnly:   true,
@@ -2161,6 +2184,7 @@ func emitDraw(node *xfaNode, path []string, parent *xfaNode, qIdx *int, parentHi
 	return types.Question{
 		ID:         sanitizeFieldIDWithIndex(node.Name, *qIdx),
 		Name:       node.Name,
+		SOMSegment: somSeg,
 		Label:      displayText,
 		Type:       types.ResponseTypeDisplay,
 		ReadOnly:   true,
