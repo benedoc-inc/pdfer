@@ -2114,6 +2114,99 @@ func TestHTMLCaptionExtraction(t *testing.T) {
 	}
 }
 
+// TestHTMLCaptionMultiParagraph verifies that a caption whose <exData> contains
+// multiple block-level paragraphs splits into Label (first block) + Description
+// (remaining blocks joined by "\n"), rather than smooshing everything into Label.
+func TestHTMLCaptionMultiParagraph(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Section1">
+    <field name="DeviceClass">
+      <ui><textEdit/></ui>
+      <caption>
+        <value>
+          <exData contentType="text/html">
+            <body xmlns="http://www.w3.org/1999/xhtml">
+              <p>Device classification</p>
+              <p>Select the regulatory class for this device.</p>
+              <p>If unsure, consult 21 CFR 860.</p>
+            </body>
+          </exData>
+        </value>
+      </caption>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	var q types.Question
+	for _, candidate := range form.Questions {
+		if candidate.Name == "DeviceClass" {
+			q = candidate
+			break
+		}
+	}
+	if q.Name == "" {
+		t.Fatal("DeviceClass not found in questions")
+	}
+	if q.Label != "Device classification" {
+		t.Errorf("label = %q, want %q", q.Label, "Device classification")
+	}
+	wantDesc := "Select the regulatory class for this device.\nIf unsure, consult 21 CFR 860."
+	if q.Description != wantDesc {
+		t.Errorf("description = %q, want %q", q.Description, wantDesc)
+	}
+	if strings.Contains(q.Label, "<") || strings.Contains(q.Description, "<") {
+		t.Errorf("HTML leaked: label=%q description=%q", q.Label, q.Description)
+	}
+}
+
+// TestHTMLCaptionExplicitDescWins verifies that an explicit <desc> takes
+// precedence over the caption-derived description, regardless of element order.
+func TestHTMLCaptionExplicitDescWins(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Section1">
+    <field name="DeviceClass">
+      <ui><textEdit/></ui>
+      <caption>
+        <value>
+          <exData contentType="text/html">
+            <body xmlns="http://www.w3.org/1999/xhtml">
+              <p>Device classification</p>
+              <p>Caption-derived subtitle that should NOT win.</p>
+            </body>
+          </exData>
+        </value>
+      </caption>
+      <desc>Authoritative description from desc element.</desc>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	var q types.Question
+	for _, candidate := range form.Questions {
+		if candidate.Name == "DeviceClass" {
+			q = candidate
+			break
+		}
+	}
+	if q.Name == "" {
+		t.Fatal("DeviceClass not found in questions")
+	}
+	if q.Label != "Device classification" {
+		t.Errorf("label = %q, want %q", q.Label, "Device classification")
+	}
+	if q.Description != "Authoritative description from desc element." {
+		t.Errorf("description = %q, want explicit <desc> content", q.Description)
+	}
+}
+
 // TestDrawTextValueBeatsToolTip verifies that for draw/heading elements, the
 // visible <value><text> content is used as the section label rather than
 // <assist><toolTip>, which XFA authors use for accessibility annotations
