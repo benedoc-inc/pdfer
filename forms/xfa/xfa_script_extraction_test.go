@@ -704,6 +704,15 @@ func TestBindNoneButtonElement(t *testing.T) {
 	if _, ok := el.Properties["xfa_role"]; ok {
 		t.Errorf("non-AddAttachment button should not carry xfa_role=attachment; got %+v", el.Properties)
 	}
+	if el.Section != "Page1" {
+		t.Errorf("Section = %q, want Page1", el.Section)
+	}
+	if el.PageNumber != 1 {
+		t.Errorf("PageNumber = %d, want 1 (parser default for fields)", el.PageNumber)
+	}
+	if el.Hidden {
+		t.Errorf("Hidden = true, want false (no presence attr on button or ancestor subform)")
+	}
 
 	s := findScript(form.Scripts, "Page1.helpBtn", "click")
 	if s == nil {
@@ -744,6 +753,9 @@ func TestEventBearingDrawElement(t *testing.T) {
 	}
 	if el.Role != "draw" {
 		t.Errorf("Role = %q, want draw", el.Role)
+	}
+	if el.Section != "Page1" {
+		t.Errorf("Section = %q, want Page1", el.Section)
 	}
 
 	s := findScript(form.Scripts, "Page1.statusOk", "initialize")
@@ -786,6 +798,14 @@ func TestPageAreaElement(t *testing.T) {
 	}
 	if el.Role != "pageArea" {
 		t.Errorf("Role = %q, want pageArea", el.Role)
+	}
+	// pageAreas are page templates, not page-bound nodes; Section/PageNumber are
+	// intentionally not populated (mirrors walkSubformChildren skipping them).
+	if el.Section != "" {
+		t.Errorf("Section = %q, want empty (pageAreas are not sections)", el.Section)
+	}
+	if el.PageNumber != 0 {
+		t.Errorf("PageNumber = %d, want 0 (pageArea is a template, not a page)", el.PageNumber)
 	}
 
 	s := findScript(form.Scripts, "form1.Master", "ready")
@@ -835,5 +855,78 @@ func TestAddAttachmentStaysQuestion(t *testing.T) {
 
 	if el := findElement(form.Elements, "CoverLetter.CLAddAttachment110"); el != nil {
 		t.Errorf("AddAttachment should not appear in Elements; got %+v", el)
+	}
+}
+
+// TestElementHiddenPropagation verifies that a button nested under a subform
+// declared presence="hidden" reports Hidden=true on the FormElement — mirroring
+// how walkSubformChildren propagates parentHidden into Question.Hidden.
+func TestElementHiddenPropagation(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Outer" presence="hidden">
+    <subform name="Inner">
+      <field name="helpBtn">
+        <ui><button/></ui>
+        <caption><value><text>Hidden Help</text></value></caption>
+        <bind match="none"/>
+        <event activity="click">
+          <script contentType="application/x-javascript">noop;</script>
+        </event>
+      </field>
+    </subform>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	el := findElement(form.Elements, "Outer.Inner.helpBtn")
+	if el == nil {
+		t.Fatalf("no element with OwnerPath=Outer.Inner.helpBtn; got %+v", form.Elements)
+	}
+	if !el.Hidden {
+		t.Errorf("Hidden = false, want true (ancestor subform is presence=hidden)")
+	}
+	if el.Section != "Inner" {
+		t.Errorf("Section = %q, want Inner (nearest enclosing subform)", el.Section)
+	}
+}
+
+// TestEventBearingImageDrawProperties verifies that an event-bearing image draw
+// (dynamic stamp / signature) preserves its image data on the FormElement.
+// emitDraw short-circuits on len(Events) > 0 before its image branch, so this
+// data would otherwise be lost; extractAllElements mirrors the image plumbing.
+func TestEventBearingImageDrawProperties(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Page1">
+    <draw name="dynStamp">
+      <ui><imageEdit/></ui>
+      <value>
+        <image contentType="image/png" href="stamp.png">aGVsbG8=</image>
+      </value>
+      <event activity="initialize">
+        <script contentType="application/x-javascript">show();</script>
+      </event>
+    </draw>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	el := findElement(form.Elements, "Page1.dynStamp")
+	if el == nil {
+		t.Fatalf("no element with OwnerPath=Page1.dynStamp; got %+v", form.Elements)
+	}
+	if got, want := el.Properties["image_data"], "aGVsbG8="; got != want {
+		t.Errorf("Properties[image_data] = %v, want %q", got, want)
+	}
+	if got, want := el.Properties["image_href"], "stamp.png"; got != want {
+		t.Errorf("Properties[image_href] = %v, want %q", got, want)
+	}
+	if got, want := el.Properties["content_type"], "image/png"; got != want {
+		t.Errorf("Properties[content_type] = %v, want %q", got, want)
 	}
 }

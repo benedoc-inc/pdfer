@@ -20,6 +20,9 @@ type FormElement struct {
 	OwnerPath  string                 `json:"owner_path"`
 	Role       string                 `json:"role"` // "button" | "draw" | "pageArea"
 	Label      string                 `json:"label,omitempty"`
+	Hidden     bool                   `json:"hidden,omitempty"`      // static presence != "visible" on this node or an ancestor subform
+	PageNumber int                    `json:"page_number,omitempty"` // field/draw "page" attribute; 0 for pageAreas and unannotated nodes
+	Section    string                 `json:"section,omitempty"`     // nearest enclosing subform name; empty for pageAreas and top-level nodes
 	Properties map[string]interface{} `json:"properties,omitempty"`
 	Scripts    []string               `json:"scripts,omitempty"` // FormScript IDs
 }

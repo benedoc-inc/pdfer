@@ -1563,13 +1563,30 @@ func extractAllScripts(root *xfaNode, schema *types.FormSchema) {
 }
 
 // extractAllElements walks the entire xfaNode tree and emits a FormElement for
-// every non-question template node that downstream renderers need to address:
-// bind="none" buttons, event-bearing <draw>s, and <pageArea>s. The ID is the
-// node's SOM path — unique within a template and trivially dereferenceable by
-// orphan FormScripts via OwnerPath equality.
+// every non-question template node that downstream renderers need to address.
+// Three roles are surfaced:
+//   - "button" — bind="none" non-AddAttachment buttons (Help Text, Show Intro,
+//     etc.). AddAttachment stays in Questions as ResponseTypeFile because it
+//     accepts user input even though it doesn't bind to the dataset.
+//   - "draw" — only draws with events (dynamic show/hide regions); static
+//     label draws stay out and are surfaced as ResponseTypeDisplay Questions
+//     by emitDraw.
+//   - "pageArea" — surfaced unconditionally because pageAreas always carry
+//     structural meaning (the page layout itself), independent of whether they
+//     host any lifecycle events.
+//
+// Section/PageNumber/Hidden are populated to match Question's contract:
+// section is the immediate enclosing subform's name (mirroring
+// walkSubformChildren, which skips pageAreas and which only ever exposes the
+// innermost subform via sectionName), and parentHidden accumulates static
+// presence from enclosing subforms so a button in a hidden subform reports
+// Hidden=true.
+//
+// The ID is the node's dot-joined ancestor path, dereferenceable by orphan
+// FormScripts via OwnerPath equality.
 func extractAllElements(root *xfaNode, schema *types.FormSchema) {
-	var walk func(*xfaNode, []string)
-	walk = func(node *xfaNode, parentPath []string) {
+	var walk func(node *xfaNode, parentPath []string, section string, parentHidden bool)
+	walk = func(node *xfaNode, parentPath []string, section string, parentHidden bool) {
 		var nodePath []string
 		if node.Name != "" && node.Name != "_root" {
 			nodePath = make([]string, len(parentPath)+1)
@@ -1582,15 +1599,15 @@ func extractAllElements(root *xfaNode, schema *types.FormSchema) {
 
 		switch node.Kind {
 		case xfaKindField:
-			// bind="none" buttons surface as Elements, except AddAttachment
-			// buttons which emitField emits as ResponseTypeFile Questions
-			// (file uploads are user input, just on a non-dataset binding path).
 			if node.Bind == "none" && node.UIType == "button" && !strings.Contains(node.Name, "AddAttachment") {
 				el := types.FormElement{
-					ID:        somPath,
-					OwnerPath: somPath,
-					Role:      "button",
-					Label:     resolveInteractiveLabel(node),
+					ID:         somPath,
+					OwnerPath:  somPath,
+					Role:       "button",
+					Label:      resolveInteractiveLabel(node),
+					Hidden:     parentHidden || node.Hidden,
+					PageNumber: node.PageNumber,
+					Section:    section,
 				}
 				if props := buildNodeProperties(node); len(props) > 0 {
 					el.Properties = props
@@ -1600,12 +1617,32 @@ func extractAllElements(root *xfaNode, schema *types.FormSchema) {
 		case xfaKindDraw:
 			if len(node.Events) > 0 {
 				el := types.FormElement{
-					ID:        somPath,
-					OwnerPath: somPath,
-					Role:      "draw",
-					Label:     resolveDrawText(node),
+					ID:         somPath,
+					OwnerPath:  somPath,
+					Role:       "draw",
+					Label:      resolveDrawText(node),
+					Hidden:     parentHidden || node.Hidden,
+					PageNumber: node.PageNumber,
+					Section:    section,
 				}
-				if props := buildNodeProperties(node); len(props) > 0 {
+				props := buildNodeProperties(node)
+				// Mirror emitDraw's image plumbing: event-bearing draws skip
+				// emitDraw entirely (it short-circuits on len(Events) > 0),
+				// so we attach image data here to keep dynamic stamps/signatures
+				// from losing their bitmap.
+				if node.ImageData != "" || node.ImageHRef != "" {
+					if props == nil {
+						props = make(map[string]interface{})
+					}
+					if node.ImageData != "" {
+						props["image_data"] = node.ImageData
+					}
+					if node.ImageHRef != "" {
+						props["image_href"] = node.ImageHRef
+					}
+					props["content_type"] = node.ImageContentType
+				}
+				if len(props) > 0 {
 					el.Properties = props
 				}
 				schema.Elements = append(schema.Elements, el)
@@ -1620,6 +1657,10 @@ func extractAllElements(root *xfaNode, schema *types.FormSchema) {
 				OwnerPath: somPath,
 				Role:      "pageArea",
 				Label:     label,
+				Hidden:    parentHidden || node.Hidden,
+				// PageNumber and Section intentionally omitted: pageAreas are
+				// page templates, not page-bound nodes, and walkSubformChildren
+				// does not treat them as sections.
 			}
 			if props := buildNodeProperties(node); len(props) > 0 {
 				el.Properties = props
@@ -1627,11 +1668,22 @@ func extractAllElements(root *xfaNode, schema *types.FormSchema) {
 			schema.Elements = append(schema.Elements, el)
 		}
 
+		// Only subforms contribute to the section name and hidden accumulation,
+		// matching walkSubformChildren / buildSection. Anonymous subforms shadow
+		// with an empty string so descendant Section values stay in parity with
+		// Question (buildSection writes node.Name into the path slot
+		// unconditionally).
+		childSection := section
+		childHidden := parentHidden
+		if node.Kind == xfaKindSubform {
+			childSection = node.Name
+			childHidden = parentHidden || node.Hidden
+		}
 		for _, child := range node.Children {
-			walk(child, nodePath)
+			walk(child, nodePath, childSection, childHidden)
 		}
 	}
-	walk(root, nil)
+	walk(root, nil, "", false)
 }
 
 // populateScriptBackRefs indexes schema.Scripts by OwnerPath and fills in the
