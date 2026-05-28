@@ -14,7 +14,7 @@ type FormSchema struct {
 // the flat Questions slice on FormSchema is the canonical store.
 type FormSection struct {
 	Name        string        `json:"name"`
-	Path        string        `json:"path"`              // dot-separated path from root, e.g. "form1.section2.sub"
+	Path        string        `json:"path"`              // SOM-style dot-path from root, e.g. "form1.section2.sub"; same-named siblings carry "[i]" suffixes (XFA only)
 	Label       string        `json:"label,omitempty"`   // human-readable label from XFA subform caption; empty when not specified
 	Tooltip     string        `json:"tooltip,omitempty"` // accessibility tooltip (e.g. IMDRF TOC chapter references)
 	Interactive bool          `json:"interactive"`       // true if the section contains any data-bound fields
@@ -52,7 +52,7 @@ type Question struct {
 	Hidden      bool                   `json:"hidden"`                // Is field initially hidden?
 	Properties  map[string]interface{} `json:"properties,omitempty"`  // Additional properties (position, size, etc.)
 	PageNumber  int                    `json:"page_number,omitempty"` // Which page the field appears on
-	Section     string                 `json:"section,omitempty"`     // Parent subform / section name
+	Section     string                 `json:"section,omitempty"`     // Parent subform / section name; matches the parent FormSection.Path's last segment (may include "[i]" for XFA same-named-sibling disambiguation)
 	Scripts     []string               `json:"scripts,omitempty"`     // FormScript IDs for events on this field, in declaration order
 }
 
