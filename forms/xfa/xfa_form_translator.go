@@ -1414,12 +1414,16 @@ func buildFormSchema(result *xfaTemplateResult, verbose bool) *types.FormSchema 
 	var qIdx int
 	schema.Sections = walkSubformChildren(result.Root, nil, schema, &qIdx, false, verbose)
 
+	// Extract non-question template nodes (bind="none" buttons, event-bearing
+	// <draw>s, <pageArea>s) as FormElements so they have a typed owner that
+	// downstream renderers and orphan FormScripts can dereference.
+	extractAllElements(result.Root, schema)
+
 	// Extract every <script> body in the template — including those on nodes
-	// pdfer doesn't emit as a Question or FormSection (event-bearing <draw>s,
-	// bind="none" non-AddAttachment buttons, <pageArea>s, per-option events
+	// pdfer doesn't emit as a Question or FormSection (per-option events
 	// inside an <exclGroup>). OwnerID is filled in by the back-ref pass below
-	// when the owner happens to also be a Question/Section; orphan scripts keep
-	// OwnerID empty and rely on OwnerPath for correlation.
+	// when the owner happens to also be a Question/Section/Element; remaining
+	// orphan scripts keep OwnerID empty and rely on OwnerPath for correlation.
 	extractAllScripts(result.Root, schema)
 	populateScriptBackRefs(schema)
 
@@ -1558,10 +1562,83 @@ func extractAllScripts(root *xfaNode, schema *types.FormSchema) {
 	walk(root, nil)
 }
 
+// extractAllElements walks the entire xfaNode tree and emits a FormElement for
+// every non-question template node that downstream renderers need to address:
+// bind="none" buttons, event-bearing <draw>s, and <pageArea>s. The ID is the
+// node's SOM path — unique within a template and trivially dereferenceable by
+// orphan FormScripts via OwnerPath equality.
+func extractAllElements(root *xfaNode, schema *types.FormSchema) {
+	var walk func(*xfaNode, []string)
+	walk = func(node *xfaNode, parentPath []string) {
+		var nodePath []string
+		if node.Name != "" && node.Name != "_root" {
+			nodePath = make([]string, len(parentPath)+1)
+			copy(nodePath, parentPath)
+			nodePath[len(parentPath)] = node.Name
+		} else {
+			nodePath = parentPath
+		}
+		somPath := strings.Join(nodePath, ".")
+
+		switch node.Kind {
+		case xfaKindField:
+			// bind="none" buttons surface as Elements, except AddAttachment
+			// buttons which emitField emits as ResponseTypeFile Questions
+			// (file uploads are user input, just on a non-dataset binding path).
+			if node.Bind == "none" && node.UIType == "button" && !strings.Contains(node.Name, "AddAttachment") {
+				el := types.FormElement{
+					ID:        somPath,
+					OwnerPath: somPath,
+					Role:      "button",
+					Label:     resolveInteractiveLabel(node),
+				}
+				if props := buildNodeProperties(node); len(props) > 0 {
+					el.Properties = props
+				}
+				schema.Elements = append(schema.Elements, el)
+			}
+		case xfaKindDraw:
+			if len(node.Events) > 0 {
+				el := types.FormElement{
+					ID:        somPath,
+					OwnerPath: somPath,
+					Role:      "draw",
+					Label:     resolveDrawText(node),
+				}
+				if props := buildNodeProperties(node); len(props) > 0 {
+					el.Properties = props
+				}
+				schema.Elements = append(schema.Elements, el)
+			}
+		case xfaKindPageArea:
+			label := strings.TrimSpace(node.BookmarkName)
+			if label == "" {
+				label = strings.TrimSpace(node.Caption)
+			}
+			el := types.FormElement{
+				ID:        somPath,
+				OwnerPath: somPath,
+				Role:      "pageArea",
+				Label:     label,
+			}
+			if props := buildNodeProperties(node); len(props) > 0 {
+				el.Properties = props
+			}
+			schema.Elements = append(schema.Elements, el)
+		}
+
+		for _, child := range node.Children {
+			walk(child, nodePath)
+		}
+	}
+	walk(root, nil)
+}
+
 // populateScriptBackRefs indexes schema.Scripts by OwnerPath and fills in the
-// Question.Scripts / FormSection.Scripts back-references, plus the script's
-// OwnerID, whenever its owner happens to be an emitted Question or Section.
-// Orphan scripts keep an empty OwnerID and rely solely on OwnerPath.
+// Question.Scripts / FormSection.Scripts / FormElement.Scripts back-references,
+// plus the script's OwnerID, whenever its owner happens to be an emitted
+// Question, Section, or Element. Orphan scripts keep an empty OwnerID and rely
+// solely on OwnerPath.
 func populateScriptBackRefs(schema *types.FormSchema) {
 	if len(schema.Scripts) == 0 {
 		return
@@ -1615,6 +1692,12 @@ func populateScriptBackRefs(schema *types.FormSchema) {
 			somPath = sp + "." + q.Name
 		}
 		q.Scripts = assign(somPath, q.ID)
+	}
+
+	// Assign element-owned scripts. ID == OwnerPath so the lookup is direct.
+	for i := range schema.Elements {
+		el := &schema.Elements[i]
+		el.Scripts = assign(el.OwnerPath, el.ID)
 	}
 }
 
@@ -1892,9 +1975,13 @@ func emitExclGroup(node *xfaNode, path []string, qIdx *int) types.Question {
 // field should appear in the output, (zero, false) if it should be skipped.
 func emitField(node *xfaNode, path []string, qIdx *int, verbose bool) (types.Question, bool) {
 	if node.Bind == "none" {
-		// Non-data-bound field — UI trigger or display label.
+		// Non-data-bound field — UI trigger, display label, or file upload.
 		if node.UIType == "button" {
-			// Attachment upload buttons — render as file inputs.
+			// AddAttachment buttons are bind="none" because XFA file uploads
+			// don't bind to the dataset (attachments go into the XFA package's
+			// own attachment stream), but they are still user input — render as
+			// a file question. Other bind="none" buttons (Help Text, Show Intro,
+			// etc.) are UI triggers and surface as FormElements instead.
 			if strings.Contains(node.Name, "AddAttachment") {
 				*qIdx++
 				label := node.Caption
@@ -1911,7 +1998,7 @@ func emitField(node *xfaNode, path []string, qIdx *int, verbose bool) (types.Que
 					Hidden:     node.Hidden,
 				}, true
 			}
-			return types.Question{}, false // UI trigger (Help Text, Show Intro, etc.)
+			return types.Question{}, false
 		}
 		displayText := resolveDrawText(node)
 		if displayText == "" {

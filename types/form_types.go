@@ -6,7 +6,22 @@ type FormSchema struct {
 	Metadata  FormMetadata  `json:"metadata"`
 	Questions []Question    `json:"questions"`
 	Sections  []FormSection `json:"sections,omitempty"` // hierarchical section tree (XFA only)
+	Elements  []FormElement `json:"elements,omitempty"` // non-question template nodes (buttons, dynamic draws, pageAreas) — XFA only
 	Scripts   []FormScript  `json:"scripts,omitempty"`  // raw <script> blocks extracted verbatim; callers parse them themselves
+}
+
+// FormElement is a non-question template node surfaced alongside Questions so
+// orphan FormScripts have a typed owner to dereference and downstream renderers
+// can render help-text buttons, dynamic draws, and pageArea events without
+// consulting the raw XFA DOM. ID equals OwnerPath — SOM paths are unique within
+// a template.
+type FormElement struct {
+	ID         string                 `json:"id"`
+	OwnerPath  string                 `json:"owner_path"`
+	Role       string                 `json:"role"` // "button" | "draw" | "pageArea"
+	Label      string                 `json:"label,omitempty"`
+	Properties map[string]interface{} `json:"properties,omitempty"`
+	Scripts    []string               `json:"scripts,omitempty"` // FormScript IDs
 }
 
 // FormSection is a node in the XFA subform hierarchy.
@@ -101,15 +116,13 @@ type ValidationRules struct {
 // Bodies are exposed verbatim — pdfer does not interpret script semantics.
 //
 // OwnerID is non-empty iff the owning node is surfaced as a typed schema
-// entity (today: Question or FormSection) that callers can dereference by ID.
-// Scripts whose owner is not currently typed in the schema appear with
-// OwnerPath set and OwnerID empty — at time of writing, these include
-// event-bearing <draw> elements, bind="none" non-AddAttachment buttons,
-// <pageArea> events, and individual radio options collapsed into an
-// <exclGroup>. The set of orphan cases will shrink as more node types become
-// typed (see docs/design/xfa-scope.md §2). Callers should treat OwnerID empty
-// as "not currently dereferenceable" rather than a permanent classification,
-// and rely on OwnerPath when they need owner-keyed addressing in either case.
+// entity (Question, FormSection, or FormElement) that callers can dereference
+// by ID. Scripts whose owner is not currently typed in the schema appear with
+// OwnerPath set and OwnerID empty — at time of writing, the remaining orphan
+// case is individual radio options collapsed into an <exclGroup> (the
+// exclGroup itself is the typed owner). Callers should treat OwnerID empty as
+// "not currently dereferenceable" rather than a permanent classification, and
+// rely on OwnerPath when they need owner-keyed addressing in either case.
 type FormScript struct {
 	ID         string                 `json:"id"`                   // stable: SOM owner path + "#" + event + "[" + index + "]"
 	OwnerPath  string                 `json:"owner_path,omitempty"` // SOM path of containing node (e.g. "form1.section.field"); empty for template-level
