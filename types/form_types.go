@@ -40,6 +40,7 @@ type FormMetadata struct {
 type Question struct {
 	ID          string                 `json:"id"`                    // Unique identifier
 	Name        string                 `json:"name"`                  // Field name from PDF
+	SOMSegment  string                 `json:"som_segment,omitempty"` // XFA only: SOM-formatted name segment (includes "[i]" when same-named siblings exist). Append to parent section's Path to get the full SOM path.
 	Label       string                 `json:"label,omitempty"`       // Display label/question text
 	Description string                 `json:"description,omitempty"` // Help text or description
 	Type        ResponseType           `json:"type"`                  // Response type
