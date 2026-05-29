@@ -36,6 +36,7 @@ type FormSection struct {
 	Label       string        `json:"label,omitempty"`   // human-readable label from XFA subform caption; empty when not specified
 	Tooltip     string        `json:"tooltip,omitempty"` // accessibility tooltip (e.g. IMDRF TOC chapter references)
 	Interactive bool          `json:"interactive"`       // true if the section contains any data-bound fields
+	Hidden      bool          `json:"hidden,omitempty"`  // static presence != "visible" on this subform or an ancestor subform
 	Layout      string        `json:"layout,omitempty"`  // XFA layout mode: position|tb|lr-tb|row|table
 	Width       string        `json:"width,omitempty"`   // subform w attribute (mm/in/pt)
 	Height      string        `json:"height,omitempty"`  // subform h attribute (mm/in/pt)
