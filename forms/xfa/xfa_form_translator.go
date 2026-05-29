@@ -1957,7 +1957,7 @@ func walkSubformChildren(node *xfaNode, path []string, schema *types.FormSchema,
 			schema.Questions = append(schema.Questions, q)
 
 		case xfaKindField:
-			if q, ok := emitField(child, path, seg, qIdx, parentHidden, verbose); ok {
+			if q, ok := emitField(child, path, seg, qIdx, parentHidden); ok {
 				schema.Questions = append(schema.Questions, q)
 			}
 
@@ -2090,7 +2090,7 @@ func emitExclGroup(node *xfaNode, path []string, somSeg string, qIdx *int, paren
 // emitField emits a <field> node as a Question. Returns (question, true) if the
 // field should appear in the output, (zero, false) if it should be skipped.
 // somSeg is the node's SOM-formatted name segment (with "[i]" when needed).
-func emitField(node *xfaNode, path []string, somSeg string, qIdx *int, parentHidden bool, verbose bool) (types.Question, bool) {
+func emitField(node *xfaNode, path []string, somSeg string, qIdx *int, parentHidden bool) (types.Question, bool) {
 	if node.Bind == "none" {
 		// Non-data-bound field — UI trigger, display label, or file upload.
 		if node.UIType == "button" {
@@ -2137,7 +2137,7 @@ func emitField(node *xfaNode, path []string, somSeg string, qIdx *int, parentHid
 	}
 	// Data-bound interactive field.
 	*qIdx++
-	q := convertNodeToQuestion(node, *qIdx, sectionName(path), parentHidden, verbose)
+	q := convertNodeToQuestion(node, *qIdx, sectionName(path), parentHidden)
 	q.SOMSegment = somSeg
 	return q, true
 }
@@ -2256,7 +2256,7 @@ func sectionName(path []string) string {
 }
 
 // convertNodeToQuestion converts a data-bound xfaNode (Kind == xfaKindField) to a Question.
-func convertNodeToQuestion(node *xfaNode, index int, section string, parentHidden bool, verbose bool) types.Question {
+func convertNodeToQuestion(node *xfaNode, index int, section string, parentHidden bool) types.Question {
 	q := types.Question{
 		ID:          sanitizeFieldIDWithIndex(node.Name, index),
 		Name:        node.Name,
