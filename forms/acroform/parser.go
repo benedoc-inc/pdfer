@@ -29,7 +29,8 @@ type Field struct {
 	T          string                 // Field name (partial name)
 	TU         string                 // Alternate field name
 	TM         string                 // Mapping name
-	Ff         int                    // Field flags
+	Ff         int                    // Field flags (/Ff)
+	F          int                    // Widget annotation flags (/F); bit 2 (0x2) = Hidden
 	V          interface{}            // Field value
 	DV         interface{}            // Default value
 	AA         map[string]interface{} // Additional actions
@@ -194,6 +195,13 @@ func parseField(pdfBytes []byte, objNum, genNum int, encryptInfo *types.PDFEncry
 		field.Ff, _ = strconv.Atoi(ffMatch[1])
 	}
 
+	// Extract widget annotation flags (F). The \s before /F avoids matching the
+	// leading "F" of /FT or /Ff; the trailing \s before the digits keeps it
+	// distinct from those keys. Hidden/visibility lives here, not in /Ff.
+	if fMatch := regexp.MustCompile(`/F\s+(\d+)`).FindStringSubmatch(dataStr); fMatch != nil {
+		field.F, _ = strconv.Atoi(fMatch[1])
+	}
+
 	// Extract value (V)
 	if vMatch := regexp.MustCompile(`/V\s*\(([^)]*)\)`).FindStringSubmatch(dataStr); vMatch != nil {
 		field.V = vMatch[1]
@@ -313,6 +321,29 @@ func (af *AcroForm) ToFormSchema() *types.FormSchema {
 	return schema
 }
 
+// hiddenAnnotFlag is bit 2 (value 0x2) of the widget annotation /F flags: Hidden.
+const hiddenAnnotFlag = 0x2
+
+// isHidden reports whether the field is initially hidden. The Hidden bit lives
+// on the widget annotation /F flags, not the field /Ff flags. For a field whose
+// widget is merged into the field dict, /F is on the field itself. For a field
+// with separate kid widgets (e.g. radio groups), the flag lives on each kid, so
+// the field counts as hidden only when every kid widget is hidden.
+func (f *Field) isHidden() bool {
+	if (f.F & hiddenAnnotFlag) != 0 {
+		return true
+	}
+	if len(f.Kids) == 0 {
+		return false
+	}
+	for _, kid := range f.Kids {
+		if (kid.F & hiddenAnnotFlag) == 0 {
+			return false
+		}
+	}
+	return true
+}
+
 // ToQuestion converts a Field to a Question
 func (f *Field) ToQuestion() *types.Question {
 	question := &types.Question{
@@ -322,6 +353,7 @@ func (f *Field) ToQuestion() *types.Question {
 		Type:       mapFieldTypeWithFlags(f.FT, f.Ff),
 		Required:   (f.Ff & 0x2) != 0, // Required flag
 		ReadOnly:   (f.Ff & 0x1) != 0, // ReadOnly flag
+		Hidden:     f.isHidden(),
 		Properties: make(map[string]interface{}),
 	}
 
