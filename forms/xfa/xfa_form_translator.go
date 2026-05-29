@@ -470,7 +470,6 @@ type xfaNode struct {
 	ImageData         string
 	ImageContentType  string
 	ImageHRef         string // href attribute value (e.g. "$rr:logo.jpeg"); empty for inline images
-	HasPresenceAttr   bool   // explicit presence= attr → script-managed status indicator, suppress
 	HasExData         bool   // contains <exData>
 	ExDataHTML        string // first block of plain text extracted from text/html exData without xfa:embed markers
 	ExDataDescription string // remaining blocks (paragraphs 2+) joined by "\n"; used as a Description fallback when no explicit <desc> is present
@@ -774,9 +773,6 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 						}
 					case "presence":
 						leaf.Hidden = attr.Value != "visible"
-						if kind == xfaKindDraw {
-							leaf.HasPresenceAttr = true
-						}
 					case "access":
 						if attr.Value == "readOnly" || attr.Value == "protected" || attr.Value == "nonInteractive" {
 							leaf.ReadOnly = true
@@ -2206,13 +2202,16 @@ func emitDraw(node *xfaNode, path []string, parent *xfaNode, somSeg string, qIdx
 		}, true
 	}
 
-	// Non-image draws: suppress if script-managed (presence= attr).
-	// These are UI status indicators (colored blocks, dynamic labels) controlled by scripts.
-	if node.HasPresenceAttr {
-		return types.Question{}, false
-	}
-
 	// Static display draw (text or exData HTML).
+	//
+	// A presence= attribute is NOT a reason to suppress: a text draw whose
+	// visibility is script-toggled is almost always conditional instructions
+	// or a label for a toggleable field, not a status indicator. Genuine
+	// status indicators are caught above (event-bearing draws and imageEdit
+	// blocks with no image). Presence-attributed draws are emitted like any
+	// other display draw, but carry their hidden state through to the Question
+	// so the frontend knows they start hidden — mirroring how hidden fields
+	// are handled in convertNodeToQuestion.
 	displayText := resolveDrawText(node)
 	if displayText == "" {
 		return types.Question{}, false
@@ -2233,6 +2232,7 @@ func emitDraw(node *xfaNode, path []string, parent *xfaNode, somSeg string, qIdx
 		Description: firstNonEmpty(node.Description, node.ExDataDescription),
 		Type:        types.ResponseTypeDisplay,
 		ReadOnly:    true,
+		Hidden:      parentHidden || node.Hidden,
 		Section:     sectionName(path),
 		PageNumber:  node.PageNumber,
 		Properties:  props,

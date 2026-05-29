@@ -251,11 +251,15 @@ func TestExclGroupLabelFromPrecedingDraw(t *testing.T) {
 	}
 }
 
-// TestPresenceManagedDrawsSkipped verifies that draw elements with an explicit
-// presence= attribute are filtered out. These are script-managed status indicators
-// (like "Required Question Complete/Incomplete") whose visibility is toggled by form
-// logic — not static labels. Static labels never need a presence attribute.
-func TestPresenceManagedDrawsSkipped(t *testing.T) {
+// TestPresenceManagedDrawsEmittedAsHidden verifies that text draws with an
+// explicit presence= attribute are emitted as display questions carrying their
+// hidden state, NOT filtered out. A script-toggled text draw is almost always
+// conditional instructions or a label for a toggleable field — real content the
+// frontend should see (and know starts hidden) — not a status indicator.
+// Genuine status indicators are filtered elsewhere: event-bearing draws and
+// imageEdit blocks with no image (see TestDrawWithEventsSkipped and the
+// imageEdit check in emitDraw).
+func TestPresenceManagedDrawsEmittedAsHidden(t *testing.T) {
 	xfaXML := `<template>
   <subform name="Page1">
     <field name="realField">
@@ -265,11 +269,11 @@ func TestPresenceManagedDrawsSkipped(t *testing.T) {
     <draw name="sectionHeader">
       <value><text>Carcinogenicity</text></value>
     </draw>
-    <draw name="statusComplete" presence="hidden">
-      <value><text>Required Question Complete</text></value>
+    <draw name="conditionalHidden" presence="hidden">
+      <value><text>Complete this only if you answered Yes above</text></value>
     </draw>
-    <draw name="statusIncomplete" presence="visible">
-      <value><text>Required Question Incomplete</text></value>
+    <draw name="conditionalVisible" presence="visible">
+      <value><text>Provide supporting documentation</text></value>
     </draw>
   </subform>
 </template>`
@@ -279,21 +283,25 @@ func TestPresenceManagedDrawsSkipped(t *testing.T) {
 		t.Fatalf("ParseXFAForm() error = %v", err)
 	}
 
-	found := make(map[string]bool)
+	byName := make(map[string]types.Question)
 	for _, q := range form.Questions {
-		found[q.Name] = true
+		byName[q.Name] = q
 	}
 
-	if found["statusComplete"] {
-		t.Error("statusComplete (presence=hidden) should be filtered")
+	if q, ok := byName["conditionalHidden"]; !ok {
+		t.Error("conditionalHidden (presence=hidden) should be emitted, not filtered")
+	} else if !q.Hidden {
+		t.Error("conditionalHidden (presence=hidden) should carry Hidden=true")
 	}
-	if found["statusIncomplete"] {
-		t.Error("statusIncomplete (presence=visible) should be filtered — explicit presence marks it as dynamic")
+	if q, ok := byName["conditionalVisible"]; !ok {
+		t.Error("conditionalVisible (presence=visible) should be emitted")
+	} else if q.Hidden {
+		t.Error("conditionalVisible (presence=visible) should have Hidden=false")
 	}
-	if !found["sectionHeader"] {
+	if _, ok := byName["sectionHeader"]; !ok {
 		t.Error("sectionHeader (no presence attr) should be kept")
 	}
-	if !found["realField"] {
+	if _, ok := byName["realField"]; !ok {
 		t.Error("realField should be kept")
 	}
 }
