@@ -1251,6 +1251,129 @@ func TestPresenceVisibleField(t *testing.T) {
 	}
 }
 
+// TestPresenceHiddenPropagation verifies that a subform declared
+// presence="hidden" propagates Hidden=true to every kind of descendant question
+// (data-bound field, exclGroup, static draw) and onto nested FormSections, while
+// a sibling visible subform is unaffected.
+func TestPresenceHiddenPropagation(t *testing.T) {
+	xfaXML := `<?xml version="1.0"?>
+<template>
+  <subform name="root">
+    <subform name="hiddenSec" presence="hidden">
+      <field name="boundField">
+        <ui><textEdit/></ui>
+        <caption><value><text>Bound</text></value></caption>
+        <bind match="dataRef"/>
+      </field>
+      <exclGroup name="choice">
+        <field name="optA"><ui><checkButton/></ui><items><text>A</text></items></field>
+        <field name="optB"><ui><checkButton/></ui><items><text>B</text></items></field>
+      </exclGroup>
+      <subform name="nested">
+        <field name="deepField">
+          <ui><textEdit/></ui>
+          <caption><value><text>Deep</text></value></caption>
+          <bind match="dataRef"/>
+        </field>
+      </subform>
+    </subform>
+    <subform name="visibleSec">
+      <field name="visField">
+        <ui><textEdit/></ui>
+        <caption><value><text>Visible</text></value></caption>
+        <bind match="dataRef"/>
+      </field>
+    </subform>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+
+	byName := map[string]*types.Question{}
+	for i := range form.Questions {
+		byName[form.Questions[i].Name] = &form.Questions[i]
+	}
+
+	for _, name := range []string{"boundField", "choice", "deepField"} {
+		q := byName[name]
+		if q == nil {
+			t.Fatalf("question %q not found; got %v", name, questionNames(form.Questions))
+		}
+		if !q.Hidden {
+			t.Errorf("question %q under presence='hidden' subform should have Hidden=true", name)
+		}
+	}
+
+	if q := byName["visField"]; q == nil {
+		t.Fatal("question visField not found")
+	} else if q.Hidden {
+		t.Error("visField under a visible subform should have Hidden=false")
+	}
+
+	hiddenStates := collectSectionHidden(form.Sections)
+	for _, name := range []string{"hiddenSec", "nested"} {
+		hid, ok := hiddenStates[name]
+		if !ok {
+			t.Fatalf("section %q not found; got %v", name, hiddenStates)
+		}
+		if !hid {
+			t.Errorf("section %q should report Hidden=true", name)
+		}
+	}
+	if hiddenStates["visibleSec"] {
+		t.Error("section visibleSec should report Hidden=false")
+	}
+}
+
+// TestPresenceHiddenExclGroupOwn verifies that an exclGroup carrying its own
+// presence="hidden" is marked Hidden even without a hidden ancestor.
+func TestPresenceHiddenExclGroupOwn(t *testing.T) {
+	xfaXML := `<?xml version="1.0"?>
+<template>
+  <subform name="root">
+    <exclGroup name="choice" presence="hidden">
+      <field name="optA"><ui><checkButton/></ui><items><text>A</text></items></field>
+      <field name="optB"><ui><checkButton/></ui><items><text>B</text></items></field>
+    </exclGroup>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	if len(form.Questions) == 0 {
+		t.Fatal("expected at least 1 question")
+	}
+	if !form.Questions[0].Hidden {
+		t.Error("exclGroup with presence='hidden' should have Hidden=true")
+	}
+}
+
+func questionNames(qs []types.Question) []string {
+	names := make([]string, len(qs))
+	for i := range qs {
+		names[i] = qs[i].Name
+	}
+	return names
+}
+
+func collectSectionHidden(secs []types.FormSection) map[string]bool {
+	out := map[string]bool{}
+	var walk func([]types.FormSection)
+	walk = func(s []types.FormSection) {
+		for i := range s {
+			out[s[i].Name] = s[i].Hidden
+			walk(s[i].Children)
+		}
+	}
+	walk(secs)
+	return out
+}
+
 // ── Rendering improvement tests ───────────────────────────────────────────────
 
 // TestPositionProperties verifies that x/y/w/h attributes on fields and subforms

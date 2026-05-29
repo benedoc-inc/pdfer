@@ -734,6 +734,10 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 						node.Name = attr.Value
 					case "layout":
 						node.Layout = attr.Value
+					case "presence":
+						if attr.Value != "visible" {
+							node.Hidden = true
+						}
 					case "x":
 						node.X = attr.Value
 					case "y":
@@ -1945,11 +1949,11 @@ func walkSubformChildren(node *xfaNode, path []string, schema *types.FormSchema,
 			sections = append(sections, sec)
 
 		case xfaKindExclGroup:
-			q := emitExclGroup(child, path, seg, qIdx)
+			q := emitExclGroup(child, path, seg, qIdx, parentHidden)
 			schema.Questions = append(schema.Questions, q)
 
 		case xfaKindField:
-			if q, ok := emitField(child, path, seg, qIdx, verbose); ok {
+			if q, ok := emitField(child, path, seg, qIdx, parentHidden); ok {
 				schema.Questions = append(schema.Questions, q)
 			}
 
@@ -1985,6 +1989,7 @@ func buildSection(node, parent *xfaNode, parentPath []string, schema *types.Form
 		Label:       label,
 		Tooltip:     node.ToolTip,
 		Interactive: interactive,
+		Hidden:      nodeHidden,
 		Layout:      node.Layout,
 		Width:       node.W,
 		Height:      node.H,
@@ -2053,7 +2058,7 @@ func collectSectionContent(node *xfaNode) []string {
 // emitExclGroup emits an XFA exclGroup as a radio-button question.
 // somSeg is the node's SOM-formatted name segment (with "[i]" when needed),
 // stored on the Question so script back-refs can stitch a unique SOM path.
-func emitExclGroup(node *xfaNode, path []string, somSeg string, qIdx *int) types.Question {
+func emitExclGroup(node *xfaNode, path []string, somSeg string, qIdx *int, parentHidden bool) types.Question {
 	*qIdx++
 	q := types.Question{
 		ID:         sanitizeFieldIDWithIndex(node.Name, *qIdx),
@@ -2063,6 +2068,7 @@ func emitExclGroup(node *xfaNode, path []string, somSeg string, qIdx *int) types
 		Type:       types.ResponseTypeRadio,
 		Section:    sectionName(path),
 		PageNumber: node.PageNumber,
+		Hidden:     parentHidden || node.Hidden,
 	}
 	if len(node.Options) > 0 {
 		q.Options = make([]types.Option, len(node.Options))
@@ -2080,7 +2086,7 @@ func emitExclGroup(node *xfaNode, path []string, somSeg string, qIdx *int) types
 // emitField emits a <field> node as a Question. Returns (question, true) if the
 // field should appear in the output, (zero, false) if it should be skipped.
 // somSeg is the node's SOM-formatted name segment (with "[i]" when needed).
-func emitField(node *xfaNode, path []string, somSeg string, qIdx *int, verbose bool) (types.Question, bool) {
+func emitField(node *xfaNode, path []string, somSeg string, qIdx *int, parentHidden bool) (types.Question, bool) {
 	if node.Bind == "none" {
 		// Non-data-bound field — UI trigger, display label, or file upload.
 		if node.UIType == "button" {
@@ -2103,7 +2109,7 @@ func emitField(node *xfaNode, path []string, somSeg string, qIdx *int, verbose b
 					Type:       types.ResponseTypeFile,
 					Section:    sectionName(path),
 					PageNumber: node.PageNumber,
-					Hidden:     node.Hidden,
+					Hidden:     parentHidden || node.Hidden,
 				}, true
 			}
 			return types.Question{}, false
@@ -2122,11 +2128,12 @@ func emitField(node *xfaNode, path []string, somSeg string, qIdx *int, verbose b
 			ReadOnly:   true,
 			Section:    sectionName(path),
 			PageNumber: node.PageNumber,
+			Hidden:     parentHidden || node.Hidden,
 		}, true
 	}
 	// Data-bound interactive field.
 	*qIdx++
-	q := convertNodeToQuestion(node, *qIdx, sectionName(path), verbose)
+	q := convertNodeToQuestion(node, *qIdx, sectionName(path), parentHidden)
 	q.SOMSegment = somSeg
 	return q, true
 }
@@ -2248,7 +2255,7 @@ func sectionName(path []string) string {
 }
 
 // convertNodeToQuestion converts a data-bound xfaNode (Kind == xfaKindField) to a Question.
-func convertNodeToQuestion(node *xfaNode, index int, section string, verbose bool) types.Question {
+func convertNodeToQuestion(node *xfaNode, index int, section string, parentHidden bool) types.Question {
 	q := types.Question{
 		ID:          sanitizeFieldIDWithIndex(node.Name, index),
 		Name:        node.Name,
@@ -2257,7 +2264,7 @@ func convertNodeToQuestion(node *xfaNode, index int, section string, verbose boo
 		Type:        mapXFAUITypeToResponseType(node.UIType, ""),
 		Required:    node.Required,
 		ReadOnly:    node.ReadOnly,
-		Hidden:      node.Hidden,
+		Hidden:      parentHidden || node.Hidden,
 		PageNumber:  node.PageNumber,
 		Section:     section,
 	}
