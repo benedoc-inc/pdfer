@@ -76,6 +76,10 @@ out, err := pdfer.EmbedAttachments(pdfBytes, []pdfer.FileAttachment{
     {Name: "report.xlsx", Data: xlsxBytes, MimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
     {Name: "photo.jpg",   Data: jpegBytes, MimeType: "image/jpeg"},
 })
+
+// For encrypted PDFs, supply the user/owner password: appended streams are
+// encrypted with the document's keys and the file /ID is carried forward.
+out, err = pdfer.EmbedAttachmentsWithPassword(encryptedBytes, files, []byte("password"))
 ```
 
 ### Stamping

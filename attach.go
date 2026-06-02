@@ -5,10 +5,10 @@ import (
 	"compress/zlib"
 	"fmt"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/benedoc-inc/pdfer/v2/core/incremental"
 	"github.com/benedoc-inc/pdfer/v2/core/parse"
 )
 
@@ -19,25 +19,32 @@ type FileAttachment struct {
 	MimeType string // MIME type, e.g. "application/pdf" or "image/jpeg"
 }
 
-// EmbedAttachments appends file attachments to pdfBytes via an incremental
-// update. The attached files appear in PDF viewers' attachment panels.
+// EmbedAttachments appends file attachments to an unencrypted pdfBytes via an
+// incremental update. The attached files appear in PDF viewers' attachment
+// panels. For encrypted PDFs use EmbedAttachmentsWithPassword.
 func EmbedAttachments(pdfBytes []byte, files []FileAttachment) ([]byte, error) {
+	return EmbedAttachmentsWithPassword(pdfBytes, files, nil)
+}
+
+// EmbedAttachmentsWithPassword appends file attachments to pdfBytes via an
+// incremental update, supplying the user or owner password for encrypted
+// documents (pass nil for unencrypted ones).
+//
+// For encrypted PDFs the appended embedded-file streams are encrypted with the
+// document's keys, string values follow the document's /StrF crypt filter, and
+// the file /ID is carried forward so the update remains decryptable.
+func EmbedAttachmentsWithPassword(pdfBytes []byte, files []FileAttachment, password []byte) ([]byte, error) {
 	if len(files) == 0 {
 		return pdfBytes, nil
 	}
 
-	pdf, err := parse.OpenWithOptions(pdfBytes, parse.ParseOptions{})
+	pdf, err := parse.OpenWithOptions(pdfBytes, parse.ParseOptions{Password: password})
 	if err != nil {
 		return nil, fmt.Errorf("parse PDF: %w", err)
 	}
 	trailer := pdf.Trailer()
 	if trailer == nil {
 		return nil, fmt.Errorf("no trailer found")
-	}
-
-	prevXRef := attachFindStartXRef(pdfBytes)
-	if prevXRef < 0 {
-		return nil, fmt.Errorf("could not locate startxref")
 	}
 
 	rootNum, err := parseRefNum(trailer.RootRef)
@@ -50,12 +57,10 @@ func EmbedAttachments(pdfBytes []byte, files []FileAttachment) ([]byte, error) {
 		return nil, fmt.Errorf("read catalog: %w", err)
 	}
 
-	nextObj := trailer.Size
-	offsets := make(map[int]int64)
-
-	var buf bytes.Buffer
-	buf.Write(pdfBytes)
-	buf.WriteByte('\n')
+	upd, err := incremental.New(pdfBytes, trailer, pdf.Encryption())
+	if err != nil {
+		return nil, err
+	}
 
 	// One embedded-file stream object + one filespec dict object per file.
 	type attachment struct {
@@ -65,80 +70,51 @@ func EmbedAttachments(pdfBytes []byte, files []FileAttachment) ([]byte, error) {
 	attachments := make([]attachment, 0, len(files))
 
 	for _, f := range files {
-		compressed := compressBytes(f.Data)
 		mimeType := f.MimeType
 		if mimeType == "" {
 			mimeType = "application/octet-stream"
 		}
-		streamNo := nextObj
-		nextObj++
-		offsets[streamNo] = int64(buf.Len())
-		fmt.Fprintf(&buf, "%d 0 obj\n", streamNo)
-		fmt.Fprintf(&buf,
-			"<</Type /EmbeddedFile /Subtype /%s /Filter /FlateDecode /Length %d>>\n",
-			pdfNameEscape(mimeType), len(compressed),
-		)
-		buf.WriteString("stream\n")
-		buf.Write(compressed)
-		buf.WriteString("\nendstream\nendobj\n")
 
-		filespecNo := nextObj
-		nextObj++
-		offsets[filespecNo] = int64(buf.Len())
-		fmt.Fprintf(&buf, "%d 0 obj\n", filespecNo)
+		streamNo := upd.Reserve()
+		dict := fmt.Sprintf(
+			"<</Type /EmbeddedFile /Subtype /%s /Filter /FlateDecode>>",
+			pdfNameEscape(mimeType),
+		)
+		if err := upd.AddStream(streamNo, 0, []byte(dict), compressBytes(f.Data)); err != nil {
+			return nil, err
+		}
+
+		filespecNo := upd.Reserve()
 		escapedName := pdfStringEscape(f.Name)
-		fmt.Fprintf(&buf,
-			"<</Type /Filespec /F (%s) /UF (%s) /EF <</F %d 0 R>>>>\n",
+		filespec := fmt.Sprintf(
+			"<</Type /Filespec /F (%s) /UF (%s) /EF <</F %d 0 R>>>>",
 			escapedName, escapedName, streamNo,
 		)
-		buf.WriteString("endobj\n")
+		if err := upd.AddObject(filespecNo, 0, []byte(filespec)); err != nil {
+			return nil, err
+		}
 
 		attachments = append(attachments, attachment{name: f.Name, filespecNo: filespecNo})
 	}
 
 	// /Names object: EmbeddedFiles name tree (flat, no kids).
-	namesNo := nextObj
-	nextObj++
-	offsets[namesNo] = int64(buf.Len())
-	fmt.Fprintf(&buf, "%d 0 obj\n", namesNo)
-	buf.WriteString("<</EmbeddedFiles <</Names [")
+	namesNo := upd.Reserve()
+	var names bytes.Buffer
+	names.WriteString("<</EmbeddedFiles <</Names [")
 	for _, a := range attachments {
-		fmt.Fprintf(&buf, " (%s) %d 0 R", pdfStringEscape(a.name), a.filespecNo)
+		fmt.Fprintf(&names, " (%s) %d 0 R", pdfStringEscape(a.name), a.filespecNo)
 	}
-	buf.WriteString(" ]>>>>\nendobj\n")
+	names.WriteString(" ]>>>>")
+	if err := upd.AddObject(namesNo, 0, names.Bytes()); err != nil {
+		return nil, err
+	}
 
 	// Updated catalog: copy old body, add/replace /Names entry.
-	newCatalog := injectNamesRef(catalogBody, namesNo)
-	offsets[rootNum] = int64(buf.Len())
-	fmt.Fprintf(&buf, "%d 0 obj\n", rootNum)
-	buf.Write(newCatalog)
-	buf.WriteString("\nendobj\n")
-
-	// xref table.
-	xrefStart := int64(buf.Len())
-	buf.WriteString("xref\n")
-	nums := make([]int, 0, len(offsets))
-	for n := range offsets {
-		nums = append(nums, n)
+	if err := upd.AddObject(rootNum, 0, injectNamesRef(catalogBody, namesNo)); err != nil {
+		return nil, err
 	}
-	sort.Ints(nums)
-	attachWriteXRef(&buf, offsets, nums)
 
-	// Trailer.
-	buf.WriteString("trailer\n<<")
-	fmt.Fprintf(&buf, "/Size %d", nextObj)
-	fmt.Fprintf(&buf, "/Root %s", trailer.RootRef)
-	if trailer.InfoRef != "" {
-		fmt.Fprintf(&buf, "/Info %s", trailer.InfoRef)
-	}
-	if trailer.EncryptRef != "" {
-		fmt.Fprintf(&buf, "/Encrypt %s", trailer.EncryptRef)
-	}
-	fmt.Fprintf(&buf, "/Prev %d", prevXRef)
-	buf.WriteString(">>\n")
-	fmt.Fprintf(&buf, "startxref\n%d\n%%%%EOF\n", xrefStart)
-
-	return buf.Bytes(), nil
+	return upd.Bytes()
 }
 
 // injectNamesRef returns a copy of catalogBody with /Names N 0 R added or
@@ -184,39 +160,4 @@ func parseRefNum(ref string) (int, error) {
 		return 0, fmt.Errorf("empty ref")
 	}
 	return strconv.Atoi(parts[0])
-}
-
-func attachFindStartXRef(pdfBytes []byte) int64 {
-	searchLen := 1024
-	if searchLen > len(pdfBytes) {
-		searchLen = len(pdfBytes)
-	}
-	tail := pdfBytes[len(pdfBytes)-searchLen:]
-	pat := regexp.MustCompile(`startxref\s+(\d+)`)
-	// Take the last match.
-	matches := pat.FindAllSubmatch(tail, -1)
-	if len(matches) == 0 {
-		return -1
-	}
-	last := matches[len(matches)-1]
-	v, err := strconv.ParseInt(string(last[1]), 10, 64)
-	if err != nil {
-		return -1
-	}
-	return v
-}
-
-func attachWriteXRef(buf *bytes.Buffer, offsets map[int]int64, nums []int) {
-	i := 0
-	for i < len(nums) {
-		j := i + 1
-		for j < len(nums) && nums[j] == nums[j-1]+1 {
-			j++
-		}
-		fmt.Fprintf(buf, "%d %d\n", nums[i], j-i)
-		for k := i; k < j; k++ {
-			fmt.Fprintf(buf, "%010d %05d n \n", offsets[nums[k]], 0)
-		}
-		i = j
-	}
 }
