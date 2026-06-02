@@ -78,7 +78,7 @@ func TestEmbedAttachments_Unencrypted(t *testing.T) {
 	payload := []byte("hello attachment payload, unencrypted")
 	out, err := EmbedAttachments(base, []FileAttachment{
 		{Name: "note.txt", Data: payload, MimeType: "text/plain"},
-	}, nil)
+	})
 	if err != nil {
 		t.Fatalf("EmbedAttachments: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestEmbedAttachments_Encrypted(t *testing.T) {
 	filespecNo := streamNo + 1
 
 	payload := []byte("TOP SECRET attachment contents that must be encrypted")
-	out, err := EmbedAttachments(enc, []FileAttachment{
+	out, err := EmbedAttachmentsWithPassword(enc, []FileAttachment{
 		{Name: "secret.txt", Data: payload, MimeType: "text/plain"},
 	}, password)
 	if err != nil {

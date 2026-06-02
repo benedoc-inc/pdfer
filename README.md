@@ -72,12 +72,14 @@ out, err := pdfer.Repair(pdfBytes, nil)
 out, err := pdfer.Linearize(pdfBytes, nil) // Fast Web View
 
 // Embed file attachments (PDF Portfolio / eCTD)
-// Pass the user/owner password for encrypted PDFs (nil otherwise); the appended
-// streams and filespec strings are encrypted and the file /ID is preserved.
 out, err := pdfer.EmbedAttachments(pdfBytes, []pdfer.FileAttachment{
     {Name: "report.xlsx", Data: xlsxBytes, MimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
     {Name: "photo.jpg",   Data: jpegBytes, MimeType: "image/jpeg"},
-}, nil)
+})
+
+// For encrypted PDFs, supply the user/owner password: appended streams are
+// encrypted with the document's keys and the file /ID is carried forward.
+out, err = pdfer.EmbedAttachmentsWithPassword(encryptedBytes, files, []byte("password"))
 ```
 
 ### Stamping

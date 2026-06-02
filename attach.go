@@ -19,14 +19,21 @@ type FileAttachment struct {
 	MimeType string // MIME type, e.g. "application/pdf" or "image/jpeg"
 }
 
-// EmbedAttachments appends file attachments to pdfBytes via an incremental
-// update. The attached files appear in PDF viewers' attachment panels.
+// EmbedAttachments appends file attachments to an unencrypted pdfBytes via an
+// incremental update. The attached files appear in PDF viewers' attachment
+// panels. For encrypted PDFs use EmbedAttachmentsWithPassword.
+func EmbedAttachments(pdfBytes []byte, files []FileAttachment) ([]byte, error) {
+	return EmbedAttachmentsWithPassword(pdfBytes, files, nil)
+}
+
+// EmbedAttachmentsWithPassword appends file attachments to pdfBytes via an
+// incremental update, supplying the user or owner password for encrypted
+// documents (pass nil for unencrypted ones).
 //
-// For encrypted PDFs, password must be the user or owner password; the appended
-// embedded-file streams and filespec strings are encrypted with the document's
-// keys and the file /ID is carried forward so the update remains decryptable.
-// Pass a nil password for unencrypted documents.
-func EmbedAttachments(pdfBytes []byte, files []FileAttachment, password []byte) ([]byte, error) {
+// For encrypted PDFs the appended embedded-file streams are encrypted with the
+// document's keys, string values follow the document's /StrF crypt filter, and
+// the file /ID is carried forward so the update remains decryptable.
+func EmbedAttachmentsWithPassword(pdfBytes []byte, files []FileAttachment, password []byte) ([]byte, error) {
 	if len(files) == 0 {
 		return pdfBytes, nil
 	}
