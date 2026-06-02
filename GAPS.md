@@ -265,13 +265,19 @@ strings, and there is no `GetNamedDestinations()` API.
 **File**: `content/extract/bookmarks.go`, `api.go`
 
 #### ~~Embedded file attachments not supported~~ ✅ Fixed
-`pdfer.EmbedAttachments(pdfBytes, []pdfer.FileAttachment{...})` writes each
-attachment as an incremental update: an `EmbeddedFile` stream object per file,
-a Filespec dict per file, and a `/Names` object that extends (or creates) the
-catalog's `/EmbeddedFiles` name tree. The original PDF bytes are never
+`pdfer.EmbedAttachments(pdfBytes, []pdfer.FileAttachment{...}, password)` writes
+each attachment as an incremental update: an `EmbeddedFile` stream object per
+file, a Filespec dict per file, and a `/Names` object that extends (or creates)
+the catalog's `/EmbeddedFiles` name tree. The original PDF bytes are never
 modified — only appended to.
 
-**File**: `attach.go`
+For encrypted PDFs, pass the user/owner password: the appended streams and
+filespec strings are encrypted with the document's per-object keys and the file
+`/ID` is carried into the new trailer (the standard security handler derives the
+key from `/ID[0]`, so dropping it breaks decryption). The shared envelope lives
+in `core/incremental`, used by both attachments and AcroForm incremental fills.
+
+**Files**: `attach.go`, `core/incremental/incremental.go`, `core/encrypt/encrypt_object.go`
 
 #### JPEG2000 (JPXDecode) images not decoded
 `images.go` identifies `JPXDecode`-filtered streams and reports the format, but

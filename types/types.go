@@ -16,6 +16,11 @@ type PDFEncryption struct {
 	P               int32  // Permissions
 	EncryptMetadata bool
 	EncryptKey      []byte // Master encryption key
+	// StrFIdentity is true when the string crypt filter (/StrF) is /Identity,
+	// meaning string values are stored unencrypted even though streams are
+	// encrypted. pdfer's own EncryptPDF emits /StrF /Identity. Write paths must
+	// honor this and leave strings in the clear.
+	StrFIdentity bool
 }
 
 // FormData represents the data to fill into the form

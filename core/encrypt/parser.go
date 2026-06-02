@@ -84,6 +84,14 @@ func ParseEncryptionDictionary(pdfBytes []byte, verbose bool) (*types.PDFEncrypt
 		encrypt.Filter = match[1]
 	}
 
+	// Parse /StrF (string crypt filter). /Identity means strings are NOT
+	// encrypted (only streams, via /StmF). Used by write paths to decide whether
+	// to encrypt appended string values.
+	strFPattern := regexp.MustCompile(`/StrF\s*/(\w+)`)
+	if match := strFPattern.FindStringSubmatch(dictContent); match != nil {
+		encrypt.StrFIdentity = match[1] == "Identity"
+	}
+
 	// Parse /V (encryption version) - must be at top level, not in nested dicts
 	vPattern := regexp.MustCompile(`/V\s+(\d+)`)
 	matches := vPattern.FindAllStringSubmatch(dictContent, -1)
