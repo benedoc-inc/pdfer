@@ -80,6 +80,14 @@ out, err := pdfer.EmbedAttachments(pdfBytes, []pdfer.FileAttachment{
 // For encrypted PDFs, supply the user/owner password: appended streams are
 // encrypted with the document's keys and the file /ID is carried forward.
 out, err = pdfer.EmbedAttachmentsWithPassword(encryptedBytes, files, []byte("password"))
+
+// List / extract embedded file attachments (inverse of EmbedAttachments)
+attachments, err := pdfer.ListAttachments(pdfBytes)
+for _, a := range attachments {
+    fmt.Printf("%s (%d bytes, %s)\n", a.Name, len(a.Data), a.MimeType)
+    _ = os.WriteFile(a.Name, a.Data, 0644)
+}
+// For encrypted PDFs: pdfer.ListAttachmentsWithPassword(pdfBytes, []byte("password"))
 ```
 
 ### Stamping
@@ -370,7 +378,7 @@ pdfer/
 | | Visible signature field appearance | ❌ |
 | | RFC 3161 timestamp (TSA) | ❌ |
 | | Long-term validation (LTV / OCSP / CRL) | ❌ |
-| **File attachments** | Embed files via `/EmbeddedFiles` name tree | ✅ |
+| **File attachments** | Embed and extract files via `/EmbeddedFiles` name tree | ✅ |
 | **Forms** | AcroForm parse, fill, flatten | ✅ |
 | | XFA extract, fill, rebuild | ✅ |
 | **Extraction** | Text, graphics, images, fonts | ✅ |

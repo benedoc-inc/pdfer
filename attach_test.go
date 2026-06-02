@@ -3,11 +3,13 @@ package pdfer
 import (
 	"bytes"
 	"compress/zlib"
+	"fmt"
 	"io"
 	"regexp"
 	"strconv"
 	"testing"
 
+	"github.com/benedoc-inc/pdfer/v2/core/incremental"
 	"github.com/benedoc-inc/pdfer/v2/core/parse"
 	"github.com/benedoc-inc/pdfer/v2/core/write"
 )
@@ -192,4 +194,166 @@ func embeddedStreamObjNum(t *testing.T, pdfBytes, password []byte) int {
 		t.Fatalf("could not determine trailer size")
 	}
 	return tr.Size
+}
+
+func TestListAttachments_RoundTrip(t *testing.T) {
+	base := buildAttachBasePDF(t)
+
+	in := []FileAttachment{
+		{Name: "report.txt", Data: []byte("hello world\nsecond line"), MimeType: "text/plain"},
+		{Name: "data.bin", Data: bytes.Repeat([]byte{0x00, 0x01, 0x02, 0xfe, 0xff}, 100), MimeType: "application/octet-stream"},
+		{Name: "weird (name).pdf", Data: []byte("%PDF-1.4 fake"), MimeType: "application/pdf"},
+	}
+
+	withAttachments, err := EmbedAttachments(base, in)
+	if err != nil {
+		t.Fatalf("EmbedAttachments: %v", err)
+	}
+
+	got, err := ListAttachments(withAttachments)
+	if err != nil {
+		t.Fatalf("ListAttachments: %v", err)
+	}
+	if len(got) != len(in) {
+		t.Fatalf("got %d attachments, want %d", len(got), len(in))
+	}
+
+	byName := make(map[string]FileAttachment, len(got))
+	for _, a := range got {
+		byName[a.Name] = a
+	}
+	for _, want := range in {
+		a, ok := byName[want.Name]
+		if !ok {
+			t.Errorf("attachment %q missing from result", want.Name)
+			continue
+		}
+		if !bytes.Equal(a.Data, want.Data) {
+			t.Errorf("attachment %q data mismatch: got %d bytes, want %d", want.Name, len(a.Data), len(want.Data))
+		}
+		if a.MimeType != want.MimeType {
+			t.Errorf("attachment %q mime: got %q, want %q", want.Name, a.MimeType, want.MimeType)
+		}
+	}
+}
+
+// TestListAttachments_Encrypted confirms the reader decrypts embedded-file
+// streams written by EmbedAttachmentsWithPassword.
+func TestListAttachments_Encrypted(t *testing.T) {
+	base := buildAttachBasePDF(t)
+	password := []byte("s3cret")
+	enc, err := EncryptPDF(base, password, nil, false)
+	if err != nil {
+		t.Fatalf("EncryptPDF: %v", err)
+	}
+
+	payload := []byte("TOP SECRET attachment contents")
+	out, err := EmbedAttachmentsWithPassword(enc, []FileAttachment{
+		{Name: "secret.txt", Data: payload, MimeType: "text/plain"},
+	}, password)
+	if err != nil {
+		t.Fatalf("EmbedAttachmentsWithPassword: %v", err)
+	}
+
+	got, err := ListAttachmentsWithPassword(out, password)
+	if err != nil {
+		t.Fatalf("ListAttachmentsWithPassword: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d attachments, want 1", len(got))
+	}
+	if got[0].Name != "secret.txt" || !bytes.Equal(got[0].Data, payload) {
+		t.Fatalf("unexpected attachment: name=%q data=%q", got[0].Name, got[0].Data)
+	}
+}
+
+func TestListAttachments_None(t *testing.T) {
+	got, err := ListAttachments(buildAttachBasePDF(t))
+	if err != nil {
+		t.Fatalf("ListAttachments: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected no attachments, got %d", len(got))
+	}
+}
+
+// TestListAttachments_NestedNameTree verifies the reader descends through
+// intermediate /Kids nodes, which EmbedAttachments never produces (it writes a
+// flat tree) but other PDF producers do.
+func TestListAttachments_NestedNameTree(t *testing.T) {
+	pdf := buildNestedNameTreePDF(t, "nested.txt", []byte("nested content"))
+	got, err := ListAttachments(pdf)
+	if err != nil {
+		t.Fatalf("ListAttachments: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d attachments, want 1", len(got))
+	}
+	if got[0].Name != "nested.txt" || !bytes.Equal(got[0].Data, []byte("nested content")) {
+		t.Fatalf("unexpected attachment: name=%q data=%q", got[0].Name, got[0].Data)
+	}
+}
+
+// buildNestedNameTreePDF embeds a single file but routes it through an
+// intermediate /Kids node, producing the nested name-tree layout that
+// EmbedAttachments (which writes flat trees) never emits. It drives the shared
+// core/incremental writer directly.
+func buildNestedNameTreePDF(t *testing.T, name string, data []byte) []byte {
+	t.Helper()
+	base := buildAttachBasePDF(t)
+
+	pdf, err := parse.OpenWithOptions(base, parse.ParseOptions{})
+	if err != nil {
+		t.Fatalf("parse base PDF: %v", err)
+	}
+	trailer := pdf.Trailer()
+	rootNum, err := parseRefNum(trailer.RootRef)
+	if err != nil {
+		t.Fatalf("bad root ref: %v", err)
+	}
+	catalog, err := pdf.GetObjectContent(rootNum)
+	if err != nil {
+		t.Fatalf("read catalog: %v", err)
+	}
+
+	upd, err := incremental.New(base, trailer, pdf.Encryption())
+	if err != nil {
+		t.Fatalf("incremental.New: %v", err)
+	}
+
+	streamNo := upd.Reserve()
+	if err := upd.AddStream(streamNo, 0, []byte("<</Type /EmbeddedFile /Filter /FlateDecode>>"), compressBytes(data)); err != nil {
+		t.Fatalf("AddStream: %v", err)
+	}
+
+	esc := pdfStringEscape(name)
+	filespecNo := upd.Reserve()
+	if err := upd.AddObject(filespecNo, 0, []byte(fmt.Sprintf("<</Type /Filespec /F (%s) /UF (%s) /EF <</F %d 0 R>>>>", esc, esc, streamNo))); err != nil {
+		t.Fatalf("AddObject filespec: %v", err)
+	}
+
+	leafNo := upd.Reserve()
+	if err := upd.AddObject(leafNo, 0, []byte(fmt.Sprintf("<</Names [(%s) %d 0 R]>>", esc, filespecNo))); err != nil {
+		t.Fatalf("AddObject leaf: %v", err)
+	}
+
+	rootNode := upd.Reserve()
+	if err := upd.AddObject(rootNode, 0, []byte(fmt.Sprintf("<</Kids [%d 0 R]>>", leafNo))); err != nil {
+		t.Fatalf("AddObject root node: %v", err)
+	}
+
+	namesNo := upd.Reserve()
+	if err := upd.AddObject(namesNo, 0, []byte(fmt.Sprintf("<</EmbeddedFiles %d 0 R>>", rootNode))); err != nil {
+		t.Fatalf("AddObject names: %v", err)
+	}
+
+	if err := upd.AddObject(rootNum, 0, injectNamesRef(catalog, namesNo)); err != nil {
+		t.Fatalf("AddObject catalog: %v", err)
+	}
+
+	out, err := upd.Bytes()
+	if err != nil {
+		t.Fatalf("incremental.Bytes: %v", err)
+	}
+	return out
 }

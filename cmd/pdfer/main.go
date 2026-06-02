@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	pdfer "github.com/benedoc-inc/pdfer/v2"
 	encrypt "github.com/benedoc-inc/pdfer/v2/core/encrypt"
@@ -34,6 +35,8 @@ func main() {
 		logFile       = flag.String("log", "", "Path to log file (if empty, logs to stderr)")
 		verify        = flag.Bool("verify", false, "Run verification test with UniPDF instead of filling form")
 		extractSchema = flag.Bool("extract-schema", false, "Extract questionnaire schema from PDF and output as JSON (requires -output)")
+		listAttach    = flag.Bool("list-attachments", false, "List embedded file attachments in the PDF and exit")
+		extractAttach = flag.String("extract-attachments", "", "Extract embedded file attachments into the given directory and exit")
 	)
 	flag.Parse()
 
@@ -58,6 +61,16 @@ func main() {
 			log.Fatal("Error: -output flag is required when using -extract-schema")
 		}
 		handleExtractSchema(*inputPDF, *outputPDF, *verbose)
+		return
+	}
+
+	// Attachment listing / extraction also short-circuit the fill path.
+	if *listAttach {
+		handleListAttachments(*inputPDF)
+		return
+	}
+	if *extractAttach != "" {
+		handleExtractAttachments(*inputPDF, *extractAttach)
 		return
 	}
 
@@ -292,4 +305,59 @@ func handleExtractSchema(inputPDF, outputJSON string, verbose bool) {
 	fmt.Printf("Input:  %s\n", inputPDF)
 	fmt.Printf("Output: %s\n", outputJSON)
 	fmt.Printf("Questions extracted: %d\n", len(schema.Questions))
+}
+
+// handleListAttachments prints the embedded file attachments found in the PDF.
+func handleListAttachments(inputPDF string) {
+	pdfBytes, err := os.ReadFile(inputPDF)
+	if err != nil {
+		log.Fatalf("Error reading PDF: %v", err)
+	}
+	attachments, err := pdfer.ListAttachments(pdfBytes)
+	if err != nil {
+		log.Fatalf("Error listing attachments: %v", err)
+	}
+	if len(attachments) == 0 {
+		fmt.Println("No embedded file attachments found.")
+		return
+	}
+	fmt.Printf("Found %d attachment(s):\n", len(attachments))
+	for _, a := range attachments {
+		mime := a.MimeType
+		if mime == "" {
+			mime = "(unknown)"
+		}
+		fmt.Printf("  %-40s %10d bytes  %s\n", a.Name, len(a.Data), mime)
+	}
+}
+
+// handleExtractAttachments writes every embedded file attachment into outDir.
+func handleExtractAttachments(inputPDF, outDir string) {
+	pdfBytes, err := os.ReadFile(inputPDF)
+	if err != nil {
+		log.Fatalf("Error reading PDF: %v", err)
+	}
+	attachments, err := pdfer.ListAttachments(pdfBytes)
+	if err != nil {
+		log.Fatalf("Error listing attachments: %v", err)
+	}
+	if len(attachments) == 0 {
+		fmt.Println("No embedded file attachments found.")
+		return
+	}
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		log.Fatalf("Error creating output directory: %v", err)
+	}
+	for _, a := range attachments {
+		// Guard against path traversal from attacker-controlled filenames.
+		name := filepath.Base(filepath.FromSlash(a.Name))
+		if name == "" || name == "." || name == string(filepath.Separator) {
+			name = "attachment"
+		}
+		dest := filepath.Join(outDir, name)
+		if err := os.WriteFile(dest, a.Data, 0644); err != nil {
+			log.Fatalf("Error writing %s: %v", dest, err)
+		}
+		fmt.Printf("Extracted %s (%d bytes)\n", dest, len(a.Data))
+	}
 }
