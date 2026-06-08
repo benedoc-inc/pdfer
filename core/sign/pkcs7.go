@@ -14,22 +14,22 @@ import (
 
 // OIDs required for CMS/PKCS#7 detached signatures.
 var (
-	oidData                  = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 1}
-	oidSignedData            = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 2}
-	oidSHA256                = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 1}
-	oidRSAEncryption         = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 1}
-	oidECDSAWithSHA256       = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 2}
-	oidContentType           = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 3}
-	oidMessageDigest         = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 4}
-	oidSigningTime           = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 5}
-	oidSigTimeStampToken     = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 16, 2, 14}
+	oidData              = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 1}
+	oidSignedData        = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 2}
+	oidSHA256            = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 1}
+	oidRSAEncryption     = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 1}
+	oidECDSAWithSHA256   = asn1.ObjectIdentifier{1, 2, 840, 10045, 4, 3, 2}
+	oidContentType       = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 3}
+	oidMessageDigest     = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 4}
+	oidSigningTime       = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 5}
+	oidSigTimeStampToken = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 16, 2, 14}
 )
 
 // derOIDs holds pre-computed DER encodings of the OIDs used in PKCS#7
 // structures. Populated once at init; asn1.Marshal on a valid, non-nil OID
 // cannot fail, so any error here indicates a compile-time constant bug.
 var derOIDs struct {
-	data, signedData, sha256, rsaEncryption, ecdsaWithSHA256 []byte
+	data, signedData, sha256, rsaEncryption, ecdsaWithSHA256   []byte
 	contentType, messageDigest, signingTime, sigTimeStampToken []byte
 }
 
@@ -188,4 +188,3 @@ func assemblePKCS7(ctx *pkcs7Context, tsaToken []byte) []byte {
 	)
 	return derSequence(derOIDs.signedData, derContextImplicit(0, signedData))
 }
-

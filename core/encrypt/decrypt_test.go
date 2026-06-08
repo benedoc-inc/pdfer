@@ -8,7 +8,7 @@ import (
 	"crypto/rc4"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 func TestDecryptObject_RC4(t *testing.T) {
@@ -75,7 +75,7 @@ func TestDecryptObject_AES(t *testing.T) {
 	keyData[n+2] = byte((objNum >> 16) & 0xff)
 	keyData[n+3] = byte(genNum & 0xff)
 	keyData[n+4] = byte((genNum >> 8) & 0xff)
-	
+
 	keyHash := md5.New()
 	keyHash.Write(keyData)
 	keyHash.Write([]byte{0x73, 0x41, 0x6C, 0x54}) // "sAlT"
@@ -131,7 +131,6 @@ func TestDecryptObject_NoEncryption(t *testing.T) {
 		t.Errorf("DecryptObject() = %q, want %q", decrypted, plaintext)
 	}
 }
-
 
 // deriveObjectKey is a helper function for tests to derive object key
 func deriveObjectKey(encryptKey []byte, objNum, genNum, r, keyLength int) []byte {

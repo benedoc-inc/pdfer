@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/core/encrypt"
-	"github.com/benedoc-inc/pdfer/forms/xfa"
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/core/encrypt"
+	"github.com/benedoc-inc/pdfer/v2/forms/xfa"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // getTestResourcePath is now in test_helpers.go
@@ -99,7 +99,7 @@ func TestXFARoundTrip(t *testing.T) {
 			t.Logf("Warning: Failed to parse template as form: %v", err)
 		} else {
 			xfaData.Form = form
-			t.Logf("Parsed form: %d questions, %d rules", len(form.Questions), len(form.Rules))
+			t.Logf("Parsed form: %d questions, %d elements, %d scripts", len(form.Questions), len(form.Elements), len(form.Scripts))
 		}
 	}
 
@@ -182,6 +182,14 @@ func TestXFARoundTrip(t *testing.T) {
 	var xfaDataRoundTrip XFAData
 	if err := json.Unmarshal(jsonData, &xfaDataRoundTrip); err != nil {
 		t.Fatalf("Failed to unmarshal JSON: %v", err)
+	}
+	if xfaData.Form != nil && xfaDataRoundTrip.Form != nil {
+		if len(xfaDataRoundTrip.Form.Elements) != len(xfaData.Form.Elements) {
+			t.Errorf("JSON round-trip elements count mismatch: got %d, want %d", len(xfaDataRoundTrip.Form.Elements), len(xfaData.Form.Elements))
+		}
+		if len(xfaData.Form.Elements) == 0 {
+			t.Error("expected non-empty Elements on real eSTAR fixture (help buttons / pageAreas)")
+		}
 	}
 
 	// Round-trip: Convert back to XFA XML and rebuild streams

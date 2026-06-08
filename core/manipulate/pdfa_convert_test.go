@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/core/write"
+	"github.com/benedoc-inc/pdfer/v2/core/write"
 )
 
 func makeSimplePDF(t *testing.T) []byte {

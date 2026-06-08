@@ -17,7 +17,7 @@ func TestSkipOverWhitespace(t *testing.T) {
 		{"tabs and newlines", "\t\n\r abc", true, 'a'},
 		{"only whitespace", "   ", true, 0},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			stream := NewPDFStream([]byte(tt.input))
@@ -46,7 +46,7 @@ func TestReadUntilWhitespace(t *testing.T) {
 		{"no whitespace", "abc", "abc"},
 		{"starts with space", " abc", ""},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			stream := NewPDFStream([]byte(tt.input))
@@ -77,7 +77,7 @@ func TestReadObjectHeader(t *testing.T) {
 		{"missing obj", "212 0", 0, 0, true},
 		{"invalid number", "abc 0 obj", 0, 0, true},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			stream := NewPDFStream([]byte(tt.input))
@@ -111,11 +111,11 @@ func TestFindObjectHeaderByRegex(t *testing.T) {
 		shouldError bool
 	}{
 		{"found", "some text 212 0 obj more text", 212, 0, 9, false}, // Pattern matches at 9 (after "some text"), +1 = 10
-		{"with spaces", "text  212   0   obj", 212, 0, 5, false},    // Pattern matches at 5 (after "text "), +1 = 6
+		{"with spaces", "text  212   0   obj", 212, 0, 5, false},     // Pattern matches at 5 (after "text "), +1 = 6
 		{"not found", "some text without object", 212, 0, -1, true},
 		// Note: multiple matches test removed - regex behavior with multiple matches is complex
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pos, err := findObjectHeaderByRegex([]byte(tt.pdfBytes), tt.objNum, tt.genNum)
@@ -139,7 +139,7 @@ func TestFindObjectHeaderByRegex(t *testing.T) {
 func TestPDFStream(t *testing.T) {
 	data := []byte("hello world")
 	stream := NewPDFStream(data)
-	
+
 	// Test Read
 	buf, err := stream.Read(5)
 	if err != nil {
@@ -148,12 +148,12 @@ func TestPDFStream(t *testing.T) {
 	if string(buf) != "hello" {
 		t.Errorf("Read() = %q, want %q", string(buf), "hello")
 	}
-	
+
 	// Test Tell
 	if stream.Tell() != 5 {
 		t.Errorf("Tell() = %d, want 5", stream.Tell())
 	}
-	
+
 	// Test Seek
 	_, err = stream.Seek(0, 0)
 	if err != nil {
@@ -162,7 +162,7 @@ func TestPDFStream(t *testing.T) {
 	if stream.Tell() != 0 {
 		t.Errorf("After Seek(0, 0), Tell() = %d, want 0", stream.Tell())
 	}
-	
+
 	// Test Peek
 	peeked := stream.Peek(5)
 	if string(peeked) != "hello" {

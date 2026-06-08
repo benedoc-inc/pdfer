@@ -205,7 +205,6 @@ type Annotation struct {
 	Subject    string                 `json:"subject,omitempty"`
 	Color      *Color                 `json:"color,omitempty"`
 	Border     *Border                `json:"border,omitempty"`
-	Actions    []Action               `json:"actions,omitempty"`
 	Properties map[string]interface{} `json:"properties,omitempty"`
 
 	// Link-specific

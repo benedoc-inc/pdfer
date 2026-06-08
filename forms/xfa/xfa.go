@@ -11,9 +11,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/core/parse"
-	"github.com/benedoc-inc/pdfer/types"
-	"github.com/benedoc-inc/pdfer/core/write"
+	"github.com/benedoc-inc/pdfer/v2/core/parse"
+	"github.com/benedoc-inc/pdfer/v2/core/write"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // extractStreamDataFromObject extracts stream data from raw object bytes
@@ -103,18 +103,18 @@ type XFAStreamInfo struct {
 
 // XFAStreams represents all XFA streams extracted from a PDF
 type XFAStreams struct {
-	Template      *XFAStreamInfo            `json:"template,omitempty"`
-	Datasets      *XFAStreamInfo            `json:"datasets,omitempty"`
-	Config        *XFAStreamInfo            `json:"config,omitempty"`
-	LocaleSet     *XFAStreamInfo            `json:"localeSet,omitempty"`
-	ConnectionSet *XFAStreamInfo            `json:"connectionSet,omitempty"`
-	Stylesheet    *XFAStreamInfo            `json:"stylesheet,omitempty"`
-	XMP           *XFAStreamInfo            `json:"xmp,omitempty"`
-	Signature     *XFAStreamInfo            `json:"signature,omitempty"`
-	SourceSet     *XFAStreamInfo            `json:"sourceSet,omitempty"`
+	Template      *XFAStreamInfo `json:"template,omitempty"`
+	Datasets      *XFAStreamInfo `json:"datasets,omitempty"`
+	Config        *XFAStreamInfo `json:"config,omitempty"`
+	LocaleSet     *XFAStreamInfo `json:"localeSet,omitempty"`
+	ConnectionSet *XFAStreamInfo `json:"connectionSet,omitempty"`
+	Stylesheet    *XFAStreamInfo `json:"stylesheet,omitempty"`
+	XMP           *XFAStreamInfo `json:"xmp,omitempty"`
+	Signature     *XFAStreamInfo `json:"signature,omitempty"`
+	SourceSet     *XFAStreamInfo `json:"sourceSet,omitempty"`
 	// Resources holds any additional XFA packet streams not matched by name above.
 	// These are typically image or font resources referenced via $rr: hrefs in the template.
-	Resources     map[string]*XFAStreamInfo `json:"resources,omitempty"`
+	Resources map[string]*XFAStreamInfo `json:"resources,omitempty"`
 }
 
 // ExtractAllXFAStreams extracts all XFA streams from a PDF without using UniPDF
@@ -436,25 +436,31 @@ func BuildPDFFromXFAStreams(streams *XFAStreams, verbose bool) ([]byte, error) {
 
 // UpdateXFAInPDF updates XFA field values in PDF bytes
 func UpdateXFAInPDF(pdfBytes []byte, formData types.FormData, encryptInfo *types.PDFEncryption, verbose bool) ([]byte, error) {
-	// Find XFA datasets stream
-	datasetsStream, streamObjNum, err := FindXFADatasetsStream(pdfBytes, encryptInfo, verbose)
+	// Find XFA datasets stream. Note: FindXFADatasetsStream returns
+	// already-decompressed XML — ExtractAllXFAStreams runs the bytes through
+	// DecompressStream internally — so we must not call DecompressStream on
+	// the result a second time (that returned wasCompressed=false on plaintext
+	// and skipped the re-compress branch, which left the rewritten stream
+	// stuck with plaintext bytes inside a dict that still advertised
+	// /Filter/FlateDecode → Adobe got an inflate failure and froze the
+	// dynamic XFA renderer on the "Please wait..." wrapper page).
+	xfaXML, streamObjNum, err := FindXFADatasetsStream(pdfBytes, encryptInfo, verbose)
 	if err != nil {
 		return nil, fmt.Errorf("error finding XFA datasets stream: %v", err)
 	}
 
 	if verbose {
 		log.Printf("Found XFA datasets stream at object %d", streamObjNum)
-		log.Printf("Stream size: %d bytes", len(datasetsStream))
+		log.Printf("Stream size: %d bytes", len(xfaXML))
 	}
 
-	// Decompress if needed and parse XML
-	xfaXML, wasCompressed, err := DecompressStream(datasetsStream)
+	// Inspect the original stream dict to learn its /Filter so we can match
+	// it on the way out. This is the source of truth — relying on a
+	// wasCompressed flag carried alongside the data has bitten us before
+	// (the flag was downstream of an internal decompress and got reset).
+	hasFlate, err := streamHasFlateFilter(pdfBytes, streamObjNum, encryptInfo)
 	if err != nil {
-		return nil, fmt.Errorf("error decompressing stream: %v", err)
-	}
-
-	if verbose {
-		log.Printf("Decompressed XFA XML: %d bytes (was compressed: %v)", len(xfaXML), wasCompressed)
+		return nil, fmt.Errorf("error reading stream dict for object %d: %v", streamObjNum, err)
 	}
 
 	// Update field values in XFA XML
@@ -463,9 +469,11 @@ func UpdateXFAInPDF(pdfBytes []byte, formData types.FormData, encryptInfo *types
 		return nil, fmt.Errorf("error updating XFA values: %v", err)
 	}
 
-	// Re-compress if it was compressed
+	// Compress iff the dict says /FlateDecode. ReplaceStreamInPDF only
+	// rewrites /Length; /Filter is preserved verbatim, so the bytes we
+	// hand it must match whatever filter the dict still names.
 	updatedStream := []byte(updatedXML)
-	if wasCompressed {
+	if hasFlate {
 		compressed, err := CompressStream(updatedStream)
 		if err != nil {
 			return nil, fmt.Errorf("error compressing stream: %v", err)
@@ -479,10 +487,26 @@ func UpdateXFAInPDF(pdfBytes []byte, formData types.FormData, encryptInfo *types
 	// Update PDF with new stream
 	updatedPDF, err := ReplaceStreamInPDF(pdfBytes, streamObjNum, updatedStream, verbose)
 	if err != nil {
-		return nil, fmt.Errorf("error replacing stream: %v", err)
+		return nil, fmt.Errorf("error replacing stream: %w", err)
 	}
 
 	return updatedPDF, nil
+}
+
+// streamHasFlateFilter reports whether the stream object's dict declares
+// /Filter/FlateDecode (either as a bare name or as a single-element array).
+// Returns an error only when the object itself cannot be fetched.
+func streamHasFlateFilter(pdfBytes []byte, objNum int, encryptInfo *types.PDFEncryption) (bool, error) {
+	objData, err := parse.GetObject(pdfBytes, objNum, encryptInfo, false)
+	if err != nil {
+		return false, err
+	}
+	streamIdx := bytes.Index(objData, []byte("stream"))
+	if streamIdx < 0 {
+		return false, nil
+	}
+	dict := objData[:streamIdx]
+	return bytes.Contains(dict, []byte("/FlateDecode")), nil
 }
 
 // UpdateXFAValues updates field values in XFA XML

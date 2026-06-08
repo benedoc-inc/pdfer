@@ -24,9 +24,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/core/write"
-	"github.com/benedoc-inc/pdfer/forms/acroform"
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/core/write"
+	"github.com/benedoc-inc/pdfer/v2/forms/acroform"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 func main() {
@@ -415,7 +415,7 @@ func buildPage2(p *write.PageBuilder) {
 
 	linkText := "Click here to visit the pdfer repository"
 	p.AddAnnotation(write.NewLinkAnnotation(72, 378, 310, 398,
-		"https://github.com/benedoc-inc/pdfer").WithBorderWidth(1).WithColor(0, 0, 0.8))
+		"https://github.com/benedoc-inc/pdfer/v2").WithBorderWidth(1).WithColor(0, 0, 0.8))
 	cs.BeginText().SetFont(font, 10).SetFillColorRGB(0, 0, 0.7).
 		SetTextPosition(72, 380).ShowText(linkText).EndText()
 	// Underline drawn as a thin rectangle
@@ -427,7 +427,7 @@ func buildPage2(p *write.PageBuilder) {
 // buildPage3WithForm draws the field-type catalog labels AND places the AcroForm
 // widget annotations in a single pass so positions can never drift apart.
 func buildPage3WithForm(p *write.PageBuilder, fb *acroform.FormBuilder) {
-	const pg = 2   // 0-based page index
+	const pg = 2 // 0-based page index
 	const lx = 72.0
 	const rx = 316.0
 	const lw = 222.0

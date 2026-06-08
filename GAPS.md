@@ -105,25 +105,19 @@ and `/CA` (stroke alpha) at the requested opacity and applies it via the `gs`
 operator. `PageBuilder` gained an `extgstates` map and a `Build()` block that
 emits `/ExtGState << ... >>` in the page resources dictionary.
 
-### ~~XFA script parsing is approximate~~ ✅ Fixed in v1.2.0
-`convertXFAEventToRule` now dispatches to a structured `parseXFAScript`
-analyser that detects language (FormCalc vs JavaScript), then tries four
-pattern families in order:
-- **Visibility** — `$.presence = "visible"/"hidden"` → `RuleTypeVisibility` +
-  `ActionTypeShow`/`ActionTypeHide` with extracted target field
-- **SetValue** — `$.rawValue = expr` or `xfa.resolveNode("x").rawValue = expr`
-  → `RuleTypeSetValue` + `ActionTypeSetValue` with extracted expression
-- **Validation** — scripts containing `return true/false` or message-box calls
-  → `RuleTypeValidate` + `ActionTypeValidate`
-- **Calculate** — scripts using FormCalc built-ins (`Sum`, `Avg`, `Concat`, …)
-  or JavaScript `return expr` → `RuleTypeCalculate` + `ActionTypeCalculate`
-  with the extracted expression
-
-Conditional guards (`if (cond) then … endif` / `if (cond) { … }`) are parsed
-into a `*Condition` with operator, field reference, and literal value where the
-expression is a simple binary comparison. The full raw script is always
-preserved in `Action.Script` for evaluation. Complex scripts that match none of
-the above patterns fall back to `ActionTypeExecute` as before.
+### ~~XFA script parsing is approximate~~ ✅ Superseded in v2.0.0
+The structured `parseXFAScript` analyser shipped in v1.2.0 (regex-based
+visibility / set-value / validate / calculate classification, populating
+`Rule`/`Condition`/`Action`) was lossy and incorrect on non-trivial scripts —
+faithful interpretation needs a real ES5/FormCalc AST, which is out of scope
+for a PDF library. v2.0.0 removes the heuristic and the `Rule`/`Action` type
+surface entirely; `FormSchema.Scripts []FormScript` now exposes verbatim
+script bodies with their event activity, language (`javascript` | `formcalc`),
+SOM owner path, and owner ID, leaving interpretation to the caller. See the
+**Forms** section of the README for usage and the type comment on
+`types.FormScript` for known gaps (scripts attached to nodes pdfer does not
+surface — decorative `<draw>`, `bind="none"` non-AddAttachment buttons,
+`<pageArea>` events, per-option `<field>`s collapsed into an `<exclGroup>`).
 
 ---
 
@@ -277,7 +271,14 @@ a Filespec dict per file, and a `/Names` object that extends (or creates) the
 catalog's `/EmbeddedFiles` name tree. The original PDF bytes are never
 modified — only appended to.
 
-**File**: `attach.go`
+For encrypted PDFs, use `EmbedAttachmentsWithPassword(pdfBytes, files, password)`:
+the appended streams are encrypted with the document's per-object keys (strings
+follow the document's `/StrF` crypt filter) and the file `/ID` is carried into
+the new trailer (the standard security handler derives the key from `/ID[0]`, so
+dropping it breaks decryption). The shared envelope lives in `core/incremental`,
+used by both attachments and AcroForm incremental fills.
+
+**Files**: `attach.go`, `core/incremental/incremental.go`, `core/encrypt/encrypt_object.go`
 
 #### JPEG2000 (JPXDecode) images not decoded
 `images.go` identifies `JPXDecode`-filtered streams and reports the format, but
@@ -340,7 +341,7 @@ CJK vertical text, some Arabic/Hebrew layout engines.
 
 ---
 
-### ~~XFA browser rendering gaps~~ ✅ Fixed in v1.4.0
+### ~~XFA browser rendering gaps~~ ✅ Fixed in v2.0.0
 
 Fourteen improvements to the XFA → `FormSchema` translation for browser rendering fidelity:
 

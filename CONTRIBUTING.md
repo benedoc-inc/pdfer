@@ -25,24 +25,27 @@ go test ./...                         # Run tests
 This project uses git hooks to maintain code quality:
 
 - **pre-commit**: Runs `gofmt` and `go vet` on staged files
-- **pre-push**: Runs the full test suite and enforces version bump requirement
+- **pre-push**: Runs the full test suite before pushing
 
-#### Version Bump Requirement
+The setup script (`./scripts/setup.sh`) configures these. To skip hooks temporarily:
 
-**Pushing to `main` requires a version bump.** The pre-push hook will reject pushes to `main` if the version in `pdfer.go` hasn't changed from the remote version. This ensures every change to `main` has an associated version increment.
-
-To bump the version:
-1. Update the version string in `pdfer.go` (e.g., `0.6.0` → `0.7.0`)
-2. Commit the change: `git commit -m "chore: bump version to X.Y.Z"`
-3. Push normally - the hook will verify the version changed
-
-To override (not recommended): `git push --no-verify`
-
-The setup script configures these automatically. To skip hooks temporarily:
 ```bash
 git commit --no-verify  # Skip pre-commit
 git push --no-verify    # Skip pre-push
 ```
+
+## Releases
+
+`Version()` reads the module version at runtime from `runtime/debug.ReadBuildInfo()`, so it always matches the git tag Go's module system resolved. There is no version constant in source to keep in sync.
+
+Releases are cut from `main` via the **Release** GitHub Actions workflow:
+
+1. Open the [Actions tab](../../actions/workflows/release.yml)
+2. Click **Run workflow**
+3. Enter the version (e.g., `v1.10.0`), following [semantic versioning](https://semver.org/)
+4. The workflow validates the version, runs the test suite, creates an annotated tag, pushes it, and publishes a GitHub release with auto-generated notes
+
+Only maintainers with write access can dispatch the workflow.
 
 ## Code Style
 

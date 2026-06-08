@@ -8,9 +8,9 @@ import (
 	"log"
 	"os"
 
-	"github.com/benedoc-inc/pdfer"
-	encrypt "github.com/benedoc-inc/pdfer/core/encrypt"
-	"github.com/benedoc-inc/pdfer/forms/xfa"
+	"github.com/benedoc-inc/pdfer/v2"
+	encrypt "github.com/benedoc-inc/pdfer/v2/core/encrypt"
+	"github.com/benedoc-inc/pdfer/v2/forms/xfa"
 )
 
 func main() {
@@ -73,7 +73,7 @@ func main() {
 		} else {
 			fmt.Printf("\nParsed Form Structure:\n")
 			fmt.Printf("  Questions: %d\n", len(form.Questions))
-			fmt.Printf("  Rules: %d\n", len(form.Rules))
+			fmt.Printf("  Scripts: %d\n", len(form.Scripts))
 
 			if len(form.Questions) > 0 {
 				fmt.Println("\nFirst 10 questions:")

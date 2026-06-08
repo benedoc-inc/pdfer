@@ -17,10 +17,10 @@ import (
 	"log"
 	"os"
 
-	pdfer "github.com/benedoc-inc/pdfer"
-	encrypt "github.com/benedoc-inc/pdfer/core/encrypt"
-	"github.com/benedoc-inc/pdfer/forms/xfa"
-	"github.com/benedoc-inc/pdfer/types"
+	pdfer "github.com/benedoc-inc/pdfer/v2"
+	encrypt "github.com/benedoc-inc/pdfer/v2/core/encrypt"
+	"github.com/benedoc-inc/pdfer/v2/forms/xfa"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 func main() {
@@ -138,49 +138,21 @@ func main() {
 		log.Fatalf("Error reading PDF: %v", err)
 	}
 
-	// Check if PDF is encrypted and decrypt if needed
-	var encryptInfo *types.PDFEncryption
-	if bytes.Contains(pdfBytes, []byte("/Encrypt")) {
-		if *verbose {
-			log.Printf("PDF is encrypted, attempting to decrypt...")
-		}
-
-		// Try to decrypt with empty password (most eSTAR PDFs allow this)
-		encInfo, err := encrypt.DecryptPDF(pdfBytes, []byte(""), *verbose)
-		if err != nil {
-			if *verbose {
-				log.Printf("Empty password failed, trying common passwords...")
-			}
-			// Try common passwords
-			commonPasswords := [][]byte{[]byte(""), []byte("admin"), []byte("password"), []byte("1234")}
-			decrypted := false
-			for _, pwd := range commonPasswords {
-				tryInfo, tryErr := encrypt.DecryptPDF(pdfBytes, pwd, *verbose)
-				if tryErr == nil {
-					encInfo = tryInfo
-					encryptInfo = encInfo
-					decrypted = true
-					if *verbose {
-						log.Printf("Successfully decrypted PDF")
-					}
-					break
-				}
-			}
-			if !decrypted {
-				log.Fatalf("Could not decrypt PDF: %v", err)
-			}
-		} else {
-			encryptInfo = encInfo
-			if *verbose {
-				log.Printf("Successfully decrypted PDF with empty password")
-			}
-		}
+	// Extract the form via the unified library entry point. This handles
+	// encryption (decrypts and rewrites the PDF to classical-xref plaintext)
+	// before fill, which is what makes XFA fill work on PDF 1.5+ inputs that
+	// use cross-reference streams — the original CLI path called
+	// xfa.UpdateXFAInPDF directly on the encrypted bytes and silently
+	// corrupted the xref on every eSTAR fixture (issue #12 will revisit
+	// whether to preserve encryption via incremental updates).
+	form, err := extractFormTryingCommonPasswords(pdfBytes, *verbose)
+	if err != nil {
+		log.Fatalf("Could not extract form: %v", err)
 	}
 
-	// Update XFA in PDF — objects are decrypted on-demand via encryptInfo
-	updatedPDF, err := xfa.UpdateXFAInPDF(pdfBytes, formData, encryptInfo, *verbose)
+	updatedPDF, err := form.Fill(pdfBytes, formData, nil, *verbose)
 	if err != nil {
-		log.Fatalf("Error updating XFA: %v", err)
+		log.Fatalf("Error filling form: %v", err)
 	}
 
 	// Write updated PDF
@@ -240,8 +212,6 @@ func handleStamp(args []string) {
 		os.Exit(1)
 	}
 
-	// Default position: top-right corner (letter page: 612×792 pt, 1in margins → ~540pt wide)
-	// X/Y are the text origin; top-right at ~490, 760 puts it inside the margin.
 	stamp := pdfer.TextStamp{
 		Text:     *text,
 		FontName: "Helvetica-Bold",
@@ -267,6 +237,35 @@ func handleStamp(args []string) {
 	}
 
 	fmt.Fprintf(os.Stderr, "Stamped %d bytes → %s\n", len(out), dest)
+}
+
+// extractFormTryingCommonPasswords runs pdfer.ExtractForm with the empty
+// password first (the eSTAR default), then a small list of common
+// developer-facing fallbacks before giving up.
+func extractFormTryingCommonPasswords(pdfBytes []byte, verbose bool) (pdfer.Form, error) {
+	if !bytes.Contains(pdfBytes, []byte("/Encrypt")) {
+		return pdfer.ExtractForm(pdfBytes, nil, verbose)
+	}
+	if verbose {
+		log.Printf("PDF is encrypted, trying empty password then common fallbacks...")
+	}
+	passwords := [][]byte{[]byte(""), []byte("admin"), []byte("password"), []byte("1234")}
+	var lastErr error
+	for _, pwd := range passwords {
+		form, err := pdfer.ExtractForm(pdfBytes, pwd, verbose)
+		if err == nil {
+			if verbose {
+				if len(pwd) == 0 {
+					log.Printf("Decrypted with empty password")
+				} else {
+					log.Printf("Decrypted with fallback password %q", string(pwd))
+				}
+			}
+			return form, nil
+		}
+		lastErr = err
+	}
+	return nil, fmt.Errorf("could not decrypt PDF with any common password: %w", lastErr)
 }
 
 // handleExtractSchema extracts questionnaire schema from PDF and writes it as JSON

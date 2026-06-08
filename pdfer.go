@@ -77,11 +77,13 @@
 package pdfer
 
 import (
-	"github.com/benedoc-inc/pdfer/types"
+	"runtime/debug"
+
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // Re-export common types for convenience.
-// Users can import just "github.com/benedoc-inc/pdfer" for basic usage.
+// Users can import just "github.com/benedoc-inc/pdfer/v2" for basic usage.
 
 // Encryption holds PDF encryption parameters and derived keys.
 type Encryption = types.PDFEncryption
@@ -92,8 +94,8 @@ type FormSchema = types.FormSchema
 // Question represents a single form field.
 type Question = types.Question
 
-// Rule represents a validation or calculation rule.
-type Rule = types.Rule
+// FormScript represents a raw script block extracted from an XFA form.
+type FormScript = types.FormScript
 
 // FormData is a map of field names to values for form filling.
 type FormData = types.FormData
@@ -107,7 +109,28 @@ type XFAConfig = types.XFAConfig
 // XFALocaleSet represents parsed XFA localization data.
 type XFALocaleSet = types.XFALocaleSet
 
-// Version returns the library version.
+const modulePath = "github.com/benedoc-inc/pdfer/v2"
+
+// Version returns the library version, derived from Go module metadata.
+//
+// When consumed via `go get` or `go install`, this returns the resolved
+// module version (e.g., "v1.10.0"). When built from a working copy, it
+// returns "(devel)". Falls back to "(unknown)" if build info is unavailable.
+//
+// Versioning is driven by git tags through the release workflow; no manual
+// string updates are required.
 func Version() string {
-	return "1.3.1"
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "(unknown)"
+	}
+	if info.Main.Path == modulePath {
+		return info.Main.Version
+	}
+	for _, dep := range info.Deps {
+		if dep != nil && dep.Path == modulePath {
+			return dep.Version
+		}
+	}
+	return "(unknown)"
 }

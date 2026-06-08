@@ -1,12 +1,30 @@
 package types
 
 // FormSchema represents the complete form structure
-// that can be used to rebuild the form with questions, responses, and control flow
+// that can be used to rebuild the form with questions, responses, and scripts.
 type FormSchema struct {
 	Metadata  FormMetadata  `json:"metadata"`
 	Questions []Question    `json:"questions"`
 	Sections  []FormSection `json:"sections,omitempty"` // hierarchical section tree (XFA only)
-	Rules     []Rule        `json:"rules"`               // Control flow rules (dependencies, conditions)
+	Elements  []FormElement `json:"elements,omitempty"` // non-question template nodes (buttons, dynamic draws, pageAreas) — XFA only
+	Scripts   []FormScript  `json:"scripts,omitempty"`  // raw <script> blocks extracted verbatim; callers parse them themselves
+}
+
+// FormElement is a non-question template node surfaced alongside Questions so
+// orphan FormScripts have a typed owner to dereference and downstream renderers
+// can render help-text buttons, dynamic draws, and pageArea events without
+// consulting the raw XFA DOM. ID equals OwnerPath — SOM paths are unique within
+// a template.
+type FormElement struct {
+	ID         string                 `json:"id"`
+	OwnerPath  string                 `json:"owner_path"`
+	Role       string                 `json:"role"` // "button" | "draw" | "pageArea"
+	Label      string                 `json:"label,omitempty"`
+	Hidden     bool                   `json:"hidden,omitempty"`      // static presence != "visible" on this node or an ancestor subform
+	PageNumber int                    `json:"page_number,omitempty"` // field/draw "page" attribute; 0 for pageAreas and unannotated nodes
+	Section    string                 `json:"section,omitempty"`     // nearest enclosing subform name; empty for pageAreas and top-level nodes
+	Properties map[string]interface{} `json:"properties,omitempty"`
+	Scripts    []string               `json:"scripts,omitempty"` // FormScript IDs
 }
 
 // FormSection is a node in the XFA subform hierarchy.
@@ -14,16 +32,18 @@ type FormSchema struct {
 // the flat Questions slice on FormSchema is the canonical store.
 type FormSection struct {
 	Name        string        `json:"name"`
-	Path        string        `json:"path"`                  // dot-separated path from root, e.g. "form1.section2.sub"
-	Label       string        `json:"label,omitempty"`       // human-readable label from XFA subform caption; empty when not specified
-	Tooltip     string        `json:"tooltip,omitempty"`     // accessibility tooltip (e.g. IMDRF TOC chapter references)
-	Interactive bool          `json:"interactive"`           // true if the section contains any data-bound fields
-	Layout      string        `json:"layout,omitempty"`      // XFA layout mode: position|tb|lr-tb|row|table
-	Width       string        `json:"width,omitempty"`       // subform w attribute (mm/in/pt)
-	Height      string        `json:"height,omitempty"`      // subform h attribute (mm/in/pt)
-	Content     []string      `json:"content,omitempty"`     // static display text from non-interactive sections
+	Path        string        `json:"path"`              // SOM-style dot-path from root, e.g. "form1.section2.sub"; same-named siblings carry "[i]" suffixes (XFA only)
+	Label       string        `json:"label,omitempty"`   // human-readable label from XFA subform caption; empty when not specified
+	Tooltip     string        `json:"tooltip,omitempty"` // accessibility tooltip (e.g. IMDRF TOC chapter references)
+	Interactive bool          `json:"interactive"`       // true if the section contains any data-bound fields
+	Hidden      bool          `json:"hidden,omitempty"`  // static presence != "visible" on this subform or an ancestor subform
+	Layout      string        `json:"layout,omitempty"`  // XFA layout mode: position|tb|lr-tb|row|table
+	Width       string        `json:"width,omitempty"`   // subform w attribute (mm/in/pt)
+	Height      string        `json:"height,omitempty"`  // subform h attribute (mm/in/pt)
+	Content     []string      `json:"content,omitempty"` // static display text from non-interactive sections
 	Children    []FormSection `json:"children,omitempty"`
 	Questions   []string      `json:"questions,omitempty"` // question IDs in document order
+	Scripts     []string      `json:"scripts,omitempty"`   // FormScript IDs for subform-level events, in declaration order
 }
 
 // FormMetadata contains information about the form
@@ -39,6 +59,7 @@ type FormMetadata struct {
 type Question struct {
 	ID          string                 `json:"id"`                    // Unique identifier
 	Name        string                 `json:"name"`                  // Field name from PDF
+	SOMSegment  string                 `json:"som_segment,omitempty"` // XFA only: SOM-formatted name segment (includes "[i]" when same-named siblings exist). Append to parent section's Path to get the full SOM path.
 	Label       string                 `json:"label,omitempty"`       // Display label/question text
 	Description string                 `json:"description,omitempty"` // Help text or description
 	Type        ResponseType           `json:"type"`                  // Response type
@@ -50,7 +71,8 @@ type Question struct {
 	Hidden      bool                   `json:"hidden"`                // Is field initially hidden?
 	Properties  map[string]interface{} `json:"properties,omitempty"`  // Additional properties (position, size, etc.)
 	PageNumber  int                    `json:"page_number,omitempty"` // Which page the field appears on
-	Section     string                 `json:"section,omitempty"`     // Parent subform / section name
+	Section     string                 `json:"section,omitempty"`     // Parent subform / section name; matches the parent FormSection.Path's last segment (may include "[i]" for XFA same-named-sibling disambiguation)
+	Scripts     []string               `json:"scripts,omitempty"`     // FormScript IDs for events on this field, in declaration order
 }
 
 // ResponseType represents the type of response expected
@@ -95,88 +117,25 @@ type ValidationRules struct {
 	ErrorMessage string   `json:"error_message,omitempty"` // Error message to display
 }
 
-// Rule represents a control flow rule (dependency/condition)
-type Rule struct {
-	ID          string     `json:"id"`                    // Unique rule identifier
-	Type        RuleType   `json:"type"`                  // Type of rule
-	Source      string     `json:"source"`                // Source question ID
-	Condition   *Condition `json:"condition,omitempty"`   // Condition to evaluate
-	Actions     []Action   `json:"actions"`               // Actions to perform when condition is met
-	Priority    int        `json:"priority,omitempty"`    // Rule priority (for ordering)
-	Description string     `json:"description,omitempty"` // Human-readable description
+// FormScript represents a raw script block extracted from an XFA form.
+// Bodies are exposed verbatim — pdfer does not interpret script semantics.
+//
+// OwnerID is non-empty iff the owning node is surfaced as a typed schema
+// entity (Question, FormSection, or FormElement) that callers can dereference
+// by ID. Scripts whose owner is not currently typed in the schema appear with
+// OwnerPath set and OwnerID empty — at time of writing, the remaining orphan
+// case is individual radio options collapsed into an <exclGroup> (the
+// exclGroup itself is the typed owner). Callers should treat OwnerID empty as
+// "not currently dereferenceable" rather than a permanent classification, and
+// rely on OwnerPath when they need owner-keyed addressing in either case.
+type FormScript struct {
+	ID         string                 `json:"id"`                   // stable: SOM owner path + "#" + event + "[" + index + "]"
+	OwnerPath  string                 `json:"owner_path,omitempty"` // SOM path of containing node (e.g. "form1.section.field"); empty for template-level
+	OwnerID    string                 `json:"owner_id,omitempty"`   // matches Question.ID or FormSection.Path when the owner is a question or section
+	Event      string                 `json:"event"`                // XFA activity: initialize|calculate|validate|change|exit|click|… ; "variables" for <variables><script> blocks
+	Name       string                 `json:"name,omitempty"`       // <event name="..."> attribute, or <script name="..."> for variables scripts
+	Language   string                 `json:"language"`             // "javascript" | "formcalc"; defaults to "formcalc" per XFA spec when contentType is absent
+	RunAt      string                 `json:"run_at,omitempty"`     // client | server | both
+	Body       string                 `json:"body"`                 // verbatim script source
+	Properties map[string]interface{} `json:"properties,omitempty"` // unknown <event>/<script> attributes (listen, ref, id, binding, stateless, url, …); event and script attrs share this map, so a key set on both is last-write-wins
 }
-
-// RuleType represents the type of control flow rule
-type RuleType string
-
-const (
-	RuleTypeVisibility RuleType = "visibility" // Show/hide fields
-	RuleTypeEnable     RuleType = "enable"     // Enable/disable fields
-	RuleTypeCalculate  RuleType = "calculate"  // Calculate field value
-	RuleTypeValidate   RuleType = "validate"   // Custom validation
-	RuleTypeSetValue   RuleType = "set_value"  // Set field value
-	RuleTypeNavigate   RuleType = "navigate"   // Navigate to page/section
-)
-
-// Condition represents a condition to evaluate
-type Condition struct {
-	Operator   Operator      `json:"operator"`             // Comparison operator
-	Value      interface{}   `json:"value,omitempty"`      // Value to compare against
-	Values     []interface{} `json:"values,omitempty"`     // Multiple values (for IN operator)
-	Expression string        `json:"expression,omitempty"` // Custom expression/script
-	Logic      LogicOp       `json:"logic,omitempty"`      // Logic operator for compound conditions
-	Children   []Condition   `json:"children,omitempty"`   // Nested conditions
-}
-
-// Operator represents comparison operators
-type Operator string
-
-const (
-	OperatorEquals         Operator = "equals"           // ==
-	OperatorNotEquals      Operator = "not_equals"       // !=
-	OperatorGreaterThan    Operator = "greater_than"     // >
-	OperatorLessThan       Operator = "less_than"        // <
-	OperatorGreaterOrEqual Operator = "greater_or_equal" // >=
-	OperatorLessOrEqual    Operator = "less_or_equal"    // <=
-	OperatorContains       Operator = "contains"         // String contains
-	OperatorNotContains    Operator = "not_contains"     // String does not contain
-	OperatorIn             Operator = "in"               // Value in array
-	OperatorNotIn          Operator = "not_in"           // Value not in array
-	OperatorIsEmpty        Operator = "is_empty"         // Field is empty
-	OperatorIsNotEmpty     Operator = "is_not_empty"     // Field is not empty
-	OperatorMatches        Operator = "matches"          // Regex match
-)
-
-// LogicOp represents logical operators for combining conditions
-type LogicOp string
-
-const (
-	LogicOpAnd LogicOp = "and"
-	LogicOpOr  LogicOp = "or"
-	LogicOpNot LogicOp = "not"
-)
-
-// Action represents an action to perform when a condition is met
-type Action struct {
-	Type        ActionType  `json:"type"`                  // Type of action
-	Target      string      `json:"target"`                // Target question ID
-	Value       interface{} `json:"value,omitempty"`       // Value to set (for set_value)
-	Expression  string      `json:"expression,omitempty"`  // Expression to evaluate (for calculate)
-	Script      string      `json:"script,omitempty"`      // Custom script to execute
-	Description string      `json:"description,omitempty"` // Human-readable description
-}
-
-// ActionType represents the type of action
-type ActionType string
-
-const (
-	ActionTypeShow      ActionType = "show"      // Show field
-	ActionTypeHide      ActionType = "hide"      // Hide field
-	ActionTypeEnable    ActionType = "enable"    // Enable field
-	ActionTypeDisable   ActionType = "disable"   // Disable field
-	ActionTypeSetValue  ActionType = "set_value" // Set field value
-	ActionTypeCalculate ActionType = "calculate" // Calculate field value
-	ActionTypeValidate  ActionType = "validate"  // Trigger validation
-	ActionTypeNavigate  ActionType = "navigate"  // Navigate to page/section
-	ActionTypeExecute   ActionType = "execute"   // Execute custom script
-)

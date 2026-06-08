@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/benedoc-inc/pdfer/core/parse"
+	"github.com/benedoc-inc/pdfer/v2/core/parse"
 )
 
 // FixPDFA attempts to repair common PDF/A conformance violations and return a

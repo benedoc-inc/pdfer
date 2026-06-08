@@ -41,8 +41,8 @@ type signedDataASN struct {
 	Version          int
 	DigestAlgorithms []pkix.AlgorithmIdentifier `asn1:"set"`
 	EncapContentInfo asn1.RawValue
-	Certificates     asn1.RawValue `asn1:"optional,tag:0"`
-	CRLs             asn1.RawValue `asn1:"optional,tag:1"`
+	Certificates     asn1.RawValue   `asn1:"optional,tag:0"`
+	CRLs             asn1.RawValue   `asn1:"optional,tag:1"`
 	SignerInfos      []signerInfoASN `asn1:"set"`
 }
 
@@ -50,7 +50,7 @@ type signerInfoASN struct {
 	Version            int
 	IssuerAndSerial    issuerAndSerial
 	DigestAlgorithm    pkix.AlgorithmIdentifier
-	SignedAttrs        asn1.RawValue        `asn1:"optional,tag:0"`
+	SignedAttrs        asn1.RawValue `asn1:"optional,tag:0"`
 	SignatureAlgorithm pkix.AlgorithmIdentifier
 	Signature          []byte
 	UnsignedAttrs      asn1.RawValue `asn1:"optional,tag:1"`
@@ -69,12 +69,12 @@ type pkcs9Attr struct {
 // ---- regex patterns for raw PDF scanning ----
 
 var (
-	reSigBlock    = regexp.MustCompile(`(?s)/Type\s*/Sig|/SubFilter\s*/adbe\.pkcs7\.detached`)
-	reByteRange   = regexp.MustCompile(`/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]`)
-	reContents    = regexp.MustCompile(`/Contents\s*<([0-9A-Fa-f\s]+)>`)
-	reReason      = regexp.MustCompile(`/Reason\s*\(`)
-	reLocation    = regexp.MustCompile(`/Location\s*\(`)
-	reFieldName   = regexp.MustCompile(`/T\s*\(([^)]*)\)`)
+	reSigBlock  = regexp.MustCompile(`(?s)/Type\s*/Sig|/SubFilter\s*/adbe\.pkcs7\.detached`)
+	reByteRange = regexp.MustCompile(`/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]`)
+	reContents  = regexp.MustCompile(`/Contents\s*<([0-9A-Fa-f\s]+)>`)
+	reReason    = regexp.MustCompile(`/Reason\s*\(`)
+	reLocation  = regexp.MustCompile(`/Location\s*\(`)
+	reFieldName = regexp.MustCompile(`/T\s*\(([^)]*)\)`)
 )
 
 // ValidateSignatures scans pdfBytes for digital signature dictionaries and

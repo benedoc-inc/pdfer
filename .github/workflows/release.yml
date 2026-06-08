@@ -1,0 +1,96 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v1.10.0)'
+        required: true
+        type: string
+      ref:
+        description: 'Branch or commit to release from'
+        required: false
+        default: 'main'
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate version format
+        run: |
+          if ! [[ "${{ inputs.version }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
+            echo "ERROR: version must match vMAJOR.MINOR.PATCH (optional -prerelease suffix)"
+            echo "Got: ${{ inputs.version }}"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Fail if tag already exists
+        run: |
+          if git rev-parse "refs/tags/${{ inputs.version }}" >/dev/null 2>&1; then
+            echo "ERROR: tag ${{ inputs.version }} already exists"
+            exit 1
+          fi
+
+      - name: Enforce semantic import versioning
+        run: |
+          VERSION="${{ inputs.version }}"
+          MAJOR="${VERSION#v}"
+          MAJOR="${MAJOR%%.*}"
+          MODULE_PATH=$(awk '/^module / {print $2; exit}' go.mod)
+          if [ "$MAJOR" -ge 2 ]; then
+            EXPECTED_SUFFIX="/v${MAJOR}"
+            case "$MODULE_PATH" in
+              *"$EXPECTED_SUFFIX")
+                ;;
+              *)
+                echo "ERROR: releasing $VERSION but go.mod module path is '$MODULE_PATH'."
+                echo "Go's semantic import versioning requires the path to end in '$EXPECTED_SUFFIX' for major version $MAJOR."
+                echo "Update go.mod and rewrite internal imports before releasing."
+                exit 1
+                ;;
+            esac
+          else
+            case "$MODULE_PATH" in
+              */v[0-9]*)
+                echo "ERROR: releasing $VERSION but go.mod module path '$MODULE_PATH' has a /vN suffix."
+                echo "Only major versions >= 2 should carry a /vN suffix."
+                exit 1
+                ;;
+            esac
+          fi
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.22'
+
+      - name: Verify build and tests
+        run: |
+          go vet ./...
+          go test ./...
+
+      - name: Create and push annotated tag
+        env:
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          git tag -a "${{ inputs.version }}" -m "Release ${{ inputs.version }}"
+          git push origin "${{ inputs.version }}"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ inputs.version }}" \
+            --title "${{ inputs.version }}" \
+            --generate-notes

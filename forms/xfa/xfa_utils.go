@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/flate"
 	"compress/zlib"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -11,9 +12,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/core/encrypt"
-	"github.com/benedoc-inc/pdfer/core/parse"
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/core/encrypt"
+	"github.com/benedoc-inc/pdfer/v2/core/parse"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // findObjectBoundaries finds the start and end of a PDF object using incremental parsing
@@ -842,25 +843,23 @@ func DecompressStream(streamBytes []byte) ([]byte, bool, error) {
 	return streamBytes, false, nil
 }
 
-// CompressStream compresses data using FlateDecode
+// CompressStream compresses data for a PDF /FlateDecode stream. PDF readers
+// (RFC 3778 §3.3.3 / PDF 1.7 §7.4.4) decode /FlateDecode as RFC 1950 zlib
+// format — the two-byte zlib header plus deflate payload plus four-byte
+// Adler-32 trailer. Raw RFC 1951 deflate (no header) is *not* the same thing.
+// Foxit accepts raw deflate as a fallback when the zlib header check fails;
+// Acrobat does not, and silently abandons dynamic XFA rendering — the form
+// stays stuck on the "Please wait..." wrapper page. Emit zlib format.
 func CompressStream(data []byte) ([]byte, error) {
 	var buf bytes.Buffer
-	writer, err := flate.NewWriter(&buf, flate.DefaultCompression)
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = writer.Write(data)
-	if err != nil {
+	writer := zlib.NewWriter(&buf)
+	if _, err := writer.Write(data); err != nil {
 		writer.Close()
 		return nil, err
 	}
-
-	err = writer.Close()
-	if err != nil {
+	if err := writer.Close(); err != nil {
 		return nil, err
 	}
-
 	return buf.Bytes(), nil
 }
 
@@ -916,29 +915,110 @@ func ReplaceStreamInPDF(pdfBytes []byte, streamObjNum int, newStream []byte, ver
 	}
 
 	streamEnd := streamStart + endstreamPos
-	afterStream := pdfBytes[streamEnd:]
 
-	// Reconstruct PDF: before length + new length + between length and stream + new stream + after stream
-	beforeLength := pdfBytes[:lengthStart]
-	betweenLengthAndStream := pdfBytes[lengthEnd:streamStart]
-
-	result := append(beforeLength, []byte(newLength)...)
-	result = append(result, betweenLengthAndStream...)
+	// Reconstruct PDF: before length + new length + between length and stream
+	// + new stream + after stream. Allocate a fresh buffer sized to the final
+	// length; appending slices of pdfBytes to a slice of pdfBytes shares the
+	// backing array, so each append mutates the source bytes the next append
+	// reads — silently corrupting the dict (e.g. dropping the '/' between
+	// /Length and /Type) and overwriting following objects' headers.
+	finalLen := lengthStart + len(newLength) + (streamStart - lengthEnd) + len(newStream) + (len(pdfBytes) - streamEnd)
+	result := make([]byte, 0, finalLen)
+	result = append(result, pdfBytes[:lengthStart]...)
+	result = append(result, []byte(newLength)...)
+	result = append(result, pdfBytes[lengthEnd:streamStart]...)
 	result = append(result, newStream...)
-	result = append(result, afterStream...)
+	result = append(result, pdfBytes[streamEnd:]...)
 
 	if verbose {
 		log.Printf("Replaced stream %d: old length %s, new length %d", streamObjNum, string(pdfBytes[lengthStart:lengthEnd]), len(newStream))
 	}
 
-	// Update startxref so PDF readers can find the cross-reference table after
-	// the byte shift caused by the stream size change.
+	// Every byte after the modified stream's start (streamObjMatch[0]) shifts
+	// by delta. The startxref offset and every xref-table entry pointing past
+	// that pivot must be updated, otherwise readers walk into the middle of
+	// binary streams and fail with errors like Adobe's "XML parsing error: no
+	// element found" near the tail of the file.
 	delta := int64(len(result)) - int64(len(pdfBytes))
 	if delta != 0 {
+		pivot := int64(streamObjMatch[0])
+		// Order matters: shiftStartXRef rewrites the startxref pointer so it
+		// targets the xref table's new location; shiftXRefOffsets then reads
+		// that updated pointer to find and rewrite the entries.
 		result = shiftStartXRef(result, delta)
+		shifted, err := shiftXRefOffsets(result, pivot, delta)
+		if err != nil {
+			return nil, fmt.Errorf("ReplaceStreamInPDF stream %d: %w", streamObjNum, err)
+		}
+		result = shifted
 	}
 
 	return result, nil
+}
+
+// ErrXRefStreamUnsupported is returned by ReplaceStreamInPDF when the input
+// PDF stores its cross-reference table as a stream (PDF 1.5+) rather than a
+// classical text xref table. We can patch the offsets in a text xref table
+// but not in a binary xref stream; producing output anyway would silently
+// point readers into the middle of binary streams. See issue #12 for the
+// follow-up that lifts this restriction by switching XFA fill to incremental
+// updates.
+var ErrXRefStreamUnsupported = errors.New("input PDF uses a cross-reference stream; ReplaceStreamInPDF only supports classical xref tables")
+
+// shiftXRefOffsets walks the classical (text) xref table in pdfBytes and adds
+// delta to every in-use ('n') entry whose recorded offset is greater than
+// pivot — i.e. every object that physically moved when bytes were inserted or
+// removed earlier in the file. Free ('f') entries are skipped because their
+// offset field encodes the next free object number, not a file offset.
+//
+// Returns ErrXRefStreamUnsupported when the PDF uses a cross-reference
+// stream. We deliberately error rather than no-op: a no-op leaves stale
+// offsets in the xref stream and produces files that look fine until a
+// reader actually walks the xref, at which point it lands in the middle of
+// a binary stream.
+func shiftXRefOffsets(pdfBytes []byte, pivot, delta int64) ([]byte, error) {
+	tail := pdfBytes
+	if len(tail) > 256 {
+		tail = tail[len(tail)-256:]
+	}
+	re := regexp.MustCompile(`startxref\s+(\d+)`)
+	loc := re.FindSubmatchIndex(tail)
+	if loc == nil {
+		return nil, fmt.Errorf("shiftXRefOffsets: startxref not found in tail")
+	}
+	xrefOff, err := strconv.ParseInt(string(tail[loc[2]:loc[3]]), 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("shiftXRefOffsets: parse startxref: %w", err)
+	}
+	if xrefOff < 0 || xrefOff >= int64(len(pdfBytes)) {
+		return nil, fmt.Errorf("shiftXRefOffsets: startxref offset %d out of bounds (len %d)", xrefOff, len(pdfBytes))
+	}
+	xrefBody := pdfBytes[xrefOff:]
+	if !bytes.HasPrefix(bytes.TrimLeft(xrefBody, " \t\r\n"), []byte("xref")) {
+		return nil, ErrXRefStreamUnsupported
+	}
+	trailerRel := bytes.Index(xrefBody, []byte("trailer"))
+	if trailerRel < 0 {
+		return nil, fmt.Errorf("shiftXRefOffsets: trailer keyword not found after xref")
+	}
+	out := make([]byte, len(pdfBytes))
+	copy(out, pdfBytes)
+	section := out[xrefOff : xrefOff+int64(trailerRel)]
+	entryRE := regexp.MustCompile(`(?m)^(\d{10}) (\d{5}) ([nf])`)
+	for _, m := range entryRE.FindAllSubmatchIndex(section, -1) {
+		if section[m[6]] != 'n' {
+			continue
+		}
+		offStart, offEnd := m[2], m[3]
+		old, perr := strconv.ParseInt(string(section[offStart:offEnd]), 10, 64)
+		if perr != nil || old <= pivot {
+			continue
+		}
+		// Preserve the fixed 10-digit width that the xref format requires.
+		newStr := fmt.Sprintf("%010d", old+delta)
+		copy(section[offStart:offEnd], newStr)
+	}
+	return out, nil
 }
 
 // shiftStartXRef adjusts the startxref offset near the end of a PDF by delta bytes.

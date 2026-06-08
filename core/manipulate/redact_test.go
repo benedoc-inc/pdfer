@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/core/parse"
-	"github.com/benedoc-inc/pdfer/core/write"
+	"github.com/benedoc-inc/pdfer/v2/core/parse"
+	"github.com/benedoc-inc/pdfer/v2/core/write"
 )
 
 // buildRedactPDF creates a one-page PDF with two text runs at different positions:
@@ -280,8 +280,8 @@ func TestRedact_TwoPagePDF(t *testing.T) {
 
 func TestParseRectArray(t *testing.T) {
 	tests := []struct {
-		input                          string
-		wantOK                         bool
+		input                              string
+		wantOK                             bool
 		wantLLX, wantLLY, wantURX, wantURY float64
 	}{
 		{"[50 100 200 300]", true, 50, 100, 200, 300},

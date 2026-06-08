@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 func TestParseXFAForm(t *testing.T) {
@@ -251,11 +251,15 @@ func TestExclGroupLabelFromPrecedingDraw(t *testing.T) {
 	}
 }
 
-// TestPresenceManagedDrawsSkipped verifies that draw elements with an explicit
-// presence= attribute are filtered out. These are script-managed status indicators
-// (like "Required Question Complete/Incomplete") whose visibility is toggled by form
-// logic — not static labels. Static labels never need a presence attribute.
-func TestPresenceManagedDrawsSkipped(t *testing.T) {
+// TestPresenceManagedDrawsEmittedAsHidden verifies that text draws with an
+// explicit presence= attribute are emitted as display questions carrying their
+// hidden state, NOT filtered out. A script-toggled text draw is almost always
+// conditional instructions or a label for a toggleable field — real content the
+// frontend should see (and know starts hidden) — not a status indicator.
+// Genuine status indicators are filtered elsewhere: event-bearing draws and
+// imageEdit blocks with no image (see TestDrawWithEventsSkipped and the
+// imageEdit check in emitDraw).
+func TestPresenceManagedDrawsEmittedAsHidden(t *testing.T) {
 	xfaXML := `<template>
   <subform name="Page1">
     <field name="realField">
@@ -265,11 +269,11 @@ func TestPresenceManagedDrawsSkipped(t *testing.T) {
     <draw name="sectionHeader">
       <value><text>Carcinogenicity</text></value>
     </draw>
-    <draw name="statusComplete" presence="hidden">
-      <value><text>Required Question Complete</text></value>
+    <draw name="conditionalHidden" presence="hidden">
+      <value><text>Complete this only if you answered Yes above</text></value>
     </draw>
-    <draw name="statusIncomplete" presence="visible">
-      <value><text>Required Question Incomplete</text></value>
+    <draw name="conditionalVisible" presence="visible">
+      <value><text>Provide supporting documentation</text></value>
     </draw>
   </subform>
 </template>`
@@ -279,21 +283,25 @@ func TestPresenceManagedDrawsSkipped(t *testing.T) {
 		t.Fatalf("ParseXFAForm() error = %v", err)
 	}
 
-	found := make(map[string]bool)
+	byName := make(map[string]types.Question)
 	for _, q := range form.Questions {
-		found[q.Name] = true
+		byName[q.Name] = q
 	}
 
-	if found["statusComplete"] {
-		t.Error("statusComplete (presence=hidden) should be filtered")
+	if q, ok := byName["conditionalHidden"]; !ok {
+		t.Error("conditionalHidden (presence=hidden) should be emitted, not filtered")
+	} else if !q.Hidden {
+		t.Error("conditionalHidden (presence=hidden) should carry Hidden=true")
 	}
-	if found["statusIncomplete"] {
-		t.Error("statusIncomplete (presence=visible) should be filtered — explicit presence marks it as dynamic")
+	if q, ok := byName["conditionalVisible"]; !ok {
+		t.Error("conditionalVisible (presence=visible) should be emitted")
+	} else if q.Hidden {
+		t.Error("conditionalVisible (presence=visible) should have Hidden=false")
 	}
-	if !found["sectionHeader"] {
+	if _, ok := byName["sectionHeader"]; !ok {
 		t.Error("sectionHeader (no presence attr) should be kept")
 	}
-	if !found["realField"] {
+	if _, ok := byName["realField"]; !ok {
 		t.Error("realField should be kept")
 	}
 }
@@ -1243,71 +1251,127 @@ func TestPresenceVisibleField(t *testing.T) {
 	}
 }
 
-func TestMultiTargetVisibilityScript(t *testing.T) {
-	script := `if (this.rawValue == "1") {
-	IMDRF.presence = "visible";
-	USA.presence = "hidden";
-	CDN.presence = "hidden";
-}`
-	results, ok := tryParseVisibilityScript(script, "javascript", "AppType", "")
-	if !ok {
-		t.Fatal("tryParseVisibilityScript should have matched")
-	}
-	result := results[0]
-	if result.ruleType != types.RuleTypeVisibility {
-		t.Errorf("ruleType = %q, want visibility", result.ruleType)
-	}
-	if len(result.actions) != 3 {
-		t.Fatalf("actions count = %d, want 3; got %+v", len(result.actions), result.actions)
+// TestPresenceHiddenPropagation verifies that a subform declared
+// presence="hidden" propagates Hidden=true to every kind of descendant question
+// (data-bound field, exclGroup, static draw) and onto nested FormSections, while
+// a sibling visible subform is unaffected.
+func TestPresenceHiddenPropagation(t *testing.T) {
+	xfaXML := `<?xml version="1.0"?>
+<template>
+  <subform name="root">
+    <subform name="hiddenSec" presence="hidden">
+      <field name="boundField">
+        <ui><textEdit/></ui>
+        <caption><value><text>Bound</text></value></caption>
+        <bind match="dataRef"/>
+      </field>
+      <exclGroup name="choice">
+        <field name="optA"><ui><checkButton/></ui><items><text>A</text></items></field>
+        <field name="optB"><ui><checkButton/></ui><items><text>B</text></items></field>
+      </exclGroup>
+      <subform name="nested">
+        <field name="deepField">
+          <ui><textEdit/></ui>
+          <caption><value><text>Deep</text></value></caption>
+          <bind match="dataRef"/>
+        </field>
+      </subform>
+    </subform>
+    <subform name="visibleSec">
+      <field name="visField">
+        <ui><textEdit/></ui>
+        <caption><value><text>Visible</text></value></caption>
+        <bind match="dataRef"/>
+      </field>
+    </subform>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
 	}
 
-	byTarget := map[string]types.ActionType{}
-	for _, a := range result.actions {
-		byTarget[a.Target] = a.Type
+	byName := map[string]*types.Question{}
+	for i := range form.Questions {
+		byName[form.Questions[i].Name] = &form.Questions[i]
 	}
-	if byTarget["IMDRF"] != types.ActionTypeShow {
-		t.Errorf("IMDRF action = %q, want show", byTarget["IMDRF"])
+
+	for _, name := range []string{"boundField", "choice", "deepField"} {
+		q := byName[name]
+		if q == nil {
+			t.Fatalf("question %q not found; got %v", name, questionNames(form.Questions))
+		}
+		if !q.Hidden {
+			t.Errorf("question %q under presence='hidden' subform should have Hidden=true", name)
+		}
 	}
-	if byTarget["USA"] != types.ActionTypeHide {
-		t.Errorf("USA action = %q, want hide", byTarget["USA"])
+
+	if q := byName["visField"]; q == nil {
+		t.Fatal("question visField not found")
+	} else if q.Hidden {
+		t.Error("visField under a visible subform should have Hidden=false")
 	}
-	if byTarget["CDN"] != types.ActionTypeHide {
-		t.Errorf("CDN action = %q, want hide", byTarget["CDN"])
+
+	hiddenStates := collectSectionHidden(form.Sections)
+	for _, name := range []string{"hiddenSec", "nested"} {
+		hid, ok := hiddenStates[name]
+		if !ok {
+			t.Fatalf("section %q not found; got %v", name, hiddenStates)
+		}
+		if !hid {
+			t.Errorf("section %q should report Hidden=true", name)
+		}
+	}
+	if hiddenStates["visibleSec"] {
+		t.Error("section visibleSec should report Hidden=false")
 	}
 }
 
-func TestThisPresenceFallback(t *testing.T) {
-	// Script only uses "this.presence" — no named external targets.
-	// Should fall back to sourceField.
-	script := `this.presence = "hidden";`
-	results, ok := tryParseVisibilityScript(script, "javascript", "myField", "")
-	if !ok {
-		t.Fatal("tryParseVisibilityScript should have matched")
+// TestPresenceHiddenExclGroupOwn verifies that an exclGroup carrying its own
+// presence="hidden" is marked Hidden even without a hidden ancestor.
+func TestPresenceHiddenExclGroupOwn(t *testing.T) {
+	xfaXML := `<?xml version="1.0"?>
+<template>
+  <subform name="root">
+    <exclGroup name="choice" presence="hidden">
+      <field name="optA"><ui><checkButton/></ui><items><text>A</text></items></field>
+      <field name="optB"><ui><checkButton/></ui><items><text>B</text></items></field>
+    </exclGroup>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
 	}
-	result := results[0]
-	if len(result.actions) != 1 {
-		t.Fatalf("actions count = %d, want 1", len(result.actions))
+	if len(form.Questions) == 0 {
+		t.Fatal("expected at least 1 question")
 	}
-	if result.actions[0].Target != "myField" {
-		t.Errorf("action target = %q, want myField", result.actions[0].Target)
-	}
-	if result.actions[0].Type != types.ActionTypeHide {
-		t.Errorf("action type = %q, want hide", result.actions[0].Type)
+	if !form.Questions[0].Hidden {
+		t.Error("exclGroup with presence='hidden' should have Hidden=true")
 	}
 }
 
-func TestPerTargetActionType(t *testing.T) {
-	script := `IMDRF.presence = "visible"; USA.presence = "hidden";`
-	if got := perTargetActionType(script, "IMDRF", types.ActionTypeHide); got != types.ActionTypeShow {
-		t.Errorf("IMDRF: got %q, want show", got)
+func questionNames(qs []types.Question) []string {
+	names := make([]string, len(qs))
+	for i := range qs {
+		names[i] = qs[i].Name
 	}
-	if got := perTargetActionType(script, "USA", types.ActionTypeShow); got != types.ActionTypeHide {
-		t.Errorf("USA: got %q, want hide", got)
+	return names
+}
+
+func collectSectionHidden(secs []types.FormSection) map[string]bool {
+	out := map[string]bool{}
+	var walk func([]types.FormSection)
+	walk = func(s []types.FormSection) {
+		for i := range s {
+			out[s[i].Name] = s[i].Hidden
+			walk(s[i].Children)
+		}
 	}
-	// Unknown target falls back to the provided default.
-	if got := perTargetActionType(script, "OTHER", types.ActionTypeShow); got != types.ActionTypeShow {
-		t.Errorf("OTHER: got %q, want show (fallback)", got)
-	}
+	walk(secs)
+	return out
 }
 
 // ── Rendering improvement tests ───────────────────────────────────────────────
@@ -1954,38 +2018,25 @@ func TestPresenceAttrImageEmitted(t *testing.T) {
 	}
 }
 
-// TestVariablesBlockRulesExtracted verifies that <variables><script> function
-// bodies with presence-based if/else-if chains are extracted as visibility rules.
-func TestVariablesBlockRulesExtracted(t *testing.T) {
-	xfaXML := `<template>
-  <variables>
-    <script name="Functions" contentType="application/x-javascript">
+// TestVariablesBlockExtracted verifies that <variables><script> blocks are
+// exposed verbatim as FormScripts on the schema. pdfer no longer interprets
+// the body; callers can parse the JavaScript themselves.
+func TestVariablesBlockExtracted(t *testing.T) {
+	body := `
       function AutoPopulate() {
         if (AppType.rawValue == "0") {
           SectionA.presence = "visible";
-          SectionB.presence = "hidden";
-          SectionC.presence = "hidden";
         } else if (AppType.rawValue == "1") {
-          SectionA.presence = "hidden";
           SectionB.presence = "visible";
-          SectionC.presence = "hidden";
-        } else if (AppType.rawValue == "2") {
-          SectionA.presence = "hidden";
-          SectionB.presence = "hidden";
-          SectionC.presence = "visible";
         }
       }
-    </script>
+    `
+	xfaXML := `<template>
+  <variables>
+    <script name="Functions" contentType="application/x-javascript">` + body + `</script>
   </variables>
   <subform name="Page1">
-    <exclGroup name="AppType">
-      <field name="opt0"><ui><checkButton/></ui><items><text>A</text></items><items save="1"><text>0</text></items></field>
-      <field name="opt1"><ui><checkButton/></ui><items><text>B</text></items><items save="1"><text>1</text></items></field>
-      <field name="opt2"><ui><checkButton/></ui><items><text>C</text></items><items save="1"><text>2</text></items></field>
-    </exclGroup>
-    <subform name="SectionA"><field name="FieldA"><ui><textEdit/></ui><caption><value><text>Field A</text></value></caption></field></subform>
-    <subform name="SectionB"><field name="FieldB"><ui><textEdit/></ui><caption><value><text>Field B</text></value></caption></field></subform>
-    <subform name="SectionC"><field name="FieldC"><ui><textEdit/></ui><caption><value><text>Field C</text></value></caption></field></subform>
+    <field name="anchor"><ui><textEdit/></ui></field>
   </subform>
 </template>`
 
@@ -1993,31 +2044,25 @@ func TestVariablesBlockRulesExtracted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseXFAForm() error = %v", err)
 	}
-	if len(form.Rules) != 3 {
-		t.Fatalf("expected 3 rules from variables block, got %d: %+v", len(form.Rules), form.Rules)
-	}
-	// Rule 0: AppType == "0" → SectionA show, SectionB hide, SectionC hide
-	r0 := form.Rules[0]
-	if r0.Type != types.RuleTypeVisibility {
-		t.Errorf("rule 0 type = %v", r0.Type)
-	}
-	if r0.Condition == nil || r0.Condition.Expression != `AppType.rawValue == "0"` {
-		t.Errorf("rule 0 condition = %+v", r0.Condition)
-	}
-	// Rule 1: AppType == "1" → SectionB show
-	r1 := form.Rules[1]
-	if r1.Condition == nil || r1.Condition.Expression != `AppType.rawValue == "1"` {
-		t.Errorf("rule 1 condition = %+v", r1.Condition)
-	}
-	// Verify rule 1 shows SectionB
-	var found bool
-	for _, a := range r1.Actions {
-		if a.Type == types.ActionTypeShow && a.Target == "SectionB" {
-			found = true
+
+	var variablesScripts []types.FormScript
+	for _, s := range form.Scripts {
+		if s.Event == "variables" {
+			variablesScripts = append(variablesScripts, s)
 		}
 	}
-	if !found {
-		t.Errorf("rule 1 actions don't include show SectionB: %+v", r1.Actions)
+	if len(variablesScripts) != 1 {
+		t.Fatalf("expected 1 variables script, got %d: %+v", len(variablesScripts), variablesScripts)
+	}
+	s := variablesScripts[0]
+	if s.Name != "Functions" {
+		t.Errorf("script name = %q, want %q", s.Name, "Functions")
+	}
+	if s.Language != "javascript" {
+		t.Errorf("language = %q, want javascript", s.Language)
+	}
+	if s.Body != body {
+		t.Errorf("body not preserved verbatim:\n got: %q\nwant: %q", s.Body, body)
 	}
 }
 
@@ -2025,6 +2070,8 @@ func TestVariablesBlockRulesExtracted(t *testing.T) {
 // AddAttachment button fields (bind="none") is treated as interactive. These
 // buttons are emitted as file questions and must cause their containing section
 // to appear in the navigation — they are not data-bound but they are user-facing.
+// AddAttachment is also NOT emitted as a generic bind="none" FormElement; it
+// stays in Questions so consumers iterating input controls find it there.
 func TestAddAttachmentSectionInteractive(t *testing.T) {
 	xfaXML := `<template>
   <subform name="CoverLetter">
@@ -2055,6 +2102,13 @@ func TestAddAttachmentSectionInteractive(t *testing.T) {
 	}
 	if fileQ.Type != types.ResponseTypeFile {
 		t.Errorf("CLAddAttachment110 type = %q, want %q", fileQ.Type, types.ResponseTypeFile)
+	}
+
+	// AddAttachment must NOT also appear in Elements — it lives in Questions.
+	for _, el := range form.Elements {
+		if el.OwnerPath == "CoverLetter.AttachmentSlot.CLAddAttachment110" {
+			t.Errorf("AddAttachment should not appear in Elements; got %+v", el)
+		}
 	}
 
 	// CoverLetter section must be marked interactive so it appears in nav.
@@ -2188,6 +2242,99 @@ func TestHTMLCaptionExtraction(t *testing.T) {
 	}
 	if strings.Contains(q.Label, "<") || strings.Contains(q.Label, ">") {
 		t.Errorf("label must not contain HTML tags: %q", q.Label)
+	}
+}
+
+// TestHTMLCaptionMultiParagraph verifies that a caption whose <exData> contains
+// multiple block-level paragraphs splits into Label (first block) + Description
+// (remaining blocks joined by "\n"), rather than smooshing everything into Label.
+func TestHTMLCaptionMultiParagraph(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Section1">
+    <field name="DeviceClass">
+      <ui><textEdit/></ui>
+      <caption>
+        <value>
+          <exData contentType="text/html">
+            <body xmlns="http://www.w3.org/1999/xhtml">
+              <p>Device classification</p>
+              <p>Select the regulatory class for this device.</p>
+              <p>If unsure, consult 21 CFR 860.</p>
+            </body>
+          </exData>
+        </value>
+      </caption>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	var q types.Question
+	for _, candidate := range form.Questions {
+		if candidate.Name == "DeviceClass" {
+			q = candidate
+			break
+		}
+	}
+	if q.Name == "" {
+		t.Fatal("DeviceClass not found in questions")
+	}
+	if q.Label != "Device classification" {
+		t.Errorf("label = %q, want %q", q.Label, "Device classification")
+	}
+	wantDesc := "Select the regulatory class for this device.\nIf unsure, consult 21 CFR 860."
+	if q.Description != wantDesc {
+		t.Errorf("description = %q, want %q", q.Description, wantDesc)
+	}
+	if strings.Contains(q.Label, "<") || strings.Contains(q.Description, "<") {
+		t.Errorf("HTML leaked: label=%q description=%q", q.Label, q.Description)
+	}
+}
+
+// TestHTMLCaptionExplicitDescWins verifies that an explicit <desc> takes
+// precedence over the caption-derived description, regardless of element order.
+func TestHTMLCaptionExplicitDescWins(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="Section1">
+    <field name="DeviceClass">
+      <ui><textEdit/></ui>
+      <caption>
+        <value>
+          <exData contentType="text/html">
+            <body xmlns="http://www.w3.org/1999/xhtml">
+              <p>Device classification</p>
+              <p>Caption-derived subtitle that should NOT win.</p>
+            </body>
+          </exData>
+        </value>
+      </caption>
+      <desc>Authoritative description from desc element.</desc>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+	var q types.Question
+	for _, candidate := range form.Questions {
+		if candidate.Name == "DeviceClass" {
+			q = candidate
+			break
+		}
+	}
+	if q.Name == "" {
+		t.Fatal("DeviceClass not found in questions")
+	}
+	if q.Label != "Device classification" {
+		t.Errorf("label = %q, want %q", q.Label, "Device classification")
+	}
+	if q.Description != "Authoritative description from desc element." {
+		t.Errorf("description = %q, want explicit <desc> content", q.Description)
 	}
 }
 

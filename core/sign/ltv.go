@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/core/parse"
+	"github.com/benedoc-inc/pdfer/v2/core/parse"
 )
 
 // appendDSS appends a /DSS (Document Security Store) dictionary to an

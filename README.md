@@ -2,19 +2,19 @@
 
 Pure Go PDF processing library — zero CGO, zero external dependencies.
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/benedoc-inc/pdfer.svg)](https://pkg.go.dev/github.com/benedoc-inc/pdfer)
-[![Go Report Card](https://goreportcard.com/badge/github.com/benedoc-inc/pdfer)](https://goreportcard.com/report/github.com/benedoc-inc/pdfer)
+[![Go Reference](https://pkg.go.dev/badge/github.com/benedoc-inc/pdfer/v2.svg)](https://pkg.go.dev/github.com/benedoc-inc/pdfer/v2)
+[![Go Report Card](https://goreportcard.com/badge/github.com/benedoc-inc/pdfer/v2)](https://goreportcard.com/report/github.com/benedoc-inc/pdfer/v2)
 
 ## Installation
 
 ```bash
-go get github.com/benedoc-inc/pdfer
+go get github.com/benedoc-inc/pdfer/v2
 ```
 
 ## Quick start
 
 ```go
-import "github.com/benedoc-inc/pdfer"
+import "github.com/benedoc-inc/pdfer/v2"
 
 // Merge two PDFs
 out, err := pdfer.MergePDFs([][]byte{a, b}, nil, false)
@@ -76,6 +76,10 @@ out, err := pdfer.EmbedAttachments(pdfBytes, []pdfer.FileAttachment{
     {Name: "report.xlsx", Data: xlsxBytes, MimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
     {Name: "photo.jpg",   Data: jpegBytes, MimeType: "image/jpeg"},
 })
+
+// For encrypted PDFs, supply the user/owner password: appended streams are
+// encrypted with the document's keys and the file /ID is carried forward.
+out, err = pdfer.EmbedAttachmentsWithPassword(encryptedBytes, files, []byte("password"))
 ```
 
 ### Stamping
@@ -178,6 +182,21 @@ filled, err := form.Fill(pdfBytes, pdfer.FormData{"FirstName": "Alice"}, nil, fa
 out, err := pdfer.FlattenForm(filled, nil, false)
 ```
 
+For XFA forms, `schema.Scripts` exposes raw `<script>` blocks verbatim:
+
+```go
+for _, s := range schema.Scripts {
+    fmt.Printf("[%s] %s (%s) on %s\n%s\n", s.Event, s.Name, s.Language, s.OwnerPath, s.Body)
+}
+```
+
+`FormScript.Body` is the unmodified source. pdfer does not interpret
+FormCalc or JavaScript semantics — callers that need to evaluate scripts
+should plug in their own parser. `Question.Scripts` and `FormSection.Scripts`
+hold `FormScript.ID` references in declaration order. See
+[xfa-web](https://github.com/benedoc-inc/xfa-web) for one example of an
+interactive renderer built on this contract.
+
 ### Content extraction
 
 ```go
@@ -233,7 +252,7 @@ if !vr.Conformant {
 ## Creating PDFs from scratch
 
 ```go
-import "github.com/benedoc-inc/pdfer/core/write"
+import "github.com/benedoc-inc/pdfer/v2/core/write"
 
 builder := write.NewSimplePDFBuilder()
 page := builder.AddPage(write.PageSizeLetter)
@@ -293,7 +312,7 @@ layout.BalanceColumns() // align cursors to the lowest column
 ## Parsing PDFs directly
 
 ```go
-import "github.com/benedoc-inc/pdfer/core/parse"
+import "github.com/benedoc-inc/pdfer/v2/core/parse"
 
 pdf, err := parse.OpenWithOptions(pdfBytes, parse.ParseOptions{
     Password: []byte("secret"),
@@ -387,7 +406,7 @@ See [GAPS.md](GAPS.md) for the full history and detailed file pointers.
 **Forms**
 - `Form.Validate()` returns "not implemented" for XFA forms — structural extraction only.
 - Calculated form fields are not re-evaluated on `Fill()`; dependent fields remain stale until opened in a viewer.
-- XFA script parsing handles common patterns (visibility, set-value, validate, calculate) and falls back to `ActionTypeExecute` for scripts it cannot classify.
+- XFA scripts are exposed verbatim via `FormSchema.Scripts` — pdfer does not interpret FormCalc or JavaScript. Scripts attached to nodes pdfer doesn't surface in the schema (decorative `<draw>`, `bind="none"` non-AddAttachment buttons, `<pageArea>` events, per-option fields collapsed into an `<exclGroup>`) are not extracted.
 
 **Images / encoding**
 - JPEG2000 (`JPXDecode`) and JBIG2 image streams are detected but not decoded.

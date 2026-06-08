@@ -54,3 +54,6 @@ go.work.sum
 output.pdf
 output_encrypted.pdf
 kitchen_sink
+
+# Local scratch / out-of-band test inputs and outputs
+scratch/

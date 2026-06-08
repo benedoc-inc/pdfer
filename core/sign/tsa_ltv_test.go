@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/core/sign"
+	"github.com/benedoc-inc/pdfer/v2/core/sign"
 )
 
 // fakeTSAServer returns an httptest.Server that responds to any request with a
@@ -192,7 +192,7 @@ func TestSignPDF_DSS_WithOCSPResponse(t *testing.T) {
 	fakeOCSP := []byte{0x30, 0x03, 0x0a, 0x01, 0x00} // minimal DER SEQUENCE
 
 	signed, err := sign.SignPDF(pdf, sign.SignOptions{
-		Certificate:  cert, PrivateKey: key,
+		Certificate: cert, PrivateKey: key,
 		OCSPResponse: fakeOCSP,
 	})
 	if err != nil {

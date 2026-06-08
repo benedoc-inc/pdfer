@@ -1,13 +1,13 @@
 package tests
 
 import (
-	"bytes"
+	"errors"
 	"os"
 	"testing"
 
-	pdfer "github.com/benedoc-inc/pdfer"
-	"github.com/benedoc-inc/pdfer/forms"
-	"github.com/benedoc-inc/pdfer/forms/xfa"
+	pdfer "github.com/benedoc-inc/pdfer/v2"
+	"github.com/benedoc-inc/pdfer/v2/forms"
+	"github.com/benedoc-inc/pdfer/v2/forms/xfa"
 )
 
 // TestFDA3881_Detection verifies that Form 3881 is correctly identified as an XFA form.
@@ -51,9 +51,14 @@ func TestFDA3881_Schema(t *testing.T) {
 	}
 }
 
-// TestFDA3881_Fill fills Form 3881 with sample data and verifies the field
-// values are written into the XFA datasets stream of the output PDF.
-func TestFDA3881_Fill(t *testing.T) {
+// TestFDA3881_Fill_RejectsXRefStream documents that XFA fill currently cannot
+// handle unencrypted PDFs that use cross-reference streams (PDF 1.5+).
+// FDA Form 3881 is exactly that shape. Earlier code path silently produced a
+// structurally-broken output (xref offsets pointing past the resized stream
+// were not updated); we now return ErrXRefStreamUnsupported so callers can
+// detect the limitation. Issue #12 tracks lifting it by switching XFA fill
+// to PDF incremental updates.
+func TestFDA3881_Fill_RejectsXRefStream(t *testing.T) {
 	pdfBytes := readFDA3881(t)
 
 	form, err := pdfer.ExtractForm(pdfBytes, nil, false)
@@ -72,39 +77,12 @@ func TestFDA3881_Fill(t *testing.T) {
 		"overthe":     "0",
 	}
 
-	filled, err := form.Fill(pdfBytes, fillData, nil, false)
-	if err != nil {
-		t.Fatalf("Fill: %v", err)
+	_, err = form.Fill(pdfBytes, fillData, nil, false)
+	if err == nil {
+		t.Fatal("Fill: expected ErrXRefStreamUnsupported for xref-stream input, got nil")
 	}
-	if len(filled) == 0 {
-		t.Fatal("Fill returned empty PDF")
-	}
-	if !bytes.HasPrefix(filled, []byte("%PDF-")) {
-		t.Error("Fill output does not start with %PDF- header")
-	}
-
-	// Re-extract datasets from the filled PDF and verify field values.
-	streams, err := xfa.ExtractAllXFAStreams(filled, nil, false)
-	if err != nil {
-		t.Fatalf("re-extract XFA streams: %v", err)
-	}
-	if streams.Datasets == nil || len(streams.Datasets.Data) == 0 {
-		t.Fatal("datasets stream missing from filled PDF")
-	}
-
-	datasetsXML := string(streams.Datasets.Data)
-
-	wantSubstrings := map[string]string{
-		"number510":   "<number510>K241234</number510>",
-		"devicename":  "<devicename>InVitro Glucose Monitor</devicename>",
-		"indications": "<indications>For professional use in measuring blood glucose in adults.</indications>",
-		"prescript":   "<prescript>1</prescript>",
-		"overthe":     "<overthe>0</overthe>",
-	}
-	for field, want := range wantSubstrings {
-		if !bytes.Contains([]byte(datasetsXML), []byte(want)) {
-			t.Errorf("field %q: expected %q in datasets XML\ngot:\n%s", field, want, datasetsXML)
-		}
+	if !errors.Is(err, xfa.ErrXRefStreamUnsupported) {
+		t.Errorf("Fill: expected ErrXRefStreamUnsupported, got: %v", err)
 	}
 }
 

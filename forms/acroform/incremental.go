@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"fmt"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/core/parse"
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/core/incremental"
+	"github.com/benedoc-inc/pdfer/v2/core/parse"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // fillIncremental fills AcroForm fields using a PDF incremental update.
@@ -22,9 +22,10 @@ import (
 // For text and choice fields an /AP appearance stream is also generated so the
 // filled value is visible in viewers that do not honour /NeedAppearances true.
 //
-// Encrypted PDFs fall back to the legacy splice path because incremental
-// updates for encrypted files require per-string key derivation that is not
-// yet implemented here.
+// Encrypted PDFs fall back to the legacy splice path: incremental filling relies
+// on ParseAcroForm, which cannot open a password-protected document (it parses
+// with an empty password internally). The appended objects are still written via
+// the shared incremental writer, which carries the document /ID forward.
 func fillIncremental(pdfBytes []byte, formData types.FormData, password []byte, verbose bool) ([]byte, error) {
 	pdf, err := parse.OpenWithOptions(pdfBytes, parse.ParseOptions{
 		Password: password,
@@ -34,7 +35,7 @@ func fillIncremental(pdfBytes []byte, formData types.FormData, password []byte, 
 		return nil, fmt.Errorf("failed to parse PDF: %w", err)
 	}
 
-	// Encrypted PDFs: fall back to legacy path.
+	// Encrypted PDFs: fall back to the encryption-aware splice path.
 	if pdf.Encryption() != nil {
 		return FillFormFieldsWithStreams(pdfBytes, formData, password, verbose)
 	}
@@ -44,21 +45,12 @@ func fillIncremental(pdfBytes []byte, formData types.FormData, password []byte, 
 		return nil, fmt.Errorf("failed to parse AcroForm: %w", err)
 	}
 
-	prevXRef := findStartXRef(pdfBytes)
-	if prevXRef < 0 {
-		return nil, fmt.Errorf("could not locate startxref in original PDF")
-	}
 	trailer := pdf.Trailer()
 	if trailer == nil {
 		return nil, fmt.Errorf("could not read PDF trailer")
 	}
 
-	// ---- Resolve fields and pre-assign object numbers ----------------------
-	//
-	// We assign fresh object numbers (starting at trailer.Size) for:
-	//   • one shared Helvetica font resource (if any text/choice field is filled)
-	//   • one form XObject per text/choice field (the appearance stream)
-	// These are appended to the PDF and referenced from the updated field dicts.
+	// ---- Resolve fields ----------------------------------------------------
 
 	type fieldFill struct {
 		field     *Field
@@ -98,49 +90,43 @@ func fillIncremental(pdfBytes []byte, formData types.FormData, password []byte, 
 		return pdfBytes, nil
 	}
 
-	nextObjNum := trailer.Size
+	// ---- Build incremental update ------------------------------------------
+	//
+	// Fresh object numbers (starting at trailer.Size) are reserved for:
+	//   • one shared Helvetica font resource (if any text/choice field is filled)
+	//   • one form XObject per text/choice field (the appearance stream)
+	//   • a pair of AP XObjects for checkboxes/radios lacking an existing /AP
 
-	// Shared Helvetica font for appearance streams.
-	var helveticaObjNum int
-	if needsFont {
-		helveticaObjNum = nextObjNum
-		nextObjNum++
+	upd, err := incremental.New(pdfBytes, trailer, pdf.Encryption())
+	if err != nil {
+		return nil, err
 	}
 
-	// Assign XObject numbers for text/choice fields, and AP XObjects for
-	// checkboxes/radio buttons that have no existing /AP.
+	var helveticaObjNum int
+	if needsFont {
+		helveticaObjNum = upd.Reserve()
+	}
+
 	for i := range fills {
 		switch {
 		case fills[i].field.FT == "Tx" || fills[i].field.FT == "Ch":
-			fills[i].xobjNum = nextObjNum
-			nextObjNum++
+			fills[i].xobjNum = upd.Reserve()
 		case fills[i].field.FT == "Btn" && !isBtnPushButton(fills[i].field.Ff):
 			if !bytes.Contains(fills[i].current, []byte("/AP")) {
-				fills[i].btnYesObj = nextObjNum
-				nextObjNum++
-				fills[i].btnOffObj = nextObjNum
-				nextObjNum++
+				fills[i].btnYesObj = upd.Reserve()
+				fills[i].btnOffObj = upd.Reserve()
 			}
 		}
 	}
 
-	// ---- Build incremental update section ----------------------------------
-
-	var buf bytes.Buffer
-	buf.Write(pdfBytes)
-	buf.WriteByte('\n')
-
-	offsets := make(map[int]int64)
-
-	// Shared Helvetica font object.
+	// Shared Helvetica font object (no strings, no stream).
 	if needsFont {
-		offsets[helveticaObjNum] = int64(buf.Len())
-		fmt.Fprintf(&buf, "%d 0 obj\n", helveticaObjNum)
-		buf.WriteString("<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding>>")
-		buf.WriteString("\nendobj\n")
+		font := "<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding>>"
+		if err := upd.AddObject(helveticaObjNum, 0, []byte(font)); err != nil {
+			return nil, err
+		}
 	}
 
-	// Per-field appearance XObjects, then updated field dicts.
 	for _, ff := range fills {
 		// Text/choice appearance XObject.
 		if ff.xobjNum > 0 {
@@ -149,12 +135,9 @@ func fillIncremental(pdfBytes []byte, formData types.FormData, password []byte, 
 				ff.field, fmt.Sprint(ff.value),
 				fontAlias, fontSize, helveticaObjNum,
 			)
-			offsets[ff.xobjNum] = int64(buf.Len())
-			fmt.Fprintf(&buf, "%d 0 obj\n", ff.xobjNum)
-			buf.Write(dictBytes)
-			buf.WriteString("\nstream\n")
-			buf.Write(streamBytes)
-			buf.WriteString("endstream\nendobj\n")
+			if err := upd.AddStream(ff.xobjNum, 0, dictBytes, streamBytes); err != nil {
+				return nil, err
+			}
 		}
 
 		// Checkbox AP XObjects (only when field has no pre-existing /AP).
@@ -166,20 +149,12 @@ func fillIncremental(pdfBytes []byte, formData types.FormData, password []byte, 
 			}
 			yesDict, yesStream := buildCheckboxAPStream(w, h, true)
 			offDict, offStream := buildCheckboxAPStream(w, h, false)
-
-			offsets[ff.btnYesObj] = int64(buf.Len())
-			fmt.Fprintf(&buf, "%d 0 obj\n", ff.btnYesObj)
-			buf.Write(yesDict)
-			buf.WriteString("\nstream\n")
-			buf.Write(yesStream)
-			buf.WriteString("endstream\nendobj\n")
-
-			offsets[ff.btnOffObj] = int64(buf.Len())
-			fmt.Fprintf(&buf, "%d 0 obj\n", ff.btnOffObj)
-			buf.Write(offDict)
-			buf.WriteString("\nstream\n")
-			buf.Write(offStream)
-			buf.WriteString("endstream\nendobj\n")
+			if err := upd.AddStream(ff.btnYesObj, 0, yesDict, yesStream); err != nil {
+				return nil, err
+			}
+			if err := upd.AddStream(ff.btnOffObj, 0, offDict, offStream); err != nil {
+				return nil, err
+			}
 		}
 
 		// Updated field dict — current is body-only (from GetObjectContent).
@@ -195,10 +170,9 @@ func fillIncremental(pdfBytes []byte, formData types.FormData, password []byte, 
 				newBody = withBtnAP(newBody, ff.btnYesObj, ff.btnOffObj)
 			}
 		}
-		offsets[ff.field.ObjectNum] = int64(buf.Len())
-		fmt.Fprintf(&buf, "%d %d obj\n", ff.field.ObjectNum, ff.field.Generation)
-		buf.Write(newBody)
-		buf.WriteString("\nendobj\n")
+		if err := upd.AddObject(ff.field.ObjectNum, ff.field.Generation, newBody); err != nil {
+			return nil, err
+		}
 
 		// Radio button group: update each kid widget's /AS.
 		if ff.field.FT == "Btn" && isBtnRadio(ff.field.Ff) && len(ff.field.Kids) > 0 {
@@ -214,39 +188,14 @@ func fillIncremental(pdfBytes []byte, formData types.FormData, password []byte, 
 					kidAS = exportVal
 				}
 				newKidBody := withAS(kidBody, kidAS)
-				offsets[kid.ObjectNum] = int64(buf.Len())
-				fmt.Fprintf(&buf, "%d %d obj\n", kid.ObjectNum, kid.Generation)
-				buf.Write(newKidBody)
-				buf.WriteString("\nendobj\n")
+				if err := upd.AddObject(kid.ObjectNum, kid.Generation, newKidBody); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}
 
-	// xref table: consecutive runs become single subsections.
-	xrefStart := int64(buf.Len())
-	buf.WriteString("xref\n")
-	objNums := make([]int, 0, len(offsets))
-	for n := range offsets {
-		objNums = append(objNums, n)
-	}
-	sort.Ints(objNums)
-	writeXRefSubsections(&buf, offsets, objNums)
-
-	// New trailer: preserve Root/Info/Encrypt, add Prev, update Size.
-	buf.WriteString("trailer\n<<")
-	fmt.Fprintf(&buf, "/Size %d", nextObjNum)
-	fmt.Fprintf(&buf, "/Root %s", trailer.RootRef)
-	if trailer.InfoRef != "" {
-		fmt.Fprintf(&buf, "/Info %s", trailer.InfoRef)
-	}
-	if trailer.EncryptRef != "" {
-		fmt.Fprintf(&buf, "/Encrypt %s", trailer.EncryptRef)
-	}
-	fmt.Fprintf(&buf, "/Prev %d", prevXRef)
-	buf.WriteString(">>\n")
-	fmt.Fprintf(&buf, "startxref\n%d\n%%%%EOF\n", xrefStart)
-
-	return buf.Bytes(), nil
+	return upd.Bytes()
 }
 
 // buildTextAppearance returns the dict bytes and stream bytes for a text-field
@@ -319,22 +268,6 @@ func withAppearanceRef(fieldBody []byte, xobjNum int) []byte {
 		return fieldBody
 	}
 	return []byte(fieldStr[:end] + newAP + fieldStr[end:])
-}
-
-// writeXRefSubsections writes xref entries grouped into contiguous subsections.
-func writeXRefSubsections(buf *bytes.Buffer, offsets map[int]int64, objNums []int) {
-	i := 0
-	for i < len(objNums) {
-		j := i + 1
-		for j < len(objNums) && objNums[j] == objNums[j-1]+1 {
-			j++
-		}
-		fmt.Fprintf(buf, "%d %d\n", objNums[i], j-i)
-		for k := i; k < j; k++ {
-			fmt.Fprintf(buf, "%010d %05d n \n", offsets[objNums[k]], 0)
-		}
-		i = j
-	}
 }
 
 // applyFieldValue returns a copy of fieldData with the /V entry set to value.
