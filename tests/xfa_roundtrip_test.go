@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/v2/core/encrypt"
-	"github.com/benedoc-inc/pdfer/v2/forms/xfa"
-	"github.com/benedoc-inc/pdfer/v2/types"
+	"github.com/benedoc-inc/pdfer/core/encrypt"
+	"github.com/benedoc-inc/pdfer/forms/xfa"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 // getTestResourcePath is now in test_helpers.go

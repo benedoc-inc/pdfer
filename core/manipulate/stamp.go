@@ -169,17 +169,18 @@ func (m *PDFManipulator) stampOnPage(pageObjNum int, stamp TextStamp) error {
 	}
 
 	// Build and register a new content stream object.
+	// Store just the body (dict+stream), not the "N G obj\n...\nendobj" wrapper —
+	// the writer adds the header and endobj itself when rebuilding.
 	streamData := buildStampContentStream(stamp, fontKey, gsKey)
 	newObjNum := stampNextObjNum(m.objects)
-	objBytes := fmt.Sprintf("%d 0 obj\n<</Length %d>>\nstream\n%s\nendstream\nendobj",
-		newObjNum, len(streamData), streamData)
+	objBytes := fmt.Sprintf("<</Length %d>>\nstream\n%s\nendstream", len(streamData), streamData)
 	m.objects[newObjNum] = []byte(objBytes)
 
 	// Update the page dict.
 	pageStr := string(m.objects[pageObjNum])
-	pageStr = stampInjectFont(pageStr, fontKey, stamp.FontName)
+	pageStr = m.stampInjectFont(pageStr, fontKey, stamp.FontName)
 	if gsKey != "" {
-		pageStr = stampInjectExtGState(pageStr, gsKey, stamp.Opacity)
+		pageStr = m.stampInjectExtGState(pageStr, gsKey, stamp.Opacity)
 	}
 	pageStr = stampAppendContents(pageStr, fmt.Sprintf("%d 0 R", newObjNum))
 	m.objects[pageObjNum] = []byte(pageStr)
@@ -291,7 +292,8 @@ func stampParseMediaBox(pageStr string) (width, height float64) {
 // stampAppendContents updates the /Contents entry in the page dict so it
 // includes newRef. If /Contents is a single reference, it becomes an array.
 func stampAppendContents(pageStr, newRef string) string {
-	re := regexp.MustCompile(`/Contents\s+(\[([^\]]*)\]|(\d+\s+\d+\s+R))`)
+	// \s* handles both "/Contents [..." and "/Contents[..." (XeLaTeX omits the space)
+	re := regexp.MustCompile(`/Contents\s*(\[([^\]]*)\]|(\d+\s+\d+\s+R))`)
 	loc := re.FindStringSubmatchIndex(pageStr)
 	if loc == nil {
 		return setDictValue(pageStr, "/Contents", "["+newRef+"]")
@@ -310,13 +312,15 @@ func stampAppendContents(pageStr, newRef string) string {
 }
 
 // stampInjectFont ensures /Resources/Font contains an entry for fontKey mapped
-// to an inline Type1 dict for baseFontName.
-func stampInjectFont(pageStr, fontKey, baseFontName string) string {
+// to an inline Type1 dict for baseFontName. It modifies pageStr (the page dict
+// string) in place when /Resources is inline, or updates m.objects when
+// /Resources is an external reference.
+func (m *PDFManipulator) stampInjectFont(pageStr, fontKey, baseFontName string) string {
 	fontEntry := fmt.Sprintf("/%s<</Type/Font/Subtype/Type1/BaseFont/%s>>", fontKey, baseFontName)
 
 	resPos := strings.Index(pageStr, "/Resources")
 	if resPos == -1 {
-		// No /Resources at all — inject a brand-new one.
+		// No /Resources at all — inject a brand-new inline one.
 		return stampInsertBeforeClosingDict(pageStr, fmt.Sprintf("/Resources<</Font<<%s>>>>", fontEntry))
 	}
 	afterKey := resPos + len("/Resources")
@@ -324,36 +328,48 @@ func stampInjectFont(pageStr, fontKey, baseFontName string) string {
 	// Try inline dict first.
 	open, close := stampFindDictBounds(pageStr, afterKey)
 	if open == -1 {
-		// External reference — too complex to rewrite here; inject an inline Resources.
-		return stampInsertBeforeClosingDict(pageStr, fmt.Sprintf("/Resources<</Font<<%s>>>>", fontEntry))
+		// External reference — resolve and modify the referenced object.
+		reRef := regexp.MustCompile(`^\s*(\d+)\s+\d+\s+R`)
+		m2 := reRef.FindStringSubmatch(pageStr[afterKey:])
+		if m2 != nil {
+			var refNum int
+			fmt.Sscanf(m2[1], "%d", &refNum)
+			if refObj, ok := m.objects[refNum]; ok {
+				m.objects[refNum] = []byte(stampInjectFontIntoDict(string(refObj), fontEntry, fontKey))
+			}
+		}
+		return pageStr
 	}
 
 	resDict := pageStr[open:close] // "<<...>>"
-	fontPos := strings.Index(resDict, "/Font")
-	if fontPos == -1 {
-		// No /Font subdictionary — prepend one.
-		newResDict := "<<" + fmt.Sprintf("/Font<<%s>>", fontEntry) + resDict[2:]
-		return pageStr[:open] + newResDict + pageStr[close:]
-	}
-
-	// /Font exists — inject our entry into its dict.
-	fOpen, fClose := stampFindDictBounds(resDict, fontPos+len("/Font"))
-	if fOpen == -1 {
-		return pageStr // couldn't parse, leave unchanged
-	}
-	// Check if the font key is already present.
-	fontDictContent := resDict[fOpen:fClose]
-	if strings.Contains(fontDictContent, "/"+fontKey) {
-		return pageStr // already injected
-	}
-	newFontDict := "<<" + fontEntry + fontDictContent[2:]
-	newResDict := resDict[:fOpen] + newFontDict + resDict[fClose:]
+	newResDict := stampInjectFontIntoDict(resDict, fontEntry, fontKey)
 	return pageStr[:open] + newResDict + pageStr[close:]
 }
 
+// stampInjectFontIntoDict adds the font entry to a /Resources dict string.
+func stampInjectFontIntoDict(resDict, fontEntry, fontKey string) string {
+	fontPos := strings.Index(resDict, "/Font")
+	if fontPos == -1 {
+		// No /Font subdictionary — prepend one.
+		return "<<" + fmt.Sprintf("/Font<<%s>>", fontEntry) + resDict[2:]
+	}
+	// /Font exists — inject our entry into its dict.
+	fOpen, fClose := stampFindDictBounds(resDict, fontPos+len("/Font"))
+	if fOpen == -1 {
+		return resDict // couldn't parse, leave unchanged
+	}
+	fontDictContent := resDict[fOpen:fClose]
+	if strings.Contains(fontDictContent, "/"+fontKey) {
+		return resDict // already injected
+	}
+	newFontDict := "<<" + fontEntry + fontDictContent[2:]
+	return resDict[:fOpen] + newFontDict + resDict[fClose:]
+}
+
 // stampInjectExtGState ensures /Resources/ExtGState contains a graphics state
-// entry with the given opacity.
-func stampInjectExtGState(pageStr, gsKey string, opacity float64) string {
+// entry with the given opacity. Like stampInjectFont, it follows external
+// /Resources references.
+func (m *PDFManipulator) stampInjectExtGState(pageStr, gsKey string, opacity float64) string {
 	gsEntry := fmt.Sprintf("/%s<</Type/ExtGState/ca %.4f/CA %.4f>>", gsKey, opacity, opacity)
 
 	resPos := strings.Index(pageStr, "/Resources")
@@ -363,26 +379,38 @@ func stampInjectExtGState(pageStr, gsKey string, opacity float64) string {
 	afterKey := resPos + len("/Resources")
 	open, close := stampFindDictBounds(pageStr, afterKey)
 	if open == -1 {
+		// External reference — resolve and modify.
+		reRef := regexp.MustCompile(`^\s*(\d+)\s+\d+\s+R`)
+		m2 := reRef.FindStringSubmatch(pageStr[afterKey:])
+		if m2 != nil {
+			var refNum int
+			fmt.Sscanf(m2[1], "%d", &refNum)
+			if refObj, ok := m.objects[refNum]; ok {
+				m.objects[refNum] = []byte(stampInjectExtGStateIntoDict(string(refObj), gsEntry, gsKey))
+			}
+		}
 		return pageStr
 	}
 	resDict := pageStr[open:close]
+	newResDict := stampInjectExtGStateIntoDict(resDict, gsEntry, gsKey)
+	return pageStr[:open] + newResDict + pageStr[close:]
+}
 
+func stampInjectExtGStateIntoDict(resDict, gsEntry, gsKey string) string {
 	gsPos := strings.Index(resDict, "/ExtGState")
 	if gsPos == -1 {
-		newResDict := "<<" + fmt.Sprintf("/ExtGState<<%s>>", gsEntry) + resDict[2:]
-		return pageStr[:open] + newResDict + pageStr[close:]
+		return "<<" + fmt.Sprintf("/ExtGState<<%s>>", gsEntry) + resDict[2:]
 	}
 	gOpen, gClose := stampFindDictBounds(resDict, gsPos+len("/ExtGState"))
 	if gOpen == -1 {
-		return pageStr
+		return resDict
 	}
 	gsContent := resDict[gOpen:gClose]
 	if strings.Contains(gsContent, "/"+gsKey) {
-		return pageStr
+		return resDict
 	}
 	newGSDict := "<<" + gsEntry + gsContent[2:]
-	newResDict := resDict[:gOpen] + newGSDict + resDict[gClose:]
-	return pageStr[:open] + newResDict + pageStr[close:]
+	return resDict[:gOpen] + newGSDict + resDict[gClose:]
 }
 
 // stampFindDictBounds finds the bounds of a <<...>> dict starting at or after

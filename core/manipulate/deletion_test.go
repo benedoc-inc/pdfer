@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/v2/content/extract"
-	"github.com/benedoc-inc/pdfer/v2/core/write"
+	"github.com/benedoc-inc/pdfer/content/extract"
+	"github.com/benedoc-inc/pdfer/core/write"
 )
 
 func TestDeletePage(t *testing.T) {

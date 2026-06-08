@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/v2/types"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 func TestParseHexString(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/v2/core/write"
+	"github.com/benedoc-inc/pdfer/core/write"
 )
 
 func TestExtractResources_Fonts(t *testing.T) {

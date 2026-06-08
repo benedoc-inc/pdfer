@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/v2/content/extract"
-	"github.com/benedoc-inc/pdfer/v2/core/write"
-	"github.com/benedoc-inc/pdfer/v2/forms/acroform"
-	"github.com/benedoc-inc/pdfer/v2/types"
+	"github.com/benedoc-inc/pdfer/content/extract"
+	"github.com/benedoc-inc/pdfer/core/write"
+	"github.com/benedoc-inc/pdfer/forms/acroform"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 // buildTestForm creates a one-page PDF with a text field, a checkbox, and a

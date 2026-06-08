@@ -6,7 +6,7 @@ import (
 	"crypto/rc4"
 	"fmt"
 
-	"github.com/benedoc-inc/pdfer/v2/types"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 var pdfPadding = []byte{

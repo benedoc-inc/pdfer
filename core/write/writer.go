@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/v2/types"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 // PDFObject represents a PDF object with its content

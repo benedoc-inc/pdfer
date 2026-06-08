@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/v2/types"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 // TestFieldEventBodyPreservedVerbatim verifies that a field-attached event's

@@ -3,9 +3,9 @@ package encrypt_test
 import (
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/v2/content/extract"
-	"github.com/benedoc-inc/pdfer/v2/core/encrypt"
-	"github.com/benedoc-inc/pdfer/v2/core/write"
+	"github.com/benedoc-inc/pdfer/content/extract"
+	"github.com/benedoc-inc/pdfer/core/encrypt"
+	"github.com/benedoc-inc/pdfer/core/write"
 )
 
 func buildEncryptedPDF(t *testing.T, userPwd, ownerPwd []byte) []byte {

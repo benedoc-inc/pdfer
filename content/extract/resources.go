@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/v2/core/parse"
-	"github.com/benedoc-inc/pdfer/v2/types"
+	"github.com/benedoc-inc/pdfer/core/parse"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 // extractResources extracts resources from a Resources dictionary
