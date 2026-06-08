@@ -3,7 +3,7 @@ package encrypt
 import (
 	"fmt"
 
-	"github.com/benedoc-inc/pdfer/v2/types"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 // DecryptStringsInContent walks raw PDF object content (a non-stream dictionary

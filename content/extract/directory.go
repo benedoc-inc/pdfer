@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/benedoc-inc/pdfer/v2/forms"
-	"github.com/benedoc-inc/pdfer/v2/types"
+	"github.com/benedoc-inc/pdfer/forms"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 // DirectoryOutput represents the result of extracting a PDF to a directory

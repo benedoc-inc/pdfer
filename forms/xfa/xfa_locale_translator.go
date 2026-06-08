@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/v2/types"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 // ParseXFALocaleSet parses XFA localeSet XML and converts it to XFALocaleSet type

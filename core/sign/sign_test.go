@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/v2/core/sign"
-	"github.com/benedoc-inc/pdfer/v2/core/write"
+	"github.com/benedoc-inc/pdfer/core/sign"
+	"github.com/benedoc-inc/pdfer/core/write"
 )
 
 // buildSimplePDF creates a minimal one-page PDF for signing tests.

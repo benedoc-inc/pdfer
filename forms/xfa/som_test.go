@@ -3,7 +3,7 @@ package xfa
 import (
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/v2/types"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 // TestSOMSegment_NoCollision_BareName: when a parent has no same-named

@@ -1,7 +1,7 @@
 package compare
 
 import (
-	"github.com/benedoc-inc/pdfer/v2/types"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 // myersDiff implements the O(ND) Myers diff algorithm

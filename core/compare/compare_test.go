@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/v2/core/write"
+	"github.com/benedoc-inc/pdfer/core/write"
 )
 
 func TestComparePDFs_Identical(t *testing.T) {

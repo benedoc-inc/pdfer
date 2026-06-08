@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/v2/types"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 func TestExtractFromDisk_Fonts(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/v2/types"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 // ParseXFAConnectionSet parses XFA connectionSet XML and converts it to XFAConnectionSet type

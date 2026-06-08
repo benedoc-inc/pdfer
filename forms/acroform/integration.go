@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/v2/core/write"
-	"github.com/benedoc-inc/pdfer/v2/types"
+	"github.com/benedoc-inc/pdfer/core/write"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 // FormBuilder integrates AcroForm creation with SimplePDFBuilder.

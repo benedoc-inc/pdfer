@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/v2/core/sign"
+	"github.com/benedoc-inc/pdfer/core/sign"
 )
 
 // fakeTSAServer returns an httptest.Server that responds to any request with a

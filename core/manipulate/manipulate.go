@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/v2/core/encrypt"
-	"github.com/benedoc-inc/pdfer/v2/core/parse"
-	"github.com/benedoc-inc/pdfer/v2/core/write"
+	"github.com/benedoc-inc/pdfer/core/encrypt"
+	"github.com/benedoc-inc/pdfer/core/parse"
+	"github.com/benedoc-inc/pdfer/core/write"
 )
 
 // PDFManipulator provides functions to modify existing PDFs

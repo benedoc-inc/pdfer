@@ -2,7 +2,7 @@
 package acroform
 
 import (
-	"github.com/benedoc-inc/pdfer/v2/types"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 // FillForm fills AcroForm fields with values from FormData

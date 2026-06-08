@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/v2/types"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 // ParseXFAStylesheet parses XFA stylesheet XML and converts it to XFAStylesheet type

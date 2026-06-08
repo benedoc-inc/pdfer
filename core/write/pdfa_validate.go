@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/v2/core/parse"
+	"github.com/benedoc-inc/pdfer/core/parse"
 )
 
 // PDFAValidationResult contains the outcome of a PDF/A conformance check.
