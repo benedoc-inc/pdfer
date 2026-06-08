@@ -267,8 +267,9 @@ func GetObjectFromStream(pdfBytes []byte, objNum int, streamObjNum int, indexInS
 	// First, we need to find the object stream's byte offset
 	// This requires having the xref table for direct objects
 
-	// For now, search for the object stream in the PDF
-	streamPattern := fmt.Sprintf(`%d\s+0\s+obj`, streamObjNum)
+	// Search for the object stream. Use (?m)^ to anchor at start-of-line so that
+	// object 11 is not accidentally matched by the substring "11" inside "111 0 obj".
+	streamPattern := fmt.Sprintf(`(?m)^%d\s+0\s+obj`, streamObjNum)
 	re := regexp.MustCompile(streamPattern)
 	matches := re.FindIndex(pdfBytes)
 	if matches == nil {
