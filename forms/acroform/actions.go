@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/v2/core/write"
+	"github.com/benedoc-inc/pdfer/core/write"
 )
 
 // removeDictKey removes a single "/key value" pair from a PDF dict string.

@@ -8,7 +8,7 @@ import (
 	"crypto/rc4"
 	"fmt"
 
-	"github.com/benedoc-inc/pdfer/v2/types"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 // EncryptObject encrypts a stream or string payload belonging to object

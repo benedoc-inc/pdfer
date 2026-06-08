@@ -1,4 +1,4 @@
-module github.com/benedoc-inc/pdfer/v2
+module github.com/benedoc-inc/pdfer
 
 go 1.21
 

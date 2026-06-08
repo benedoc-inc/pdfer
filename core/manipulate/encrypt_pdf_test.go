@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/v2/core/encrypt"
-	"github.com/benedoc-inc/pdfer/v2/core/parse"
-	"github.com/benedoc-inc/pdfer/v2/core/write"
+	"github.com/benedoc-inc/pdfer/core/encrypt"
+	"github.com/benedoc-inc/pdfer/core/parse"
+	"github.com/benedoc-inc/pdfer/core/write"
 )
 
 // buildPlainPDF builds a one-page PDF with a single text run (no encryption).

@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/v2/core/encrypt"
-	"github.com/benedoc-inc/pdfer/v2/core/write"
-	"github.com/benedoc-inc/pdfer/v2/forms/xfa"
-	"github.com/benedoc-inc/pdfer/v2/types"
+	"github.com/benedoc-inc/pdfer/core/encrypt"
+	"github.com/benedoc-inc/pdfer/core/write"
+	"github.com/benedoc-inc/pdfer/forms/xfa"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 func TestBuildPDFFromScratch(t *testing.T) {
