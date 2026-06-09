@@ -249,11 +249,31 @@ func attachReadFilespec(pdf *parse.PDF, filespecNum int) (FileAttachment, bool) 
 		return FileAttachment{}, false
 	}
 
+	// Derive the MIME from the stream dict only, not the whole object: the
+	// compressed payload could otherwise contain bytes that look like
+	// /Subtype /… and yield a bogus type when the real key is absent.
 	mime := ""
-	if sub := attachFindName(streamObj, "Subtype"); sub != "" {
-		mime = pdfNameUnescape(sub)
+	if dict, ok := attachStreamDict(streamObj); ok {
+		if sub := attachFindName(dict, "Subtype"); sub != "" {
+			mime = pdfNameUnescape(sub)
+		}
 	}
 	return FileAttachment{Name: name, Data: data, MimeType: mime}, true
+}
+
+// attachStreamDict returns the bounded << >> dictionary slice of a stream
+// object, excluding the raw stream payload. Searching the whole object for
+// keys would risk matching bytes inside the compressed stream data.
+func attachStreamDict(obj []byte) ([]byte, bool) {
+	dictStart := bytes.Index(obj, []byte("<<"))
+	if dictStart == -1 {
+		return nil, false
+	}
+	dictEnd := attachMatchDelimited(obj, dictStart, '<', '>')
+	if dictEnd == -1 {
+		return nil, false
+	}
+	return obj[dictStart : dictEnd+1], true
 }
 
 // attachDecodeStream slices the raw stream bytes out of an object and applies
@@ -263,15 +283,12 @@ func attachDecodeStream(pdf *parse.PDF, obj []byte) ([]byte, error) {
 	// Bound the dictionary first: searching for "stream" naively would match
 	// inside names like /Subtype /application#2Foctet-stream. Match the dict's
 	// own << >> and only look for the stream keyword past its close.
-	dictStart := bytes.Index(obj, []byte("<<"))
-	if dictStart == -1 {
+	dict, ok := attachStreamDict(obj)
+	if !ok {
 		return nil, fmt.Errorf("no stream dict")
 	}
-	dictEnd := attachMatchDelimited(obj, dictStart, '<', '>')
-	if dictEnd == -1 {
-		return nil, fmt.Errorf("unterminated stream dict")
-	}
-	dict := obj[dictStart : dictEnd+1]
+	dictStart := bytes.Index(obj, []byte("<<"))
+	dictEnd := dictStart + len(dict) - 1
 
 	rel := bytes.Index(obj[dictEnd:], []byte("stream"))
 	if rel == -1 {

@@ -410,16 +410,40 @@ func handleExtractAttachments(inputPDF, outDir string) {
 	if err := os.MkdirAll(outDir, 0755); err != nil {
 		log.Fatalf("Error creating output directory: %v", err)
 	}
+	// Track names already written so colliding base names don't clobber each
+	// other: distinct attachments can share a display name, and filepath.Base
+	// can collapse distinct paths to the same name.
+	used := make(map[string]bool)
 	for _, a := range attachments {
 		// Guard against path traversal from attacker-controlled filenames.
 		name := filepath.Base(filepath.FromSlash(a.Name))
 		if name == "" || name == "." || name == string(filepath.Separator) {
 			name = "attachment"
 		}
+		name = uniqueAttachmentName(name, used)
 		dest := filepath.Join(outDir, name)
 		if err := os.WriteFile(dest, a.Data, 0644); err != nil {
 			log.Fatalf("Error writing %s: %v", dest, err)
 		}
 		fmt.Printf("Extracted %s (%d bytes)\n", dest, len(a.Data))
+	}
+}
+
+// uniqueAttachmentName returns name if unused, otherwise inserts a -1, -2, …
+// suffix before the extension until the result is unique. The chosen name is
+// recorded in used.
+func uniqueAttachmentName(name string, used map[string]bool) string {
+	if !used[name] {
+		used[name] = true
+		return name
+	}
+	ext := filepath.Ext(name)
+	base := name[:len(name)-len(ext)]
+	for i := 1; ; i++ {
+		candidate := fmt.Sprintf("%s-%d%s", base, i, ext)
+		if !used[candidate] {
+			used[candidate] = true
+			return candidate
+		}
 	}
 }
