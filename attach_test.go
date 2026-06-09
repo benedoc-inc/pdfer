@@ -148,11 +148,10 @@ func TestEmbedAttachments_Encrypted(t *testing.T) {
 	if bytes.Contains(out, compressed.Bytes()) {
 		t.Error("compressed attachment bytes appear in cleartext; stream was not encrypted")
 	}
-	// pdfer encrypts with /StrF /Identity, so strings (the filename) are stored
-	// in the clear by design; encrypting them would be unreadable to conformant
-	// viewers. The stream (/StmF /StdCF) is still encrypted, checked above.
-	if !bytes.Contains(out, []byte("(secret.txt)")) {
-		t.Error("filename should be cleartext for a /StrF /Identity document")
+	// pdfer encrypts with /StrF /StdCF, so strings (the filename) must be
+	// ciphertext in the raw bytes, matching the declared filter.
+	if bytes.Contains(out, []byte("secret.txt")) {
+		t.Error("filename appears in cleartext for a /StrF /StdCF document")
 	}
 
 	// --- Round-trip with the password: stream decrypts + inflates to payload. ---

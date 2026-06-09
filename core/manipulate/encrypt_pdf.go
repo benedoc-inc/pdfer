@@ -3,6 +3,7 @@ package manipulate
 import (
 	"bytes"
 	"fmt"
+	"regexp"
 
 	"github.com/benedoc-inc/pdfer/core/encrypt"
 	"github.com/benedoc-inc/pdfer/core/parse"
@@ -79,26 +80,27 @@ func EncryptPDF(pdfBytes []byte, userPassword, ownerPassword []byte, verbose boo
 	return w.Bytes()
 }
 
+// encryptStreamKeyword matches the stream keyword between the dictionary's
+// closing >> and the stream data: optional whitespace, "stream", then the
+// spec-mandated CRLF or LF. Anchoring on >> means a dict ending ">>stream\n"
+// (no newline before the keyword) is still recognized as a stream object.
+var encryptStreamKeyword = regexp.MustCompile(`>>[ \t\r\n]*stream\r?\n`)
+
 // encryptSplitContent splits GetObjectContent output into the dict bytes and
 // raw stream bytes for a stream object. Returns (content, nil) for plain dicts.
 func encryptSplitContent(content []byte) (dictBytes, streamBytes []byte) {
-	for _, sep := range [][]byte{
-		[]byte("\nstream\r\n"),
-		[]byte("\nstream\n"),
+	loc := encryptStreamKeyword.FindIndex(content)
+	if loc == nil {
+		return content, nil
+	}
+	dict := content[:loc[0]+2] // keep the closing >>
+	rest := content[loc[1]:]
+	for _, endSep := range [][]byte{
+		[]byte("\nendstream"),
+		[]byte("endstream"),
 	} {
-		idx := bytes.Index(content, sep)
-		if idx < 0 {
-			continue
-		}
-		dict := content[:idx]
-		rest := content[idx+len(sep):]
-		for _, endSep := range [][]byte{
-			[]byte("\nendstream"),
-			[]byte("endstream"),
-		} {
-			if j := bytes.Index(rest, endSep); j >= 0 {
-				return dict, rest[:j]
-			}
+		if j := bytes.Index(rest, endSep); j >= 0 {
+			return dict, rest[:j]
 		}
 	}
 	return content, nil

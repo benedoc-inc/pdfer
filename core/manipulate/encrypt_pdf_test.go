@@ -57,6 +57,20 @@ func TestEncryptSplitContent_StreamCRLF(t *testing.T) {
 	}
 }
 
+func TestEncryptSplitContent_NoNewlineBeforeStream(t *testing.T) {
+	// Some producers put the stream keyword right after >>. Missing this split
+	// routes the binary stream through the string-encryption walker (and leaves
+	// the stream itself unencrypted).
+	raw := "<</Filter/FlateDecode/Length 5>>stream\nHello\nendstream"
+	d, s := encryptSplitContent([]byte(raw))
+	if !strings.HasSuffix(string(d), ">>") || strings.Contains(string(d), "stream") {
+		t.Errorf("dict bytes wrong: %q", d)
+	}
+	if string(s) != "Hello" {
+		t.Errorf("stream bytes = %q, want %q", s, "Hello")
+	}
+}
+
 // --- integration tests --------------------------------------------------------
 
 func TestEncryptPDF_ParseableAfterEncrypt(t *testing.T) {

@@ -73,3 +73,58 @@ func TestEncryptStringsInContent_HonorsStrF(t *testing.T) {
 		t.Errorf("string did not round-trip; got %q", back)
 	}
 }
+
+// TestParsePDFLiteralStringBytes exercises the literal-string parser.
+func TestParsePDFLiteralStringBytes(t *testing.T) {
+	cases := []struct {
+		input   string
+		want    string
+		wantEnd int
+	}{
+		{"(hello)", "hello", 7},
+		{"(hi) extra", "hi", 4},
+		{"(a\\nb)", "a\nb", 6},
+		{"(a\\(b\\)c)", "a(b)c", 9},
+		{"(nest(ed))", "nest(ed)", 10},
+		{"(\\101)", "A", 6}, // octal \101 = 65 = 'A'
+	}
+	for _, tc := range cases {
+		got, end, ok := parsePDFLiteralStringBytes([]byte(tc.input), 1)
+		if !ok {
+			t.Errorf("input %q: unexpectedly unterminated", tc.input)
+			continue
+		}
+		if string(got) != tc.want {
+			t.Errorf("input %q: got %q, want %q", tc.input, got, tc.want)
+		}
+		if end != tc.wantEnd {
+			t.Errorf("input %q: end=%d, want %d", tc.input, end, tc.wantEnd)
+		}
+	}
+}
+
+// TestEncParseHexString exercises the hex-string parser.
+func TestEncParseHexString(t *testing.T) {
+	cases := []struct {
+		input   string
+		want    []byte
+		wantEnd int
+	}{
+		{"<48656C6C6F>", []byte("Hello"), 12},
+		{"<4142>", []byte{0x41, 0x42}, 6},
+		{"<41 42\n43>", []byte{0x41, 0x42, 0x43}, 10},
+	}
+	for _, tc := range cases {
+		end, got, err := encParseHexString([]byte(tc.input), 0)
+		if err != nil {
+			t.Errorf("input %q: unexpected error %v", tc.input, err)
+			continue
+		}
+		if !bytes.Equal(got, tc.want) {
+			t.Errorf("input %q: got %v, want %v", tc.input, got, tc.want)
+		}
+		if end != tc.wantEnd {
+			t.Errorf("input %q: end=%d, want %d", tc.input, end, tc.wantEnd)
+		}
+	}
+}

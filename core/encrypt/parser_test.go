@@ -88,6 +88,50 @@ trailer
 	}
 }
 
+func TestParseEncryptionDictionary_StrF(t *testing.T) {
+	// Per ISO 32000-1 §7.6.5: with crypt filters in use (V ≥ 4) an absent /StrF
+	// defaults to /Identity; for V 1/2 strings are always encrypted.
+	build := func(body string) []byte {
+		return []byte(`%PDF-1.4
+1 0 obj
+<<
+/Filter /Standard
+` + body + `
+/O (12345678901234567890123456789012)
+/U (abcdefghijklmnopqrstuvwxyzabcdef)
+>>
+endobj
+trailer
+<<
+/Encrypt 1 0 R
+/Root 2 0 R
+>>
+`)
+	}
+
+	cases := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"V4 absent StrF defaults to Identity", "/V 4\n/R 4\n/Length 128", true},
+		{"V4 explicit StdCF", "/V 4\n/R 4\n/Length 128\n/CF <</StdCF <</CFM /AESV2>>>>\n/StmF /StdCF\n/StrF /StdCF", false},
+		{"V4 explicit Identity", "/V 4\n/R 4\n/Length 128\n/CF <</StdCF <</CFM /AESV2>>>>\n/StmF /StdCF\n/StrF /Identity", true},
+		{"V2 strings always encrypted", "/V 2\n/R 3\n/Length 128", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			enc, err := ParseEncryptionDictionary(build(tc.body), false)
+			if err != nil {
+				t.Fatalf("ParseEncryptionDictionary() error = %v", err)
+			}
+			if enc.StrFIdentity != tc.want {
+				t.Errorf("StrFIdentity = %v, want %v", enc.StrFIdentity, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseEncryptionDictionary_NotFound(t *testing.T) {
 	// PDF without encryption
 	pdfBytes := []byte(`%PDF-1.4

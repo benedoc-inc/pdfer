@@ -117,7 +117,14 @@ func EncryptStringsInContent(content []byte, objNum, genNum int, enc *types.PDFE
 				i++
 			}
 		case b == '(':
-			decoded, end := parsePDFLiteralStringBytes(content, i+1)
+			decoded, end, ok := parsePDFLiteralStringBytes(content, i+1)
+			if !ok {
+				// No balanced ')': not a real string (e.g. a '(' byte inside
+				// binary content) — pass the byte through untouched.
+				out = append(out, b)
+				i++
+				continue
+			}
 			enc2, err := EncryptObject(decoded, objNum, genNum, enc)
 			if err != nil {
 				return nil, fmt.Errorf("encrypt literal string in obj %d: %w", objNum, err)

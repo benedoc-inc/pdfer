@@ -238,6 +238,11 @@ func extractDirectObjectContent(pdfBytes []byte, objNum int, offset int64, encry
 
 		if encryptInfo != nil {
 			dictPart := content[:streamStart]
+			// Stream dictionaries can carry string values too (e.g. embedded-file
+			// /Desc or /Params dates); decrypt them like any other dict strings.
+			if decryptedDict, decErr := encrypt.DecryptStringsInContent(dictPart, objNum, genNum, encryptInfo); decErr == nil {
+				dictPart = decryptedDict
+			}
 			lengthPattern := regexp.MustCompile(`/Length\s+(\d+)`)
 			lengthMatch := lengthPattern.FindSubmatch(dictPart)
 
