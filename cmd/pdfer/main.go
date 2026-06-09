@@ -18,10 +18,10 @@ import (
 	"os"
 	"path/filepath"
 
-	pdfer "github.com/benedoc-inc/pdfer"
-	encrypt "github.com/benedoc-inc/pdfer/core/encrypt"
-	"github.com/benedoc-inc/pdfer/forms/xfa"
-	"github.com/benedoc-inc/pdfer/types"
+	pdfer "github.com/benedoc-inc/pdfer/v2"
+	encrypt "github.com/benedoc-inc/pdfer/v2/core/encrypt"
+	"github.com/benedoc-inc/pdfer/v2/forms/xfa"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 func main() {

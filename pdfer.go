@@ -79,11 +79,11 @@ package pdfer
 import (
 	"runtime/debug"
 
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // Re-export common types for convenience.
-// Users can import just "github.com/benedoc-inc/pdfer" for basic usage.
+// Users can import just "github.com/benedoc-inc/pdfer/v2" for basic usage.
 
 // Encryption holds PDF encryption parameters and derived keys.
 type Encryption = types.PDFEncryption
@@ -109,7 +109,7 @@ type XFAConfig = types.XFAConfig
 // XFALocaleSet represents parsed XFA localization data.
 type XFALocaleSet = types.XFALocaleSet
 
-const modulePath = "github.com/benedoc-inc/pdfer"
+const modulePath = "github.com/benedoc-inc/pdfer/v2"
 
 // Version returns the library version, derived from Go module metadata.
 //

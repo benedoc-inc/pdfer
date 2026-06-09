@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 type textPos struct {

@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // detectTables finds table structures from graphic lines and maps text into cells.

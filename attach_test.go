@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/core/incremental"
-	"github.com/benedoc-inc/pdfer/core/parse"
-	"github.com/benedoc-inc/pdfer/core/write"
+	"github.com/benedoc-inc/pdfer/v2/core/incremental"
+	"github.com/benedoc-inc/pdfer/v2/core/parse"
+	"github.com/benedoc-inc/pdfer/v2/core/write"
 )
 
 // buildAttachBasePDF returns a minimal single-page PDF to attach files to.

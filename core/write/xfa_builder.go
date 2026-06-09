@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/core/parse"
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/core/parse"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // XFABuilder builds PDFs with XFA content

@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // ---- Intermediate types (package-internal) ----

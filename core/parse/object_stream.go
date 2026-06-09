@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/core/encrypt"
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/core/encrypt"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // ObjectStreamEntry represents an object stored in an object stream (Type 2 xref entry)

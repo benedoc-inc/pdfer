@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // testEnc returns an AES-128 (V4) encryption context with a fixed master key.
