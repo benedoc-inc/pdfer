@@ -1,6 +1,12 @@
-// Command pdfer is a BeneDoc-internal tool for filling XFA forms and extracting
-// XFA schemas from eSTAR PDFs. It is not a general-purpose PDF CLI — for the
-// full library API see the root pdfer package documentation.
+// Command pdfer is a BeneDoc-internal tool for filling XFA forms, extracting
+// XFA schemas from eSTAR PDFs, and stamping/watermarking PDFs.
+// It is not a general-purpose PDF CLI — for the full library API see the root
+// pdfer package documentation.
+//
+// Subcommands:
+//
+//	pdfer stamp -input a.pdf -output b.pdf [-text DRAFT] [-opacity 0.12] [-angle 45] [-font-size 80]
+//	pdfer (no subcommand) — XFA form filling (legacy behaviour)
 package main
 
 import (
@@ -10,11 +16,12 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
-	pdfer "github.com/benedoc-inc/pdfer/v2"
-	encrypt "github.com/benedoc-inc/pdfer/v2/core/encrypt"
-	"github.com/benedoc-inc/pdfer/v2/forms/xfa"
-	"github.com/benedoc-inc/pdfer/v2/types"
+	pdfer "github.com/benedoc-inc/pdfer"
+	encrypt "github.com/benedoc-inc/pdfer/core/encrypt"
+	"github.com/benedoc-inc/pdfer/forms/xfa"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 func main() {
@@ -26,6 +33,12 @@ func main() {
 		}
 	}()
 
+	// Dispatch subcommands before the legacy flag.Parse() path.
+	if len(os.Args) > 1 && os.Args[1] == "stamp" {
+		handleStamp(os.Args[2:])
+		return
+	}
+
 	var (
 		inputPDF      = flag.String("input", "", "Path to input eSTAR PDF file")
 		dataJSON      = flag.String("data", "", "Path to JSON file with form data")
@@ -34,6 +47,8 @@ func main() {
 		logFile       = flag.String("log", "", "Path to log file (if empty, logs to stderr)")
 		verify        = flag.Bool("verify", false, "Run verification test with UniPDF instead of filling form")
 		extractSchema = flag.Bool("extract-schema", false, "Extract questionnaire schema from PDF and output as JSON (requires -output)")
+		listAttach    = flag.Bool("list-attachments", false, "List embedded file attachments in the PDF and exit")
+		extractAttach = flag.String("extract-attachments", "", "Extract embedded file attachments into the given directory and exit")
 	)
 	flag.Parse()
 
@@ -58,6 +73,16 @@ func main() {
 			log.Fatal("Error: -output flag is required when using -extract-schema")
 		}
 		handleExtractSchema(*inputPDF, *outputPDF, *verbose)
+		return
+	}
+
+	// Attachment listing / extraction also short-circuit the fill path.
+	if *listAttach {
+		handleListAttachments(*inputPDF)
+		return
+	}
+	if *extractAttach != "" {
+		handleExtractAttachments(*inputPDF, *extractAttach)
 		return
 	}
 
@@ -174,12 +199,62 @@ func main() {
 	fmt.Printf("Fields filled: %d\n", len(formData))
 }
 
+// handleStamp adds a text watermark to every page of a PDF.
+func handleStamp(args []string) {
+	fs := flag.NewFlagSet("stamp", flag.ExitOnError)
+	input := fs.String("input", "", "Path to input PDF (required)")
+	output := fs.String("output", "", "Path to output PDF (defaults to input, overwriting in place)")
+	text := fs.String("text", "CONFIDENTIAL DRAFT", "Stamp text")
+	opacity := fs.Float64("opacity", 0.55, "Opacity 0.0–1.0")
+	fontSize := fs.Float64("font-size", 9.0, "Font size in points")
+	fs.Parse(args)
+
+	if *input == "" {
+		fmt.Fprintln(os.Stderr, "Error: -input is required")
+		fs.Usage()
+		os.Exit(1)
+	}
+	dest := *output
+	if dest == "" {
+		dest = *input
+	}
+
+	pdfBytes, err := os.ReadFile(*input)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading %s: %v\n", *input, err)
+		os.Exit(1)
+	}
+
+	stamp := pdfer.TextStamp{
+		Text:     *text,
+		FontName: "Helvetica-Bold",
+		FontSize: *fontSize,
+		X:        420,
+		Y:        760,
+		Opacity:  *opacity,
+		Angle:    0,
+		R:        0.55,
+		G:        0.55,
+		B:        0.55,
+	}
+
+	out, err := pdfer.StampAllPages(pdfBytes, stamp, nil, false)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error stamping PDF: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := os.WriteFile(dest, out, 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing %s: %v\n", dest, err)
+		os.Exit(1)
+	}
+
+	fmt.Fprintf(os.Stderr, "Stamped %d bytes → %s\n", len(out), dest)
+}
+
 // extractFormTryingCommonPasswords runs pdfer.ExtractForm with the empty
 // password first (the eSTAR default), then a small list of common
-// developer-facing fallbacks before giving up. Returns the form on first
-// success and the last error otherwise. The library does encryption
-// detection and decryption itself; this helper exists only to preserve the
-// CLI's previous fallback behavior.
+// developer-facing fallbacks before giving up.
 func extractFormTryingCommonPasswords(pdfBytes []byte, verbose bool) (pdfer.Form, error) {
 	if !bytes.Contains(pdfBytes, []byte("/Encrypt")) {
 		return pdfer.ExtractForm(pdfBytes, nil, verbose)
@@ -292,4 +367,83 @@ func handleExtractSchema(inputPDF, outputJSON string, verbose bool) {
 	fmt.Printf("Input:  %s\n", inputPDF)
 	fmt.Printf("Output: %s\n", outputJSON)
 	fmt.Printf("Questions extracted: %d\n", len(schema.Questions))
+}
+
+// handleListAttachments prints the embedded file attachments found in the PDF.
+func handleListAttachments(inputPDF string) {
+	pdfBytes, err := os.ReadFile(inputPDF)
+	if err != nil {
+		log.Fatalf("Error reading PDF: %v", err)
+	}
+	attachments, err := pdfer.ListAttachments(pdfBytes)
+	if err != nil {
+		log.Fatalf("Error listing attachments: %v", err)
+	}
+	if len(attachments) == 0 {
+		fmt.Println("No embedded file attachments found.")
+		return
+	}
+	fmt.Printf("Found %d attachment(s):\n", len(attachments))
+	for _, a := range attachments {
+		mime := a.MimeType
+		if mime == "" {
+			mime = "(unknown)"
+		}
+		fmt.Printf("  %-40s %10d bytes  %s\n", a.Name, len(a.Data), mime)
+	}
+}
+
+// handleExtractAttachments writes every embedded file attachment into outDir.
+func handleExtractAttachments(inputPDF, outDir string) {
+	pdfBytes, err := os.ReadFile(inputPDF)
+	if err != nil {
+		log.Fatalf("Error reading PDF: %v", err)
+	}
+	attachments, err := pdfer.ListAttachments(pdfBytes)
+	if err != nil {
+		log.Fatalf("Error listing attachments: %v", err)
+	}
+	if len(attachments) == 0 {
+		fmt.Println("No embedded file attachments found.")
+		return
+	}
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		log.Fatalf("Error creating output directory: %v", err)
+	}
+	// Track names already written so colliding base names don't clobber each
+	// other: distinct attachments can share a display name, and filepath.Base
+	// can collapse distinct paths to the same name.
+	used := make(map[string]bool)
+	for _, a := range attachments {
+		// Guard against path traversal from attacker-controlled filenames.
+		name := filepath.Base(filepath.FromSlash(a.Name))
+		if name == "" || name == "." || name == string(filepath.Separator) {
+			name = "attachment"
+		}
+		name = uniqueAttachmentName(name, used)
+		dest := filepath.Join(outDir, name)
+		if err := os.WriteFile(dest, a.Data, 0644); err != nil {
+			log.Fatalf("Error writing %s: %v", dest, err)
+		}
+		fmt.Printf("Extracted %s (%d bytes)\n", dest, len(a.Data))
+	}
+}
+
+// uniqueAttachmentName returns name if unused, otherwise inserts a -1, -2, …
+// suffix before the extension until the result is unique. The chosen name is
+// recorded in used.
+func uniqueAttachmentName(name string, used map[string]bool) string {
+	if !used[name] {
+		used[name] = true
+		return name
+	}
+	ext := filepath.Ext(name)
+	base := name[:len(name)-len(ext)]
+	for i := 1; ; i++ {
+		candidate := fmt.Sprintf("%s-%d%s", base, i, ext)
+		if !used[candidate] {
+			used[candidate] = true
+			return candidate
+		}
+	}
 }

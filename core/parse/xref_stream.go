@@ -1,7 +1,7 @@
 package parse
 
 import (
-	"github.com/benedoc-inc/pdfer/v2/types"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 // ParseXRefStream parses a PDF cross-reference stream and returns a map of object

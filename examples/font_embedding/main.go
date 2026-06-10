@@ -6,8 +6,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/benedoc-inc/pdfer/v2/core/write"
-	"github.com/benedoc-inc/pdfer/v2/resources/font"
+	"github.com/benedoc-inc/pdfer/core/write"
+	"github.com/benedoc-inc/pdfer/resources/font"
 )
 
 func main() {

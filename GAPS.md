@@ -271,7 +271,14 @@ a Filespec dict per file, and a `/Names` object that extends (or creates) the
 catalog's `/EmbeddedFiles` name tree. The original PDF bytes are never
 modified — only appended to.
 
-**File**: `attach.go`
+For encrypted PDFs, use `EmbedAttachmentsWithPassword(pdfBytes, files, password)`:
+the appended streams are encrypted with the document's per-object keys (strings
+follow the document's `/StrF` crypt filter) and the file `/ID` is carried into
+the new trailer (the standard security handler derives the key from `/ID[0]`, so
+dropping it breaks decryption). The shared envelope lives in `core/incremental`,
+used by both attachments and AcroForm incremental fills.
+
+**Files**: `attach.go`, `core/incremental/incremental.go`, `core/encrypt/encrypt_object.go`
 
 #### JPEG2000 (JPXDecode) images not decoded
 `images.go` identifies `JPXDecode`-filtered streams and reports the format, but

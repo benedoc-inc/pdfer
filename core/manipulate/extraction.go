@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strconv"
 
-	"github.com/benedoc-inc/pdfer/v2/core/write"
+	"github.com/benedoc-inc/pdfer/core/write"
 )
 
 // ExtractPages extracts specific pages from a PDF and returns a new PDF containing

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/v2/core/parse"
-	"github.com/benedoc-inc/pdfer/v2/core/write"
+	"github.com/benedoc-inc/pdfer/core/parse"
+	"github.com/benedoc-inc/pdfer/core/write"
 )
 
 // buildRedactPDF creates a one-page PDF with two text runs at different positions:

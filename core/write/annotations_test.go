@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/v2/content/extract"
-	"github.com/benedoc-inc/pdfer/v2/core/write"
+	"github.com/benedoc-inc/pdfer/content/extract"
+	"github.com/benedoc-inc/pdfer/core/write"
 )
 
 // buildAnnotationPDF is a helper that creates a single-page PDF, adds the

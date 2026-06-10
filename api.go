@@ -1,14 +1,14 @@
 package pdfer
 
 import (
-	"github.com/benedoc-inc/pdfer/v2/content/extract"
-	"github.com/benedoc-inc/pdfer/v2/core/compare"
-	"github.com/benedoc-inc/pdfer/v2/core/manipulate"
-	"github.com/benedoc-inc/pdfer/v2/core/sign"
-	"github.com/benedoc-inc/pdfer/v2/core/write"
-	"github.com/benedoc-inc/pdfer/v2/forms"
-	"github.com/benedoc-inc/pdfer/v2/forms/acroform"
-	"github.com/benedoc-inc/pdfer/v2/types"
+	"github.com/benedoc-inc/pdfer/content/extract"
+	"github.com/benedoc-inc/pdfer/core/compare"
+	"github.com/benedoc-inc/pdfer/core/manipulate"
+	"github.com/benedoc-inc/pdfer/core/sign"
+	"github.com/benedoc-inc/pdfer/core/write"
+	"github.com/benedoc-inc/pdfer/forms"
+	"github.com/benedoc-inc/pdfer/forms/acroform"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 // --- Type aliases -----------------------------------------------------------

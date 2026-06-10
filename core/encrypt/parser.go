@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/v2/types"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 // ParseEncryptionDictionary parses the /Encrypt dictionary from PDF
@@ -82,6 +82,14 @@ func ParseEncryptionDictionary(pdfBytes []byte, verbose bool) (*types.PDFEncrypt
 	filterPattern := regexp.MustCompile(`/Filter\s+/(\w+)`)
 	if match := filterPattern.FindStringSubmatch(dictContent); match != nil {
 		encrypt.Filter = match[1]
+	}
+
+	// Parse /StrF (string crypt filter). /Identity means strings are NOT
+	// encrypted (only streams, via /StmF). Used by write paths to decide whether
+	// to encrypt appended string values.
+	strFPattern := regexp.MustCompile(`/StrF\s*/(\w+)`)
+	if match := strFPattern.FindStringSubmatch(dictContent); match != nil {
+		encrypt.StrFIdentity = match[1] == "Identity"
 	}
 
 	// Parse /V (encryption version) - must be at top level, not in nested dicts
