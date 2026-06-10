@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // htmlTagRe matches HTML tags for stripping caption exData HTML to plain text.

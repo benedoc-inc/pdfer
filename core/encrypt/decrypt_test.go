@@ -8,7 +8,7 @@ import (
 	"crypto/rc4"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 func TestDecryptObject_RC4(t *testing.T) {

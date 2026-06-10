@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/core/parse"
+	"github.com/benedoc-inc/pdfer/v2/core/parse"
 )
 
 func TestWatermark_Text(t *testing.T) {

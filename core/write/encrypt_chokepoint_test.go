@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/core/parse"
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/core/parse"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // buildEncryptedDoc builds a one-page PDF with a doc-info /Title, applies the

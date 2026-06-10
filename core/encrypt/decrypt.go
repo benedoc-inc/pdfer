@@ -8,7 +8,7 @@ import (
 	"crypto/rc4"
 	"log"
 
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // DecryptPDF verifies the password and derives the file encryption key.
