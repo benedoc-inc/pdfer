@@ -25,6 +25,8 @@ type FormElement struct {
 	Section    string                 `json:"section,omitempty"`     // nearest enclosing subform name; empty for pageAreas and top-level nodes
 	Properties map[string]interface{} `json:"properties,omitempty"`
 	Scripts    []string               `json:"scripts,omitempty"` // FormScript IDs
+	Occur      *Occur                 `json:"occur,omitempty"`   // declared cardinality from <occur>; nil when absent
+	Bind       *Bind                  `json:"bind,omitempty"`    // <bind> declaration; nil when absent
 }
 
 // FormSection is a node in the XFA subform hierarchy.
@@ -44,6 +46,27 @@ type FormSection struct {
 	Children    []FormSection `json:"children,omitempty"`
 	Questions   []string      `json:"questions,omitempty"` // question IDs in document order
 	Scripts     []string      `json:"scripts,omitempty"`   // FormScript IDs for subform-level events, in declaration order
+	Occur       *Occur        `json:"occur,omitempty"`     // declared cardinality from <occur>; nil when absent
+	Bind        *Bind         `json:"bind,omitempty"`      // subform-level <bind> declaration; nil when absent
+}
+
+// Occur reflects the template's declared cardinality, normalized to XFA spec
+// defaults (min=1, max=min, initial=min; Max=-1 means unbounded). Nil when the
+// template has no <occur> element. The schema lists each repeating subform once
+// regardless of how many instances the dataset carries; materializing instances
+// is the runtime's responsibility.
+type Occur struct {
+	Min     int `json:"min"`
+	Max     int `json:"max"` // -1 for unbounded
+	Initial int `json:"initial"`
+}
+
+// Bind reflects the template's <bind> declaration. Match defaults to "once"
+// per the XFA spec when the attribute is absent; Ref is the ref attribute
+// verbatim (a SOM path, normally paired with match="dataRef").
+type Bind struct {
+	Match string `json:"match"`
+	Ref   string `json:"ref,omitempty"`
 }
 
 // FormMetadata contains information about the form
@@ -73,6 +96,8 @@ type Question struct {
 	PageNumber  int                    `json:"page_number,omitempty"` // Which page the field appears on
 	Section     string                 `json:"section,omitempty"`     // Parent subform / section name; matches the parent FormSection.Path's last segment (may include "[i]" for XFA same-named-sibling disambiguation)
 	Scripts     []string               `json:"scripts,omitempty"`     // FormScript IDs for events on this field, in declaration order
+	Occur       *Occur                 `json:"occur,omitempty"`       // declared cardinality from <occur>; nil when absent (XFA only)
+	Bind        *Bind                  `json:"bind,omitempty"`        // <bind> declaration; nil when absent (XFA only)
 }
 
 // ResponseType represents the type of response expected
