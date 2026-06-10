@@ -7,7 +7,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // ParseXFAFields parses XFA XML and extracts form fields, returning FormField types

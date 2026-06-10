@@ -1,7 +1,7 @@
 package compare
 
 import (
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // compareText compares text elements between two pages using advanced diff algorithms
