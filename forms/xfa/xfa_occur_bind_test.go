@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/v2/types"
+	"github.com/benedoc-inc/pdfer/types"
 )
 
 // findSectionByName returns the first section with the given Name via
