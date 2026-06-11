@@ -1653,11 +1653,11 @@ func buildFormScripts(events []XFAEvent, ownerPath, ownerID string) []types.Form
 
 // extractAllScripts walks the entire xfaNode tree and emits a FormScript for
 // every event-bearing node — regardless of whether pdfer also surfaces that
-// node as a Question or FormSection. OwnerPath is the SOM path of the owning
-// node. OwnerID is left blank here and filled in by populateScriptBackRefs
-// when the owner also became a Question/Section; it stays empty for orphan
-// scripts (event-bearing <draw>s, bind="none" non-AddAttachment buttons,
-// <pageArea>s, and per-option events flattened out of an <exclGroup>).
+// node as a Question, FormSection, or FormElement. OwnerPath is the SOM path
+// of the owning node. OwnerID is left blank here and filled in by
+// populateScriptBackRefs when the owner also became a typed schema entity
+// (Question/Section/Element); it stays empty only for per-option events
+// flattened out of an <exclGroup>, where the exclGroup itself is the typed owner.
 func extractAllScripts(root *xfaNode, schema *types.FormSchema) {
 	var walk func(node, parent *xfaNode, parentPath []string)
 	walk = func(node, parent *xfaNode, parentPath []string) {

@@ -156,7 +156,7 @@ type ValidationRules struct {
 type FormScript struct {
 	ID         string                 `json:"id"`                   // stable: SOM owner path + "#" + event + "[" + index + "]"
 	OwnerPath  string                 `json:"owner_path,omitempty"` // SOM path of containing node (e.g. "form1.section.field"); empty for template-level
-	OwnerID    string                 `json:"owner_id,omitempty"`   // matches Question.ID or FormSection.Path when the owner is a question or section
+	OwnerID    string                 `json:"owner_id,omitempty"`   // matches Question.ID, FormSection.Path, or FormElement.ID when the owner is a question, section, or element
 	Event      string                 `json:"event"`                // XFA activity: initialize|calculate|validate|change|exit|click|… ; "variables" for <variables><script> blocks
 	Name       string                 `json:"name,omitempty"`       // <event name="..."> attribute, or <script name="..."> for variables scripts
 	Language   string                 `json:"language"`             // "javascript" | "formcalc"; defaults to "formcalc" per XFA spec when contentType is absent
