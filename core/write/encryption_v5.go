@@ -230,6 +230,16 @@ func CreateEncryptionDictionary(encrypt *types.PDFEncryption) []byte {
 	buf.WriteString(fmt.Sprintf("/Length %d\n", encrypt.KeyLength*8)) // Length in bits
 	buf.WriteString(fmt.Sprintf("/P %d\n", encrypt.P))
 
+	// Crypt filters. /StrF is derived from encrypt.StrFIdentity so the declared
+	// string filter always matches what the writer actually does with strings.
+	strF := "StdCF"
+	if encrypt.StrFIdentity {
+		strF = "Identity"
+	}
+	buf.WriteString("/CF <</StdCF <</AuthEvent /DocOpen /CFM /AESV3 /Length 32>>>>\n")
+	buf.WriteString("/StmF /StdCF\n")
+	buf.WriteString(fmt.Sprintf("/StrF /%s\n", strF))
+
 	// U value (48 bytes) - use hex string to avoid issues with binary data
 	buf.WriteString("/U <")
 	for _, b := range encrypt.U {

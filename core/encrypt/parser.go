@@ -84,14 +84,6 @@ func ParseEncryptionDictionary(pdfBytes []byte, verbose bool) (*types.PDFEncrypt
 		encrypt.Filter = match[1]
 	}
 
-	// Parse /StrF (string crypt filter). /Identity means strings are NOT
-	// encrypted (only streams, via /StmF). Used by write paths to decide whether
-	// to encrypt appended string values.
-	strFPattern := regexp.MustCompile(`/StrF\s*/(\w+)`)
-	if match := strFPattern.FindStringSubmatch(dictContent); match != nil {
-		encrypt.StrFIdentity = match[1] == "Identity"
-	}
-
 	// Parse /V (encryption version) - must be at top level, not in nested dicts
 	vPattern := regexp.MustCompile(`/V\s+(\d+)`)
 	matches := vPattern.FindAllStringSubmatch(dictContent, -1)
@@ -156,6 +148,18 @@ func ParseEncryptionDictionary(pdfBytes []byte, verbose bool) (*types.PDFEncrypt
 		}
 	}
 
+	// Parse /StrF (string crypt filter). /Identity means strings are NOT
+	// encrypted (only streams, via /StmF). Per ISO 32000-1 §7.6.5 an absent
+	// /StrF defaults to /Identity when crypt filters are in use (V ≥ 4); for
+	// V 1/2 there are no crypt filters and strings are always encrypted.
+	// Must run after /V (and its default) is settled.
+	strFPattern := regexp.MustCompile(`/StrF\s*/(\w+)`)
+	if match := strFPattern.FindStringSubmatch(dictContent); match != nil {
+		encrypt.StrFIdentity = match[1] == "Identity"
+	} else {
+		encrypt.StrFIdentity = encrypt.V >= 4
+	}
+
 	// Parse /O (owner password hash) - binary data in parentheses or hex string
 	// Try hex format first: /O <hex>
 	oHexPattern := regexp.MustCompile(`/O\s*<([0-9A-Fa-f]+)>`)
@@ -175,7 +179,7 @@ func ParseEncryptionDictionary(pdfBytes []byte, verbose bool) (*types.PDFEncrypt
 			parenStart := bytes.Index(pdfBytes[oStartInDict:], []byte("("))
 			if parenStart != -1 {
 				parenStart += oStartInDict + 1
-				raw, _ := parsePDFLiteralStringBytes(pdfBytes, parenStart)
+				raw, _, _ := parsePDFLiteralStringBytes(pdfBytes, parenStart)
 				encrypt.O = raw
 				if verbose {
 					log.Printf("Extracted O value (binary): %d bytes", len(encrypt.O))
@@ -203,7 +207,7 @@ func ParseEncryptionDictionary(pdfBytes []byte, verbose bool) (*types.PDFEncrypt
 			parenStart := bytes.Index(pdfBytes[uStartInDict:], []byte("("))
 			if parenStart != -1 {
 				parenStart += uStartInDict + 1
-				raw, _ := parsePDFLiteralStringBytes(pdfBytes, parenStart)
+				raw, _, _ := parsePDFLiteralStringBytes(pdfBytes, parenStart)
 				encrypt.U = raw
 				if verbose {
 					log.Printf("Extracted U value (binary): %d bytes", len(encrypt.U))
@@ -245,7 +249,7 @@ func ParseEncryptionDictionary(pdfBytes []byte, verbose bool) (*types.PDFEncrypt
 				parenStart := bytes.Index(pdfBytes[ueStartInDict:], []byte("("))
 				if parenStart != -1 {
 					parenStart += ueStartInDict + 1
-					raw, _ := parsePDFLiteralStringBytes(pdfBytes, parenStart)
+					raw, _, _ := parsePDFLiteralStringBytes(pdfBytes, parenStart)
 					encrypt.UE = raw
 					if verbose {
 						log.Printf("Extracted UE value (binary): %d bytes", len(encrypt.UE))
@@ -271,7 +275,7 @@ func ParseEncryptionDictionary(pdfBytes []byte, verbose bool) (*types.PDFEncrypt
 				parenStart := bytes.Index(pdfBytes[oeStartInDict:], []byte("("))
 				if parenStart != -1 {
 					parenStart += oeStartInDict + 1
-					raw, _ := parsePDFLiteralStringBytes(pdfBytes, parenStart)
+					raw, _, _ := parsePDFLiteralStringBytes(pdfBytes, parenStart)
 					encrypt.OE = raw
 					if verbose {
 						log.Printf("Extracted OE value (binary): %d bytes", len(encrypt.OE))
@@ -286,8 +290,11 @@ func ParseEncryptionDictionary(pdfBytes []byte, verbose bool) (*types.PDFEncrypt
 
 // parsePDFLiteralStringBytes reads a PDF literal string starting at pdfBytes[start],
 // where start points to the first byte AFTER the opening '('.
-// It returns the decoded bytes (PDF escape sequences resolved) and the index
-// of the byte after the closing ')'. Nested parentheses are balanced.
+// It returns the decoded bytes (PDF escape sequences resolved), the index of the
+// byte after the closing ')', and whether a balanced closing ')' was found before
+// the end of input. Nested parentheses are balanced. Callers scanning content
+// that may not actually be a string (e.g. a '(' byte inside binary data) must
+// check the terminated flag and treat false as "not a string".
 //
 // PDF escape sequences handled:
 //
@@ -295,7 +302,7 @@ func ParseEncryptionDictionary(pdfBytes []byte, verbose bool) (*types.PDFEncrypt
 //	\f  → 0x0C   \\  → 0x5C   \(  → 0x28   \)  → 0x29
 //	\ooo → octal byte value
 //	\ followed by EOL → line continuation (byte dropped)
-func parsePDFLiteralStringBytes(pdfBytes []byte, start int) ([]byte, int) {
+func parsePDFLiteralStringBytes(pdfBytes []byte, start int) ([]byte, int, bool) {
 	var out []byte
 	depth := 1 // Already consumed the opening '('
 	i := start
@@ -369,5 +376,5 @@ func parsePDFLiteralStringBytes(pdfBytes []byte, start int) ([]byte, int) {
 		}
 		i++
 	}
-	return out, i
+	return out, i, depth == 0
 }
