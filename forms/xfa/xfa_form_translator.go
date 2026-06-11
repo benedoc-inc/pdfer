@@ -656,6 +656,16 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 	// pushed, so attachment resumes once one is on top of the stack.
 	var pageSetDepth int
 
+	// <subformSet> has the same hazard but needs a finer guard: it is not
+	// pushed onto the node stack, yet its subform children ARE. Record the
+	// stack depth at each <subformSet> open; an <occur>/<bind> seen while the
+	// stack is still at that depth sits directly inside the subformSet (no
+	// child subform pushed since) and must not attach to the enclosing node.
+	var subformSetMarks []int
+	directlyInSubformSet := func() bool {
+		return len(subformSetMarks) > 0 && subformSetMarks[len(subformSetMarks)-1] == len(nodeStack)
+	}
+
 	for {
 		token, err := decoder.Token()
 		if err != nil {
@@ -1142,7 +1152,7 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 					}
 					currentLeaf.BindMeta = meta
 				} else if top := topOfStack(); top.Kind == xfaKindSubform || top.Kind == xfaKindPageArea || top.Kind == xfaKindExclGroup {
-					if pageSetDepth == 0 || top.Kind == xfaKindPageArea {
+					if (pageSetDepth == 0 && !directlyInSubformSet()) || top.Kind == xfaKindPageArea {
 						top.BindMeta = meta
 					}
 				}
@@ -1152,13 +1162,16 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 				if currentLeaf != nil {
 					currentLeaf.Occur = occ
 				} else if top := topOfStack(); top.Kind == xfaKindSubform || top.Kind == xfaKindPageArea || top.Kind == xfaKindExclGroup {
-					if pageSetDepth == 0 || top.Kind == xfaKindPageArea {
+					if (pageSetDepth == 0 && !directlyInSubformSet()) || top.Kind == xfaKindPageArea {
 						top.Occur = occ
 					}
 				}
 
 			case "pageSet":
 				pageSetDepth++
+
+			case "subformSet":
+				subformSetMarks = append(subformSetMarks, len(nodeStack))
 
 			case "extras":
 				// Track <extras name="bookmark"> on subforms for bookmark label extraction.
@@ -1333,6 +1346,11 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 			case "pageSet":
 				if pageSetDepth > 0 {
 					pageSetDepth--
+				}
+
+			case "subformSet":
+				if len(subformSetMarks) > 0 {
+					subformSetMarks = subformSetMarks[:len(subformSetMarks)-1]
 				}
 
 			case "script":

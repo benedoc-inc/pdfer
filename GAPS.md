@@ -147,6 +147,20 @@ by `Redact`. Call `RedactMetadata` separately for document-level metadata.
 
 ### P2 — Medium impact
 
+#### Strings in PDFs encrypted by pdfer ≤ v2.5.0 are no longer transparently decrypted (accepted)
+pdfer ≤ v2.5.0 declared `/StrF /Identity` in the encryption dictionary while
+nevertheless AES-encrypting string values; the old read path compensated with
+a heuristic (attempt decryption of hex strings ≥ 32 decoded bytes). Since the
+string-crypto chokepoint refactor, both read and write paths honor the declared
+`/StrF`, which is the spec-correct behavior and fixes silent mangling of
+genuine `/StrF /Identity` documents — but string values in files encrypted by
+pdfer ≤ v2.5.0 now come back as ciphertext. **This break is accepted**: such
+files were never readable by conformant external readers anyway (the
+declaration contradicted the bytes). Workaround for affected files: decrypt
+with a pdfer ≤ v2.5.0 build, then re-encrypt with the current version.
+
+**Files**: `core/encrypt/strings.go`, `core/encrypt/encrypt.go`
+
 #### ~~Annotation appearance streams missing for most subtypes~~ ✅ Fixed in v1.7.0
 `AnnotationBuilder.build()` produced structurally valid annotation dicts but no
 `/AP` (appearance) entry.  Adobe Acrobat synthesises appearances from the

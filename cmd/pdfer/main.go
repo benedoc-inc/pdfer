@@ -5,7 +5,7 @@
 //
 // Subcommands:
 //
-//	pdfer stamp -input a.pdf -output b.pdf [-text DRAFT] [-opacity 0.12] [-angle 45] [-font-size 80]
+//	pdfer stamp -input a.pdf -output b.pdf [-text DRAFT] [-opacity 0.12] [-angle 45] [-font-size 80] [-x 420] [-y 760]
 //	pdfer (no subcommand) — XFA form filling (legacy behaviour)
 package main
 
@@ -207,6 +207,9 @@ func handleStamp(args []string) {
 	text := fs.String("text", "CONFIDENTIAL DRAFT", "Stamp text")
 	opacity := fs.Float64("opacity", 0.55, "Opacity 0.0–1.0")
 	fontSize := fs.Float64("font-size", 9.0, "Font size in points")
+	angle := fs.Float64("angle", 0, "Rotation in degrees, counter-clockwise")
+	x := fs.Float64("x", 420, "Stamp X position in points from page origin")
+	y := fs.Float64("y", 760, "Stamp Y position in points from page origin")
 	fs.Parse(args)
 
 	if *input == "" {
@@ -229,10 +232,10 @@ func handleStamp(args []string) {
 		Text:     *text,
 		FontName: "Helvetica-Bold",
 		FontSize: *fontSize,
-		X:        420,
-		Y:        760,
+		X:        *x,
+		Y:        *y,
 		Opacity:  *opacity,
-		Angle:    0,
+		Angle:    *angle,
 		R:        0.55,
 		G:        0.55,
 		B:        0.55,

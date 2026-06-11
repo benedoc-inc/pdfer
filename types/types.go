@@ -18,8 +18,11 @@ type PDFEncryption struct {
 	EncryptKey      []byte // Master encryption key
 	// StrFIdentity is true when the string crypt filter (/StrF) is /Identity,
 	// meaning string values are stored unencrypted even though streams are
-	// encrypted. pdfer's own EncryptPDF emits /StrF /Identity. Write paths must
-	// honor this and leave strings in the clear.
+	// encrypted. Read and write paths must honor this and leave such strings
+	// untouched. pdfer's own EncryptPDF declares /StrF /StdCF and encrypts
+	// strings accordingly. (pdfer <= v2.5.0 declared /StrF /Identity while
+	// still encrypting strings; strings in files it produced are no longer
+	// transparently readable now that the declaration is honored — see GAPS.md.)
 	StrFIdentity bool
 	// EncryptObjNum is the object number of the /Encrypt dictionary itself.
 	// Strings inside that dictionary (/O, /U, ...) are never encrypted (ISO
