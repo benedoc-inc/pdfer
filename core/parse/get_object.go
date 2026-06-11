@@ -240,8 +240,12 @@ func extractDirectObjectContent(pdfBytes []byte, objNum int, offset int64, encry
 			dictPart := content[:streamStart]
 			// Stream dictionaries can carry string values too (e.g. embedded-file
 			// /Desc or /Params dates); decrypt them like any other dict strings.
-			if decryptedDict, decErr := encrypt.DecryptStringsInContent(dictPart, objNum, genNum, encryptInfo); decErr == nil {
-				dictPart = decryptedDict
+			// The /Encrypt dictionary itself is exempt: its strings (/O, /U, ...)
+			// are never encrypted (ISO 32000-1 §7.6.5).
+			if objNum != encryptInfo.EncryptObjNum {
+				if decryptedDict, decErr := encrypt.DecryptStringsInContent(dictPart, objNum, genNum, encryptInfo); decErr == nil {
+					dictPart = decryptedDict
+				}
 			}
 			lengthPattern := regexp.MustCompile(`/Length\s+(\d+)`)
 			lengthMatch := lengthPattern.FindSubmatch(dictPart)
@@ -290,8 +294,10 @@ func extractDirectObjectContent(pdfBytes []byte, objNum int, offset int64, encry
 				log.Printf("Decryption failed: %v", decErr)
 			}
 		}
-	} else if encryptInfo != nil {
-		// Dictionary object — decrypt individual string values.
+	} else if encryptInfo != nil && objNum != encryptInfo.EncryptObjNum {
+		// Dictionary object — decrypt individual string values. The /Encrypt
+		// dictionary itself is exempt: its strings (/O, /U, ...) are never
+		// encrypted (ISO 32000-1 §7.6.5).
 		decrypted, decErr := encrypt.DecryptStringsInContent(content, objNum, genNum, encryptInfo)
 		if decErr == nil {
 			content = decrypted
