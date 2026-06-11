@@ -201,7 +201,14 @@ for _, s := range schema.Scripts {
 `FormScript.Body` is the unmodified source. pdfer does not interpret
 FormCalc or JavaScript semantics — callers that need to evaluate scripts
 should plug in their own parser. `Question.Scripts` and `FormSection.Scripts`
-hold `FormScript.ID` references in declaration order. See
+hold `FormScript.ID` references in declaration order.
+
+For dynamic XFA, `<occur>` and `<bind>` declarations are likewise surfaced
+as data: `Occur` (declared cardinality, normalized to XFA spec defaults,
+`Max: -1` = unbounded) and `Bind` (match mode plus the `ref` SOM path) on
+`Question`, `FormSection`, and `FormElement`. pdfer hands the renderer what
+the template said; deciding which subforms get an "add another" control and
+materializing instances is the caller's job. See
 [xfa-web](https://github.com/benedoc-inc/xfa-web) for one example of an
 interactive renderer built on this contract.
 
@@ -414,7 +421,8 @@ See [GAPS.md](GAPS.md) for the full history and detailed file pointers.
 **Forms**
 - `Form.Validate()` returns "not implemented" for XFA forms — structural extraction only.
 - Calculated form fields are not re-evaluated on `Fill()`; dependent fields remain stale until opened in a viewer.
-- XFA scripts are exposed verbatim via `FormSchema.Scripts` — pdfer does not interpret FormCalc or JavaScript. Scripts attached to nodes pdfer doesn't surface in the schema (decorative `<draw>`, `bind="none"` non-AddAttachment buttons, `<pageArea>` events, per-option fields collapsed into an `<exclGroup>`) are not extracted.
+- XFA scripts are exposed verbatim via `FormSchema.Scripts` — pdfer does not interpret FormCalc or JavaScript. Every `<script>` in the template is extracted, including those on nodes not surfaced as questions; scripts whose owner is not a typed schema entity carry an empty `OwnerID` and are correlated via `OwnerPath`.
+- XFA `<occur>` and `<bind>` declarations are surfaced as data (`Occur`/`Bind` on `Question`, `FormSection`, and `FormElement`) but never acted on — no instance expansion, no template/data merge. The schema lists each repeating subform once; materializing instances is the renderer's job.
 
 **Images / encoding**
 - JPEG2000 (`JPXDecode`) and JBIG2 image streams are detected but not decoded.

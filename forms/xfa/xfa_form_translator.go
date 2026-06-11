@@ -422,7 +422,12 @@ type xfaNode struct {
 	Default     string
 	Description string
 	UIType      string // from <ui> child: textEdit | checkButton | radioButton | choiceList | …
-	Bind        string // "none" when <bind match="none">; "" means auto-bind
+	Bind        string // "none" when <bind match="none">; "" means auto-bind — leaf-only, drives emission filtering
+
+	// Declarative metadata surfaced verbatim on the schema (never consulted by
+	// emission filters — those stay keyed to the Bind string above).
+	Occur    *types.Occur // normalized <occur> cardinality; nil when the element is absent
+	BindMeta *types.Bind  // full <bind> declaration (match/ref); nil when the element is absent
 
 	// Position / dimensions (present on field, draw, subform, exclGroup)
 	X, Y, W, H, MinH string
@@ -644,6 +649,12 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 	var inBookmarkExtras bool
 	var inBookmarkName bool
 	var currentBookmarkName strings.Builder
+
+	// <pageSet> is not pushed onto the node stack, so container-level <occur>/
+	// <bind> attachment must be suppressed while directly inside one (otherwise
+	// the metadata would misattribute to the enclosing subform). pageAreas ARE
+	// pushed, so attachment resumes once one is on top of the stack.
+	var pageSetDepth int
 
 	for {
 		token, err := decoder.Token()
@@ -1114,13 +1125,40 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 				}
 
 			case "bind":
-				if currentLeaf != nil {
-					for _, attr := range se.Attr {
-						if attr.Name.Local == "match" && attr.Value == "none" {
-							currentLeaf.Bind = "none"
+				meta := &types.Bind{Match: "once"} // XFA spec default when match is absent
+				for _, attr := range se.Attr {
+					switch attr.Name.Local {
+					case "match":
+						if attr.Value != "" {
+							meta.Match = attr.Value
 						}
+					case "ref":
+						meta.Ref = attr.Value
 					}
 				}
+				if currentLeaf != nil {
+					if meta.Match == "none" {
+						currentLeaf.Bind = "none"
+					}
+					currentLeaf.BindMeta = meta
+				} else if top := topOfStack(); top.Kind == xfaKindSubform || top.Kind == xfaKindPageArea || top.Kind == xfaKindExclGroup {
+					if pageSetDepth == 0 || top.Kind == xfaKindPageArea {
+						top.BindMeta = meta
+					}
+				}
+
+			case "occur":
+				occ := parseOccurAttrs(se.Attr)
+				if currentLeaf != nil {
+					currentLeaf.Occur = occ
+				} else if top := topOfStack(); top.Kind == xfaKindSubform || top.Kind == xfaKindPageArea || top.Kind == xfaKindExclGroup {
+					if pageSetDepth == 0 || top.Kind == xfaKindPageArea {
+						top.Occur = occ
+					}
+				}
+
+			case "pageSet":
+				pageSetDepth++
 
 			case "extras":
 				// Track <extras name="bookmark"> on subforms for bookmark label extraction.
@@ -1292,6 +1330,11 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 			case "extras":
 				inBookmarkExtras = false
 
+			case "pageSet":
+				if pageSetDepth > 0 {
+					pageSetDepth--
+				}
+
 			case "script":
 				if inVariablesScript {
 					body := currentValue.String()
@@ -1433,6 +1476,38 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 
 	res.Root = root
 	return res, nil
+}
+
+// parseOccurAttrs normalizes <occur> attributes to XFA spec defaults:
+// min defaults to 1; max and initial default to min; max="-1" means unbounded.
+// Unparseable attribute values are treated as absent.
+func parseOccurAttrs(attrs []xml.Attr) *types.Occur {
+	min := 1
+	var max, initial int
+	var maxSet, initialSet bool
+	for _, attr := range attrs {
+		v, err := strconv.Atoi(strings.TrimSpace(attr.Value))
+		if err != nil {
+			continue
+		}
+		switch attr.Name.Local {
+		case "min":
+			min = v
+		case "max":
+			max = v
+			maxSet = true
+		case "initial":
+			initial = v
+			initialSet = true
+		}
+	}
+	if !maxSet {
+		max = min
+	}
+	if !initialSet {
+		initial = min
+	}
+	return &types.Occur{Min: min, Max: max, Initial: initial}
 }
 
 // ── Schema builder ────────────────────────────────────────────────────────────
@@ -1649,6 +1724,8 @@ func extractAllElements(root *xfaNode, schema *types.FormSchema) {
 					Hidden:     parentHidden || node.Hidden,
 					PageNumber: node.PageNumber,
 					Section:    section,
+					Occur:      node.Occur,
+					Bind:       node.BindMeta,
 				}
 				if props := buildNodeProperties(node); len(props) > 0 {
 					el.Properties = props
@@ -1665,6 +1742,8 @@ func extractAllElements(root *xfaNode, schema *types.FormSchema) {
 					Hidden:     parentHidden || node.Hidden,
 					PageNumber: node.PageNumber,
 					Section:    section,
+					Occur:      node.Occur,
+					Bind:       node.BindMeta,
 				}
 				props := buildNodeProperties(node)
 				// Mirror emitDraw's image plumbing: event-bearing draws skip
@@ -1699,6 +1778,8 @@ func extractAllElements(root *xfaNode, schema *types.FormSchema) {
 				Role:      "pageArea",
 				Label:     label,
 				Hidden:    parentHidden || node.Hidden,
+				Occur:     node.Occur,
+				Bind:      node.BindMeta,
 				// PageNumber and Section intentionally omitted: pageAreas are
 				// page templates, not page-bound nodes, and walkSubformChildren
 				// does not treat them as sections.
@@ -1993,6 +2074,8 @@ func buildSection(node, parent *xfaNode, parentPath []string, schema *types.Form
 		Layout:      node.Layout,
 		Width:       node.W,
 		Height:      node.H,
+		Occur:       node.Occur,
+		Bind:        node.BindMeta,
 	}
 	sec.Children = walkSubformChildren(node, path, schema, qIdx, nodeHidden, verbose)
 	// Record all question IDs added during this section's subtree walk.
@@ -2069,6 +2152,8 @@ func emitExclGroup(node *xfaNode, path []string, somSeg string, qIdx *int, paren
 		Section:    sectionName(path),
 		PageNumber: node.PageNumber,
 		Hidden:     parentHidden || node.Hidden,
+		Occur:      node.Occur,
+		Bind:       node.BindMeta,
 	}
 	if len(node.Options) > 0 {
 		q.Options = make([]types.Option, len(node.Options))
@@ -2110,6 +2195,8 @@ func emitField(node *xfaNode, path []string, somSeg string, qIdx *int, parentHid
 					Section:    sectionName(path),
 					PageNumber: node.PageNumber,
 					Hidden:     parentHidden || node.Hidden,
+					Occur:      node.Occur,
+					Bind:       node.BindMeta,
 				}, true
 			}
 			return types.Question{}, false
@@ -2129,6 +2216,8 @@ func emitField(node *xfaNode, path []string, somSeg string, qIdx *int, parentHid
 			Section:    sectionName(path),
 			PageNumber: node.PageNumber,
 			Hidden:     parentHidden || node.Hidden,
+			Occur:      node.Occur,
+			Bind:       node.BindMeta,
 		}, true
 	}
 	// Data-bound interactive field.
@@ -2176,6 +2265,8 @@ func emitDraw(node *xfaNode, path []string, parent *xfaNode, somSeg string, qIdx
 			Section:    sectionName(path),
 			PageNumber: node.PageNumber,
 			Properties: props,
+			Occur:      node.Occur,
+			Bind:       node.BindMeta,
 		}, true
 	}
 
@@ -2206,6 +2297,8 @@ func emitDraw(node *xfaNode, path []string, parent *xfaNode, somSeg string, qIdx
 			Section:     sectionName(path),
 			PageNumber:  node.PageNumber,
 			Properties:  props,
+			Occur:       node.Occur,
+			Bind:        node.BindMeta,
 		}, true
 	}
 
@@ -2243,6 +2336,8 @@ func emitDraw(node *xfaNode, path []string, parent *xfaNode, somSeg string, qIdx
 		Section:     sectionName(path),
 		PageNumber:  node.PageNumber,
 		Properties:  props,
+		Occur:       node.Occur,
+		Bind:        node.BindMeta,
 	}, true
 }
 
@@ -2267,6 +2362,8 @@ func convertNodeToQuestion(node *xfaNode, index int, section string, parentHidde
 		Hidden:      parentHidden || node.Hidden,
 		PageNumber:  node.PageNumber,
 		Section:     section,
+		Occur:       node.Occur,
+		Bind:        node.BindMeta,
 	}
 	// Adjust dateTimeEdit type based on picture format.
 	if node.UIType == "dateTimeEdit" && node.DateTimeSubType == "time" {

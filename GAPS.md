@@ -115,9 +115,12 @@ surface entirely; `FormSchema.Scripts []FormScript` now exposes verbatim
 script bodies with their event activity, language (`javascript` | `formcalc`),
 SOM owner path, and owner ID, leaving interpretation to the caller. See the
 **Forms** section of the README for usage and the type comment on
-`types.FormScript` for known gaps (scripts attached to nodes pdfer does not
-surface — decorative `<draw>`, `bind="none"` non-AddAttachment buttons,
-`<pageArea>` events, per-option `<field>`s collapsed into an `<exclGroup>`).
+`types.FormScript` for owner-reference semantics. (The follow-on gap — scripts
+attached to nodes pdfer did not surface, such as decorative `<draw>`s,
+`bind="none"` non-AddAttachment buttons, `<pageArea>` events, and per-option
+`<field>`s collapsed into an `<exclGroup>` — was closed by the orphan-script
+extraction in `88b6989`; such scripts are now extracted with `OwnerPath` set
+and an empty `OwnerID` when the owner is not a typed schema entity.)
 
 ---
 
