@@ -960,9 +960,10 @@ func ReplaceStreamInPDF(pdfBytes []byte, streamObjNum int, newStream []byte, ver
 // PDF stores its cross-reference table as a stream (PDF 1.5+) rather than a
 // classical text xref table. We can patch the offsets in a text xref table
 // but not in a binary xref stream; producing output anyway would silently
-// point readers into the middle of binary streams. See issue #12 for the
-// follow-up that lifts this restriction by switching XFA fill to incremental
-// updates.
+// point readers into the middle of binary streams. XFA fill no longer hits
+// this: UpdateXFAInPDF routes xref-stream sources to
+// UpdateXFAInPDFIncremental, which appends an incremental update instead of
+// patching bytes in place.
 var ErrXRefStreamUnsupported = errors.New("input PDF uses a cross-reference stream; ReplaceStreamInPDF only supports classical xref tables")
 
 // shiftXRefOffsets walks the classical (text) xref table in pdfBytes and adds

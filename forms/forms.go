@@ -43,6 +43,31 @@ type Form interface {
 	GetValues() map[string]interface{}
 }
 
+// FillStrategy selects how XFA form fills modify the PDF.
+type FillStrategy int
+
+const (
+	// StrategyByteRewrite patches the datasets stream in place, decrypting the
+	// whole document first when the source is encrypted (output is plaintext).
+	// Only works for classical-xref sources; xref-stream sources automatically
+	// use the incremental path instead. That automatic routing means the
+	// plaintext-output rule above holds only for classical-xref sources: an
+	// encrypted xref-stream source filled with this (default) strategy goes
+	// through the incremental path and produces encrypted output, same as
+	// StrategyIncrementalUpdate.
+	StrategyByteRewrite FillStrategy = iota
+	// StrategyIncrementalUpdate appends a PDF incremental update (ISO 32000-1
+	// §7.5.6): original bytes are preserved verbatim, the source's encryption
+	// is preserved (the new datasets stream is re-encrypted with the document
+	// key), and signatures over the original revision are not invalidated.
+	StrategyIncrementalUpdate
+)
+
+// FillOptions configures XFAFormWrapper.FillWithOptions.
+type FillOptions struct {
+	Strategy FillStrategy // default StrategyByteRewrite (current Fill behavior)
+}
+
 // AcroFormWrapper wraps an AcroForm to implement the Form interface
 type AcroFormWrapper struct {
 	acroForm *acroform.AcroForm
@@ -97,18 +122,33 @@ func (w *XFAFormWrapper) Fill(pdfBytes []byte, data types.FormData, password []b
 
 	// PDF was not encrypted at extraction time — but the caller may have supplied
 	// a password for a separately-obtained encrypted copy.
-	if len(password) > 0 || len(w.password) > 0 {
+	pwd := password
+	if len(pwd) == 0 {
+		pwd = w.password
+	}
+	if len(pwd) > 0 && bytes.Contains(pdfBytes, []byte("/Encrypt")) {
+		if decrypted, decErr := decryptForXFA(pdfBytes, pwd, verbose); decErr == nil {
+			return xfa.UpdateXFAInPDF(decrypted, data, nil, verbose)
+		}
+	}
+	// Pass the password through: xref-stream sources route to the incremental
+	// path, which must open the (possibly still encrypted) bytes itself.
+	return xfa.UpdateXFAInPDFWithPassword(pdfBytes, data, pwd, nil, verbose)
+}
+
+// FillWithOptions fills the form like Fill, with an explicit strategy choice.
+// StrategyIncrementalUpdate works directly on the supplied (possibly encrypted)
+// bytes and preserves the source's encryption in the output, unlike the default
+// path which returns plaintext for encrypted sources.
+func (w *XFAFormWrapper) FillWithOptions(pdfBytes []byte, data types.FormData, password []byte, opts FillOptions, verbose bool) ([]byte, error) {
+	if opts.Strategy == StrategyIncrementalUpdate {
 		pwd := password
 		if len(pwd) == 0 {
 			pwd = w.password
 		}
-		if bytes.Contains(pdfBytes, []byte("/Encrypt")) {
-			if decrypted, decErr := decryptForXFA(pdfBytes, pwd, verbose); decErr == nil {
-				return xfa.UpdateXFAInPDF(decrypted, data, nil, verbose)
-			}
-		}
+		return xfa.UpdateXFAInPDFIncremental(pdfBytes, data, pwd, verbose)
 	}
-	return xfa.UpdateXFAInPDF(pdfBytes, data, nil, verbose)
+	return w.Fill(pdfBytes, data, password, verbose)
 }
 
 func (w *XFAFormWrapper) Validate(data types.FormData) []error {

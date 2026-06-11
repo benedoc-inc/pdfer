@@ -24,7 +24,35 @@ func FindObjectLocation(pdfBytes []byte, objNum int, verbose bool) (*ObjectLocat
 	// ALWAYS use xref table first - it's the authoritative source
 	// Direct search using bytes.Index is dangerous because "5 0 obj" matches inside "265 0 obj"
 
-	// Parse xref to find object
+	// Walk the full revision chain (last startxref, /Prev links, newest entry
+	// wins). Anything else misreads incrementally-updated files: the first
+	// startxref in the file belongs to the OLDEST revision. The chain parse
+	// is memoized per pdfBytes slice — GetObject runs once per field in
+	// form-parsing loops, and re-walking the chain each call would be
+	// O(fields × revisions).
+	if chain, err := mergedXRefChain(pdfBytes, verbose); err == nil {
+		if entry, ok := chain.ObjectStreams[objNum]; ok {
+			if verbose {
+				log.Printf("Object %d is in object stream %d at index %d", objNum, entry.StreamObjNum, entry.IndexInStream)
+			}
+			return &ObjectLocation{
+				IsDirect:      false,
+				StreamObjNum:  entry.StreamObjNum,
+				IndexInStream: entry.IndexInStream,
+			}, nil
+		}
+		if offset, ok := chain.Objects[objNum]; ok {
+			if verbose {
+				log.Printf("Object %d at byte offset %d (from merged xref chain)", objNum, offset)
+			}
+			return &ObjectLocation{IsDirect: true, ByteOffset: offset}, nil
+		}
+	} else if verbose {
+		log.Printf("Incremental xref parse failed (%v), falling back to single-section parse", err)
+	}
+
+	// Fallback: parse only the section at the first startxref (legacy behavior
+	// for files the chain walker cannot handle).
 	startxrefPattern := regexp.MustCompile(`startxref\s+(\d+)`)
 	startxrefMatch := startxrefPattern.FindStringSubmatch(string(pdfBytes))
 	if startxrefMatch == nil {
@@ -89,9 +117,12 @@ func FindObjectLocation(pdfBytes []byte, objNum int, verbose bool) (*ObjectLocat
 
 	// Not found in xref - try regex search for object header with word boundary
 	// Use negative lookbehind equivalent: require whitespace or start of file before objNum
+	// Take the LAST match: with incremental updates the newest definition of an
+	// object appears later in the file.
 	pattern := regexp.MustCompile(fmt.Sprintf(`(^|\s|[\r\n])%d\s+0\s+obj`, objNum))
-	matches := pattern.FindIndex(pdfBytes)
-	if matches != nil {
+	allMatches := pattern.FindAllIndex(pdfBytes, -1)
+	if len(allMatches) > 0 {
+		matches := allMatches[len(allMatches)-1]
 		// Find the actual start of the object number
 		offset := int64(matches[0])
 		// Skip the preceding whitespace/newline
