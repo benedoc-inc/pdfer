@@ -3,8 +3,8 @@ package tests
 import (
 	"testing"
 
-	pdfer "github.com/benedoc-inc/pdfer"
-	pdftypes "github.com/benedoc-inc/pdfer/types"
+	pdfer "github.com/benedoc-inc/pdfer/v2"
+	pdftypes "github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // TestPreSTAR_OccurBindMetadata verifies on the real PreSTAR form that
