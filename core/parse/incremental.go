@@ -435,15 +435,20 @@ func (p *incrementalParser) parseXRefStreamSection(startXRef int64) (*xrefSectio
 
 // mergeSections merges all xref sections (older entries first, newer override)
 func (p *incrementalParser) mergeSections() {
-	// sections are already ordered oldest to newest
+	// sections are already ordered oldest to newest. A newer revision may
+	// change an object's storage kind (direct <-> in object stream), so an
+	// override must also remove the object from the other map — a stale entry
+	// there would shadow the newer one in consumers that check one map first.
 	for _, section := range p.sections {
 		// Regular objects
 		for objNum, offset := range section.Objects {
 			p.mergedObjs[objNum] = offset
+			delete(p.mergedStreams, objNum)
 		}
 		// Object stream entries
 		for objNum, entry := range section.Streams {
 			p.mergedStreams[objNum] = entry
+			delete(p.mergedObjs, objNum)
 		}
 	}
 

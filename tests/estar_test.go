@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	pdfer "github.com/benedoc-inc/pdfer/v2"
+	"github.com/benedoc-inc/pdfer/v2/forms"
+	"github.com/benedoc-inc/pdfer/v2/forms/xfa"
 	pdftypes "github.com/benedoc-inc/pdfer/v2/types"
 )
 
@@ -259,6 +261,74 @@ func assertFillWorks(t *testing.T, pdfBytes []byte, filename string) {
 			filename, len(refilledSchema.Questions), len(schema.Questions))
 	}
 	t.Logf("%s fill: %d fields set, output %d bytes, re-extracted %d questions", filename, count, len(filled), len(refilledSchema.Questions))
+}
+
+// TestESTAR_NonIVD_FillIncremental_PreservesEncryption verifies the opt-in
+// incremental fill strategy (issue #12) on an encrypted xref-stream eSTAR:
+// the original bytes are preserved verbatim as a prefix (so signatures over
+// the original revision stay valid), the output stays encrypted (the new
+// datasets stream is re-encrypted with the document key), and the filled
+// values read back through normal extraction.
+func TestESTAR_NonIVD_FillIncremental_PreservesEncryption(t *testing.T) {
+	pdfBytes := readESTARPDF(t, "nonivd_estar.pdf")
+
+	form, err := pdfer.ExtractForm(pdfBytes, nil, false)
+	if err != nil {
+		t.Fatalf("ExtractForm: %v", err)
+	}
+	xfaForm, ok := form.(*forms.XFAFormWrapper)
+	if !ok {
+		t.Fatalf("expected *forms.XFAFormWrapper, got %T", form)
+	}
+
+	// Fill the first writable text-like field with a recognizable value. Most
+	// eSTAR fields report Hidden (dynamic XFA decides visibility at render
+	// time), so only ReadOnly disqualifies.
+	var fieldID string
+	for _, q := range form.Schema().Questions {
+		if (q.Type == pdftypes.ResponseTypeText || q.Type == pdftypes.ResponseTypeTextarea) && !q.ReadOnly {
+			fieldID = q.ID
+			break
+		}
+	}
+	if fieldID == "" {
+		t.Fatal("no writable text field found")
+	}
+	const marker = "IncrementalFillProbe"
+	filled, err := xfaForm.FillWithOptions(pdfBytes, pdfer.FormData{fieldID: marker}, nil,
+		forms.FillOptions{Strategy: forms.StrategyIncrementalUpdate}, false)
+	if err != nil {
+		t.Fatalf("FillWithOptions(incremental): %v", err)
+	}
+
+	if !bytes.HasPrefix(filled, pdfBytes) {
+		t.Error("incremental fill must preserve the original bytes as a prefix")
+	}
+	appended := filled[len(pdfBytes):]
+	if !bytes.Contains(appended, []byte("/Type/XRef")) {
+		t.Error("appended revision must use a cross-reference stream (source uses one)")
+	}
+	if !bytes.Contains(appended, []byte("/Encrypt")) {
+		t.Error("appended xref section must carry the /Encrypt reference forward")
+	}
+	if bytes.Contains(appended, []byte(marker)) {
+		t.Error("appended datasets stream must be encrypted; found plaintext fill value")
+	}
+
+	// Round-trip: decrypt the filled output and read the datasets back. The
+	// filled value must be there (GetValues is no use here — eSTAR datasets
+	// yield an empty value map even on the unfilled original).
+	decrypted, err := pdfer.DecryptPDF(filled, nil, false)
+	if err != nil {
+		t.Fatalf("DecryptPDF on filled output: %v", err)
+	}
+	xfaXML, _, err := xfa.FindXFADatasetsStream(decrypted, nil, false)
+	if err != nil {
+		t.Fatalf("FindXFADatasetsStream on filled output: %v", err)
+	}
+	if !bytes.Contains(xfaXML, []byte(marker)) {
+		t.Errorf("filled datasets missing value %q for field %q", marker, fieldID)
+	}
 }
 
 // TestESTAR_NonIVD_Fill_PreservesFileID checks that filling an encrypted

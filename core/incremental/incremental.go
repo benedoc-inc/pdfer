@@ -11,6 +11,7 @@ package incremental
 
 import (
 	"bytes"
+	"compress/zlib"
 	"fmt"
 	"regexp"
 	"sort"
@@ -34,6 +35,7 @@ type Update struct {
 	enc        *types.PDFEncryption
 	prevXRef   int64
 	idArray    []byte // raw "[<...><...>]" carried from the source trailer
+	xrefStream bool   // source's active xref is a cross-reference stream
 
 	nextObj int
 	buf     bytes.Buffer
@@ -63,6 +65,7 @@ func New(original []byte, trailer *parse.TrailerInfo, enc *types.PDFEncryption) 
 		enc:        enc,
 		prevXRef:   prev,
 		idArray:    extractTrailerID(original, prev),
+		xrefStream: xrefIsStream(original, prev),
 		nextObj:    trailer.Size,
 		offsets:    make(map[int]int64),
 	}
@@ -127,9 +130,17 @@ func (u *Update) AddStream(num, gen int, dict, data []byte) error {
 
 // Bytes finalises the update: xref section, trailer (preserving Root/Info/
 // Encrypt/ID, chaining via /Prev) and startxref.
+//
+// The cross-reference form mirrors the source: a classical xref table + trailer
+// when the previous section is a table, a cross-reference stream when the
+// previous section is a stream (ISO 32000-1 §7.5.8.4 requires updates to a
+// pure xref-stream file to also use xref streams).
 func (u *Update) Bytes() ([]byte, error) {
 	if len(u.offsets) == 0 {
 		return nil, fmt.Errorf("incremental: no objects added")
+	}
+	if u.xrefStream {
+		return u.bytesXRefStream()
 	}
 
 	xrefStart := int64(u.buf.Len())
@@ -164,6 +175,117 @@ func (u *Update) Bytes() ([]byte, error) {
 	fmt.Fprintf(&u.buf, "startxref\n%d\n%%%%EOF\n", xrefStart)
 
 	return u.buf.Bytes(), nil
+}
+
+// bytesXRefStream finalises the update with a cross-reference stream instead of
+// a classical table. Trailer entries (Size/Root/Info/Encrypt/ID/Prev) live in
+// the stream dictionary. The stream itself is never encrypted (ISO 32000-1
+// §7.5.8.2), so it is written directly rather than through AddStream.
+func (u *Update) bytesXRefStream() ([]byte, error) {
+	// The xref stream is itself an object and must appear in its own table.
+	xrefNum := u.Reserve()
+	xrefStart := int64(u.buf.Len())
+	u.offsets[xrefNum] = xrefStart
+
+	nums := make([]int, 0, len(u.offsets))
+	for n := range u.offsets {
+		nums = append(nums, n)
+	}
+	sort.Ints(nums)
+
+	// Field widths: type (1), byte offset (enough for the largest offset,
+	// which is always the xref stream's own), generation (2).
+	const w1, w3 = 1, 2
+	w2 := bytesNeeded(xrefStart)
+
+	var index, data bytes.Buffer
+	i := 0
+	for i < len(nums) {
+		j := i + 1
+		for j < len(nums) && nums[j] == nums[j-1]+1 {
+			j++
+		}
+		fmt.Fprintf(&index, " %d %d", nums[i], j-i)
+		for k := i; k < j; k++ {
+			entry := make([]byte, w1+w2+w3)
+			entry[0] = 1 // type 1: in-use, at byte offset, generation 0
+			putBigEndian(entry[w1:w1+w2], u.offsets[nums[k]])
+			data.Write(entry)
+		}
+		i = j
+	}
+
+	var compressed bytes.Buffer
+	zw := zlib.NewWriter(&compressed)
+	if _, err := zw.Write(data.Bytes()); err != nil {
+		return nil, fmt.Errorf("incremental: compress xref stream: %w", err)
+	}
+	if err := zw.Close(); err != nil {
+		return nil, fmt.Errorf("incremental: compress xref stream: %w", err)
+	}
+
+	fmt.Fprintf(&u.buf, "%d 0 obj\n<</Type/XRef", xrefNum)
+	fmt.Fprintf(&u.buf, "/Size %d", u.nextObj)
+	fmt.Fprintf(&u.buf, "/W[%d %d %d]", w1, w2, w3)
+	fmt.Fprintf(&u.buf, "/Index[%s]", bytes.TrimSpace(index.Bytes()))
+	fmt.Fprintf(&u.buf, "/Root %s", u.rootRef)
+	if u.infoRef != "" {
+		fmt.Fprintf(&u.buf, "/Info %s", u.infoRef)
+	}
+	if u.encryptRef != "" {
+		fmt.Fprintf(&u.buf, "/Encrypt %s", u.encryptRef)
+	}
+	if len(u.idArray) > 0 {
+		u.buf.WriteString("/ID ")
+		u.buf.Write(u.idArray)
+	}
+	fmt.Fprintf(&u.buf, "/Prev %d", u.prevXRef)
+	fmt.Fprintf(&u.buf, "/Filter/FlateDecode/Length %d>>\nstream\n", compressed.Len())
+	u.buf.Write(compressed.Bytes())
+	u.buf.WriteString("\nendstream\nendobj\n")
+	fmt.Fprintf(&u.buf, "startxref\n%d\n%%%%EOF\n", xrefStart)
+
+	return u.buf.Bytes(), nil
+}
+
+// UsesXRefStream reports whether the PDF's active cross-reference section is a
+// cross-reference stream (PDF 1.5+) rather than a classical xref table. Returns
+// false when no startxref can be located.
+func UsesXRefStream(pdfBytes []byte) bool {
+	prev := findStartXRef(pdfBytes)
+	return prev >= 0 && xrefIsStream(pdfBytes, prev)
+}
+
+// xrefIsStream reports whether the cross-reference section at offset is a
+// cross-reference stream (an indirect object) rather than a classical table
+// (the keyword "xref").
+func xrefIsStream(pdfBytes []byte, offset int64) bool {
+	if offset < 0 || offset >= int64(len(pdfBytes)) {
+		return false
+	}
+	tail := pdfBytes[offset:]
+	if len(tail) > 32 {
+		tail = tail[:32]
+	}
+	return !bytes.HasPrefix(bytes.TrimLeft(tail, " \t\r\n"), []byte("xref"))
+}
+
+// bytesNeeded returns how many bytes are required to represent n big-endian.
+func bytesNeeded(n int64) int {
+	w := 1
+	for n > 0xff {
+		w++
+		n >>= 8
+	}
+	return w
+}
+
+// putBigEndian writes n into dst big-endian, using all of dst.
+func putBigEndian(dst []byte, n int64) {
+	for i := len(dst) - 1; i >= 0; i-- {
+		dst[i] = byte(n)
+		n >>= 8
+	}
 }
 
 // setLength removes any existing /Length entry from a stream dictionary and

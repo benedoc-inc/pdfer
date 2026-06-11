@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/benedoc-inc/pdfer/v2/core/incremental"
 	"github.com/benedoc-inc/pdfer/v2/core/parse"
 	"github.com/benedoc-inc/pdfer/v2/core/write"
 	"github.com/benedoc-inc/pdfer/v2/types"
@@ -434,8 +435,17 @@ func BuildPDFFromXFAStreams(streams *XFAStreams, verbose bool) ([]byte, error) {
 	return builder.BuildFromXFA(xfaStreams)
 }
 
-// UpdateXFAInPDF updates XFA field values in PDF bytes
+// UpdateXFAInPDF updates XFA field values in PDF bytes.
+//
+// Sources whose active xref is a cross-reference stream (PDF 1.5+) are filled
+// via a PDF incremental update — the in-place byte-rewrite below cannot adjust
+// xref-stream offsets (see ErrXRefStreamUnsupported). Classical-xref sources
+// keep the byte-rewrite path.
 func UpdateXFAInPDF(pdfBytes []byte, formData types.FormData, encryptInfo *types.PDFEncryption, verbose bool) ([]byte, error) {
+	if incremental.UsesXRefStream(pdfBytes) {
+		return UpdateXFAInPDFIncremental(pdfBytes, formData, nil, verbose)
+	}
+
 	// Find XFA datasets stream. Note: FindXFADatasetsStream returns
 	// already-decompressed XML — ExtractAllXFAStreams runs the bytes through
 	// DecompressStream internally — so we must not call DecompressStream on

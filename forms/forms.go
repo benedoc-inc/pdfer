@@ -43,6 +43,27 @@ type Form interface {
 	GetValues() map[string]interface{}
 }
 
+// FillStrategy selects how XFA form fills modify the PDF.
+type FillStrategy int
+
+const (
+	// StrategyByteRewrite patches the datasets stream in place, decrypting the
+	// whole document first when the source is encrypted (output is plaintext).
+	// Only works for classical-xref sources; xref-stream sources automatically
+	// use the incremental path instead.
+	StrategyByteRewrite FillStrategy = iota
+	// StrategyIncrementalUpdate appends a PDF incremental update (ISO 32000-1
+	// §7.5.6): original bytes are preserved verbatim, the source's encryption
+	// is preserved (the new datasets stream is re-encrypted with the document
+	// key), and signatures over the original revision are not invalidated.
+	StrategyIncrementalUpdate
+)
+
+// FillOptions configures XFAFormWrapper.FillWithOptions.
+type FillOptions struct {
+	Strategy FillStrategy // default StrategyByteRewrite (current Fill behavior)
+}
+
 // AcroFormWrapper wraps an AcroForm to implement the Form interface
 type AcroFormWrapper struct {
 	acroForm *acroform.AcroForm
@@ -109,6 +130,21 @@ func (w *XFAFormWrapper) Fill(pdfBytes []byte, data types.FormData, password []b
 		}
 	}
 	return xfa.UpdateXFAInPDF(pdfBytes, data, nil, verbose)
+}
+
+// FillWithOptions fills the form like Fill, with an explicit strategy choice.
+// StrategyIncrementalUpdate works directly on the supplied (possibly encrypted)
+// bytes and preserves the source's encryption in the output, unlike the default
+// path which returns plaintext for encrypted sources.
+func (w *XFAFormWrapper) FillWithOptions(pdfBytes []byte, data types.FormData, password []byte, opts FillOptions, verbose bool) ([]byte, error) {
+	if opts.Strategy == StrategyIncrementalUpdate {
+		pwd := password
+		if len(pwd) == 0 {
+			pwd = w.password
+		}
+		return xfa.UpdateXFAInPDFIncremental(pdfBytes, data, pwd, verbose)
+	}
+	return w.Fill(pdfBytes, data, password, verbose)
 }
 
 func (w *XFAFormWrapper) Validate(data types.FormData) []error {
