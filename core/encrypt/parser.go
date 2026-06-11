@@ -76,7 +76,7 @@ func ParseEncryptionDictionary(pdfBytes []byte, verbose bool) (*types.PDFEncrypt
 		log.Printf("Encrypt dictionary content (first 200 chars): %s", dictContent[:min(200, len(dictContent))])
 	}
 
-	encrypt := &types.PDFEncryption{}
+	encrypt := &types.PDFEncryption{EncryptObjNum: encryptObjNum}
 
 	// Parse /Filter
 	filterPattern := regexp.MustCompile(`/Filter\s+/(\w+)`)

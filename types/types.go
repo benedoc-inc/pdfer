@@ -21,6 +21,11 @@ type PDFEncryption struct {
 	// encrypted. pdfer's own EncryptPDF emits /StrF /Identity. Write paths must
 	// honor this and leave strings in the clear.
 	StrFIdentity bool
+	// EncryptObjNum is the object number of the /Encrypt dictionary itself.
+	// Strings inside that dictionary (/O, /U, ...) are never encrypted (ISO
+	// 32000-1 §7.6.5), so read and write paths must skip string crypto for
+	// this object. Zero when unknown (object 0 cannot hold a dictionary).
+	EncryptObjNum int
 }
 
 // FormData represents the data to fill into the form
