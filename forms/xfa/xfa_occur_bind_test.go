@@ -350,6 +350,53 @@ func TestOccurUnderPageSet(t *testing.T) {
 	}
 }
 
+// TestOccurUnderSubformSet verifies the subformSet guard: <subformSet> is not
+// pushed onto the parser's node stack, so an <occur>/<bind> directly under it
+// must attach nowhere (NOT to the enclosing subform) — while an <occur> on a
+// subform nested inside the set still attaches to that subform.
+func TestOccurUnderSubformSet(t *testing.T) {
+	xfaXML := `<template>
+  <subform name="form1">
+    <subformSet relation="ordered">
+      <occur min="1" max="4"/>
+      <bind match="none"/>
+      <subform name="inner">
+        <occur max="2"/>
+        <field name="a"><ui><textEdit/></ui></field>
+      </subform>
+    </subformSet>
+    <field name="f">
+      <ui><textEdit/></ui>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+
+	sec := findSectionByName(form.Sections, "form1")
+	if sec == nil {
+		t.Fatal("section 'form1' not found")
+	}
+	if sec.Occur != nil {
+		t.Errorf("subformSet-level <occur> misattributed to enclosing subform: %+v", *sec.Occur)
+	}
+	if sec.Bind != nil {
+		t.Errorf("subformSet-level <bind> misattributed to enclosing subform: %+v", *sec.Bind)
+	}
+
+	inner := findSectionByName(form.Sections, "inner")
+	if inner == nil {
+		t.Fatal("section 'inner' not found")
+	}
+	want := types.Occur{Min: 1, Max: 2, Initial: 1}
+	if inner.Occur == nil || *inner.Occur != want {
+		t.Errorf("subform-in-set Occur = %+v, want %+v", inner.Occur, want)
+	}
+}
+
 // TestFDA3881OccurBindMetadata checks the real FDA 3881 template: it declares
 // no <occur> elements (so Occur must be nil everywhere — guarding against
 // spurious defaults), and its only <bind> declarations are match="none" — on
