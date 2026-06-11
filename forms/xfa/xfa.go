@@ -441,9 +441,23 @@ func BuildPDFFromXFAStreams(streams *XFAStreams, verbose bool) ([]byte, error) {
 // via a PDF incremental update — the in-place byte-rewrite below cannot adjust
 // xref-stream offsets (see ErrXRefStreamUnsupported). Classical-xref sources
 // keep the byte-rewrite path.
+//
+// The incremental route opens the source with no password, which only works
+// for unencrypted sources and encrypted ones with an empty user password
+// (e.g. FDA eSTAR templates). Callers holding a password for an encrypted
+// xref-stream source should use UpdateXFAInPDFWithPassword.
 func UpdateXFAInPDF(pdfBytes []byte, formData types.FormData, encryptInfo *types.PDFEncryption, verbose bool) ([]byte, error) {
+	return UpdateXFAInPDFWithPassword(pdfBytes, formData, nil, encryptInfo, verbose)
+}
+
+// UpdateXFAInPDFWithPassword is UpdateXFAInPDF with a password to open
+// sources routed to the incremental path (encrypted xref-stream PDFs cannot
+// be pre-decrypted by the byte-rewrite pipeline, so the password must reach
+// the incremental opener directly). The byte-rewrite path is unchanged: it
+// operates on plaintext bytes and uses encryptInfo as before.
+func UpdateXFAInPDFWithPassword(pdfBytes []byte, formData types.FormData, password []byte, encryptInfo *types.PDFEncryption, verbose bool) ([]byte, error) {
 	if incremental.UsesXRefStream(pdfBytes) {
-		return UpdateXFAInPDFIncremental(pdfBytes, formData, nil, verbose)
+		return UpdateXFAInPDFIncremental(pdfBytes, formData, password, verbose)
 	}
 
 	// Find XFA datasets stream. Note: FindXFADatasetsStream returns

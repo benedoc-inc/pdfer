@@ -26,10 +26,12 @@ func FindObjectLocation(pdfBytes []byte, objNum int, verbose bool) (*ObjectLocat
 
 	// Walk the full revision chain (last startxref, /Prev links, newest entry
 	// wins). Anything else misreads incrementally-updated files: the first
-	// startxref in the file belongs to the OLDEST revision.
-	incParser := newIncrementalParser(pdfBytes, verbose)
-	if err := incParser.parse(); err == nil {
-		if entry, ok := incParser.getObjectStreamMap()[objNum]; ok {
+	// startxref in the file belongs to the OLDEST revision. The chain parse
+	// is memoized per pdfBytes slice — GetObject runs once per field in
+	// form-parsing loops, and re-walking the chain each call would be
+	// O(fields × revisions).
+	if chain, err := mergedXRefChain(pdfBytes, verbose); err == nil {
+		if entry, ok := chain.ObjectStreams[objNum]; ok {
 			if verbose {
 				log.Printf("Object %d is in object stream %d at index %d", objNum, entry.StreamObjNum, entry.IndexInStream)
 			}
@@ -39,7 +41,7 @@ func FindObjectLocation(pdfBytes []byte, objNum int, verbose bool) (*ObjectLocat
 				IndexInStream: entry.IndexInStream,
 			}, nil
 		}
-		if offset, ok := incParser.getObjectMap()[objNum]; ok {
+		if offset, ok := chain.Objects[objNum]; ok {
 			if verbose {
 				log.Printf("Object %d at byte offset %d (from merged xref chain)", objNum, offset)
 			}
