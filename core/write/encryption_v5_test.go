@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/core/encrypt"
-	"github.com/benedoc-inc/pdfer/core/parse"
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/core/encrypt"
+	"github.com/benedoc-inc/pdfer/v2/core/parse"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 func TestSetupAES256Encryption(t *testing.T) {
@@ -322,9 +322,9 @@ func TestEncryptedPDF_DictStringsRoundtrip(t *testing.T) {
 	}
 }
 
-// TestEncryptStringsInContent_LiteralString verifies that literal strings are
-// encrypted and the ciphertext differs from the original.
-func TestEncryptStringsInContent_LiteralString(t *testing.T) {
+// TestEncryptObjectBody_LiteralString verifies that the writer's string-encryption
+// chokepoint encrypts literal strings and the ciphertext differs from the original.
+func TestEncryptObjectBody_LiteralString(t *testing.T) {
 	w := NewPDFWriter()
 	_, err := w.SetupEncryptionWithPasswords([]byte("pw"), []byte("owner"), -3904, true)
 	if err != nil {
@@ -332,10 +332,7 @@ func TestEncryptStringsInContent_LiteralString(t *testing.T) {
 	}
 
 	content := []byte("<</Title (Hello World)/Type/Catalog>>")
-	encrypted, err := w.encryptStringsInContent(content, 5, 0)
-	if err != nil {
-		t.Fatalf("encryptStringsInContent: %v", err)
-	}
+	encrypted := w.encryptObjectBody(content, 5, 0, 0)
 
 	// The literal (Hello World) must not appear in encrypted output.
 	if bytes.Contains(encrypted, []byte("Hello World")) {
@@ -348,60 +345,5 @@ func TestEncryptStringsInContent_LiteralString(t *testing.T) {
 	// The encrypted string should be a hex string <...>.
 	if !bytes.Contains(encrypted, []byte("<")) {
 		t.Error("encrypted output should contain a hex string")
-	}
-}
-
-// TestParsePDFLiteralString exercises the literal-string parser.
-func TestParsePDFLiteralString(t *testing.T) {
-	cases := []struct {
-		input   string
-		want    string
-		wantEnd int
-	}{
-		{"(hello)", "hello", 7},
-		{"(hi) extra", "hi", 4},
-		{"(a\\nb)", "a\nb", 6},
-		{"(a\\(b\\)c)", "a(b)c", 9},
-		{"(nest(ed))", "nest(ed)", 10},
-		{"(\\101)", "A", 6}, // octal \101 = 65 = 'A'
-	}
-	for _, tc := range cases {
-		end, got, err := pdfParseLiteralString([]byte(tc.input), 0)
-		if err != nil {
-			t.Errorf("input %q: unexpected error %v", tc.input, err)
-			continue
-		}
-		if string(got) != tc.want {
-			t.Errorf("input %q: got %q, want %q", tc.input, got, tc.want)
-		}
-		if end != tc.wantEnd {
-			t.Errorf("input %q: end=%d, want %d", tc.input, end, tc.wantEnd)
-		}
-	}
-}
-
-// TestParsePDFHexString exercises the hex-string parser.
-func TestParsePDFHexString(t *testing.T) {
-	cases := []struct {
-		input   string
-		want    []byte
-		wantEnd int
-	}{
-		{"<48656C6C6F>", []byte("Hello"), 12},
-		{"<4142>", []byte{0x41, 0x42}, 6},
-		{"<41 42\n43>", []byte{0x41, 0x42, 0x43}, 10},
-	}
-	for _, tc := range cases {
-		end, got, err := pdfParseHexString([]byte(tc.input), 0)
-		if err != nil {
-			t.Errorf("input %q: unexpected error %v", tc.input, err)
-			continue
-		}
-		if string(got) != string(tc.want) {
-			t.Errorf("input %q: got %v, want %v", tc.input, got, tc.want)
-		}
-		if end != tc.wantEnd {
-			t.Errorf("input %q: end=%d, want %d", tc.input, end, tc.wantEnd)
-		}
 	}
 }

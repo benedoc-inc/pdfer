@@ -4,17 +4,14 @@ package write
 import (
 	"bytes"
 	"compress/zlib"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/md5"
-	"crypto/rand"
 	"fmt"
 	"io"
 	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/core/encrypt"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // PDFObject represents a PDF object with its content
@@ -262,7 +259,9 @@ func (w *PDFWriter) Write(out io.Writer) error {
 			continue
 		}
 
-		// Skip objects that are in object streams (they'll be referenced via Type 2)
+		// Skip objects that are in object streams (they'll be referenced via Type 2).
+		// Object-stream members must NOT pass through encryptObjectBody: the objstm
+		// is encrypted as a unit, so member strings stay unencrypted inside it.
 		if objStreamMap != nil {
 			if _, inStream := objStreamMap[objNum]; inStream {
 				continue
@@ -284,11 +283,7 @@ func (w *PDFWriter) Write(out io.Writer) error {
 				}
 			}
 			dictContent := rawStreamUpdateLength(obj.RawDict, len(streamData))
-			if w.encryptInfo != nil && objNum != encryptDictObjNum {
-				if enc, err := w.encryptStringsInContent(dictContent, objNum, obj.Generation); err == nil {
-					dictContent = enc
-				}
-			}
+			dictContent = w.encryptObjectBody(dictContent, objNum, obj.Generation, encryptDictObjNum)
 			buf.Write(dictContent)
 			buf.WriteString("\nstream\n")
 			buf.Write(streamData)
@@ -303,23 +298,21 @@ func (w *PDFWriter) Write(out io.Writer) error {
 				encrypted, err := w.encryptStream(streamData, objNum, obj.Generation)
 				if err == nil {
 					streamData = encrypted
-					// Update length in dictionary
+					// Update length in dictionary. Drop a slashed "/Length" variant
+					// so the stale value cannot serialize alongside the new one.
+					delete(obj.Dict, "/Length")
 					obj.Dict["Length"] = len(streamData)
 					content = w.formatDictionary(obj.Dict)
 				}
 			}
+			content = w.encryptObjectBody(content, objNum, obj.Generation, encryptDictObjNum)
 
 			buf.Write(content)
 			buf.WriteString("\nstream\n")
 			buf.Write(streamData)
 			buf.WriteString("\nendstream")
 		} else if obj.Content != nil {
-			content := obj.Content
-			if w.encryptInfo != nil && objNum != encryptDictObjNum {
-				if encrypted, err := w.encryptStringsInContent(content, objNum, obj.Generation); err == nil {
-					content = encrypted
-				}
-			}
+			content := w.encryptObjectBody(obj.Content, objNum, obj.Generation, encryptDictObjNum)
 			buf.Write(content)
 		}
 
@@ -472,69 +465,29 @@ func (w *PDFWriter) formatValue(value interface{}) string {
 
 // encryptStream encrypts stream data using the PDF's encryption settings
 func (w *PDFWriter) encryptStream(data []byte, objNum, genNum int) ([]byte, error) {
-	if w.encryptInfo == nil || len(w.encryptInfo.EncryptKey) == 0 {
-		return data, nil
+	return encrypt.EncryptObject(data, objNum, genNum, w.encryptInfo)
+}
+
+// encryptObjectBody is the single chokepoint for in-body string encryption: every
+// directly-written object body (raw dict bytes, formatted stream dict, or full
+// non-stream content) passes through here exactly once. Exemptions:
+//   - the /Encrypt dictionary itself (PDF spec §7.6.5);
+//   - object-stream members, which never reach this path (the objstm is encrypted
+//     as a unit, so member strings must not be individually encrypted);
+//   - a signature dictionary's /Contents would also be exempt per spec — pdfer
+//     does not currently write signed-and-encrypted documents.
+//
+// Whether strings are actually encrypted (vs. left cleartext for /StrF /Identity)
+// is decided by encrypt.EncryptStringsInContent from encryptInfo.StrFIdentity,
+// the same field EncryptDictString derives the declared /StrF from.
+func (w *PDFWriter) encryptObjectBody(body []byte, objNum, genNum, encryptDictObjNum int) []byte {
+	if w.encryptInfo == nil || objNum == encryptDictObjNum {
+		return body
 	}
-
-	// Derive object-specific key (same as decrypt)
-	pack1 := []byte{byte(objNum & 0xff), byte((objNum >> 8) & 0xff), byte((objNum >> 16) & 0xff)}
-	pack2 := []byte{byte(genNum & 0xff), byte((genNum >> 8) & 0xff)}
-
-	n := w.encryptInfo.KeyLength
-	if n == 0 {
-		n = 5
+	if enc, err := encrypt.EncryptStringsInContent(body, objNum, genNum, w.encryptInfo); err == nil {
+		return enc
 	}
-
-	keyData := make([]byte, n+5)
-	copy(keyData, w.encryptInfo.EncryptKey[:n])
-	copy(keyData[n:], pack1)
-	copy(keyData[n+3:], pack2)
-
-	keyHash := md5.New()
-	keyHash.Write(keyData)
-
-	// AES encryption
-	if w.encryptInfo.V == 4 || w.encryptInfo.V == 5 {
-		keyHash.Write([]byte{0x73, 0x41, 0x6C, 0x54}) // "sAlT"
-		aesKeyHash := keyHash.Sum(nil)
-		aesKeyLen := min(n+5, 16)
-		aesKey := aesKeyHash[:aesKeyLen]
-
-		// Generate random IV
-		iv := make([]byte, 16)
-		if _, err := rand.Read(iv); err != nil {
-			return nil, err
-		}
-
-		// Pad data to multiple of 16 (PKCS#7)
-		padLen := 16 - (len(data) % 16)
-		padded := make([]byte, len(data)+padLen)
-		copy(padded, data)
-		for i := len(data); i < len(padded); i++ {
-			padded[i] = byte(padLen)
-		}
-
-		// Encrypt
-		block, err := aes.NewCipher(aesKey)
-		if err != nil {
-			return nil, err
-		}
-
-		encrypted := make([]byte, len(padded))
-		mode := cipher.NewCBCEncrypter(block, iv)
-		mode.CryptBlocks(encrypted, padded)
-
-		// Prepend IV
-		result := make([]byte, 16+len(encrypted))
-		copy(result[:16], iv)
-		copy(result[16:], encrypted)
-
-		return result, nil
-	}
-
-	// RC4 encryption (V1, V2)
-	// Not implemented for now
-	return data, nil
+	return body
 }
 
 // Bytes returns the complete PDF as a byte slice

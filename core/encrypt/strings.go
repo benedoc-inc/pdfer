@@ -3,18 +3,20 @@ package encrypt
 import (
 	"fmt"
 
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // DecryptStringsInContent walks raw PDF object content (a non-stream dictionary
-// body) and decrypts every hex-string value found. This is the read-side
-// complement to the write package's encryptStringsInContent.
+// body) and decrypts every string value found — both hex <...> and literal (...)
+// forms — re-encoding each as a literal string. It is the read-side complement
+// of EncryptStringsInContent.
 //
-// Hex strings that are too short to be AES-encrypted (< 32 bytes decoded) or
-// that fail decryption are left unchanged, providing backward compatibility
-// with PDFs written before string encryption was implemented.
+// The document's /StrF crypt filter is honored deterministically: when it is
+// /Identity (strings stored in the clear) the content is returned unchanged.
+// There is no heuristic fallback — in a non-Identity document every string is
+// ciphertext by definition.
 func DecryptStringsInContent(content []byte, objNum, genNum int, enc *types.PDFEncryption) ([]byte, error) {
-	if enc == nil {
+	if enc == nil || enc.StrFIdentity {
 		return content, nil
 	}
 	out := make([]byte, 0, len(content))
@@ -27,6 +29,25 @@ func DecryptStringsInContent(content []byte, objNum, genNum int, enc *types.PDFE
 				out = append(out, content[i])
 				i++
 			}
+		case b == '(':
+			decoded, end, ok := parsePDFLiteralStringBytes(content, i+1)
+			if !ok {
+				// No balanced ')': not a real string — pass the byte through.
+				out = append(out, b)
+				i++
+				continue
+			}
+			plain, decErr := DecryptObject(decoded, objNum, genNum, enc)
+			if decErr != nil {
+				// Malformed ciphertext — pass through as-is.
+				out = append(out, content[i:end]...)
+				i = end
+				continue
+			}
+			out = append(out, '(')
+			out = encAppendLiteral(out, plain)
+			out = append(out, ')')
+			i = end
 		case b == '<' && i+1 < len(content) && content[i+1] == '<':
 			out = append(out, '<', '<')
 			i += 2
@@ -35,15 +56,14 @@ func DecryptStringsInContent(content []byte, objNum, genNum int, enc *types.PDFE
 			i += 2
 		case b == '<':
 			end, decoded, err := encParseHexString(content, i)
-			if err != nil || len(decoded) < 32 {
-				// Too short to be AES-encrypted or malformed — pass through as-is.
+			if err != nil {
+				// Malformed hex string — pass through as-is.
 				out = append(out, b)
 				i++
 				continue
 			}
 			plain, decErr := DecryptObject(decoded, objNum, genNum, enc)
 			if decErr != nil {
-				// Decryption failed: likely not an encrypted string. Pass through.
 				out = append(out, content[i:end]...)
 				i = end
 				continue

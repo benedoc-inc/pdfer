@@ -7,7 +7,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // SetupAES256Encryption creates an encryption dictionary for AES-256 (V5/R5/R6)
@@ -229,6 +229,16 @@ func CreateEncryptionDictionary(encrypt *types.PDFEncryption) []byte {
 	buf.WriteString(fmt.Sprintf("/R %d\n", encrypt.R))
 	buf.WriteString(fmt.Sprintf("/Length %d\n", encrypt.KeyLength*8)) // Length in bits
 	buf.WriteString(fmt.Sprintf("/P %d\n", encrypt.P))
+
+	// Crypt filters. /StrF is derived from encrypt.StrFIdentity so the declared
+	// string filter always matches what the writer actually does with strings.
+	strF := "StdCF"
+	if encrypt.StrFIdentity {
+		strF = "Identity"
+	}
+	buf.WriteString("/CF <</StdCF <</AuthEvent /DocOpen /CFM /AESV3 /Length 32>>>>\n")
+	buf.WriteString("/StmF /StdCF\n")
+	buf.WriteString(fmt.Sprintf("/StrF /%s\n", strF))
 
 	// U value (48 bytes) - use hex string to avoid issues with binary data
 	buf.WriteString("/U <")

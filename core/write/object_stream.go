@@ -24,11 +24,22 @@ func (w *PDFWriter) createObjectStreams() (map[int]struct {
 		return nil, nil, nil
 	}
 
+	// The /Encrypt dictionary must stay a direct object (ISO 32000-1 Table 16):
+	// readers need it before they can decrypt the object stream that would
+	// otherwise contain it.
+	var encryptDictObjNum int
+	if w.encryptRef != "" {
+		fmt.Sscanf(w.encryptRef, "%d 0 R", &encryptDictObjNum)
+	}
+
 	// Group non-stream objects into object streams
 	// For simplicity, put all eligible objects into one stream (can be optimized later)
 	var eligibleObjs []int
 	for objNum, obj := range w.objects {
 		if obj.IsFree {
+			continue
+		}
+		if w.encryptRef != "" && objNum == encryptDictObjNum {
 			continue
 		}
 		// Only compress non-stream objects (stream objects are already compressed)

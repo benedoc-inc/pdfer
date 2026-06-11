@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 func TestValidateField(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/core/sign"
+	"github.com/benedoc-inc/pdfer/v2/core/sign"
 )
 
 func TestSignPDF_VisibleAppearance_RectIsNonZero(t *testing.T) {

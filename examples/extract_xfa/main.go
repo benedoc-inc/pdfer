@@ -8,9 +8,9 @@ import (
 	"log"
 	"os"
 
-	"github.com/benedoc-inc/pdfer"
-	encrypt "github.com/benedoc-inc/pdfer/core/encrypt"
-	"github.com/benedoc-inc/pdfer/forms/xfa"
+	"github.com/benedoc-inc/pdfer/v2"
+	encrypt "github.com/benedoc-inc/pdfer/v2/core/encrypt"
+	"github.com/benedoc-inc/pdfer/v2/forms/xfa"
 )
 
 func main() {

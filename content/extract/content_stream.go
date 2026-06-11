@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // parseContentStream parses a PDF content stream and extracts text, graphics, and images

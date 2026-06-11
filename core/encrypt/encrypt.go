@@ -6,7 +6,7 @@ import (
 	"crypto/rc4"
 	"fmt"
 
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 var pdfPadding = []byte{
@@ -123,6 +123,9 @@ func PrepareEncryption(opts EncryptOptions) (*types.PDFEncryption, []byte, error
 		O:               oValue,
 		P:               p,
 		EncryptMetadata: true,
+		// Strings are encrypted alongside streams (/StrF /StdCF). Leaving string
+		// values cleartext inside an "encrypted" PDF is a weak default.
+		StrFIdentity: false,
 	}
 
 	// Derive the file encryption key.
@@ -143,17 +146,22 @@ func PrepareEncryption(opts EncryptOptions) (*types.PDFEncryption, []byte, error
 }
 
 // EncryptDictString returns the raw PDF dictionary bytes for the /Encrypt object
-// produced by PrepareEncryption. Streams are AES-128 encrypted; strings are not
-// (StrF=Identity) to avoid the complexity of in-dict string encryption.
+// produced by PrepareEncryption. Streams are always AES-128 encrypted via /StmF;
+// the declared /StrF is derived from enc.StrFIdentity so the dictionary always
+// matches what the write paths actually do with string values.
 func EncryptDictString(enc *types.PDFEncryption) []byte {
 	oHex := fmt.Sprintf("%X", enc.O)
 	uHex := fmt.Sprintf("%X", enc.U)
+	strF := "StdCF"
+	if enc.StrFIdentity {
+		strF = "Identity"
+	}
 	return []byte(fmt.Sprintf(
 		"<</Filter/Standard/V 4/R 4/Length 128/P %d"+
 			"/O <%s>/U <%s>"+
 			"/EncryptMetadata true"+
 			"/CF<</StdCF<</AuthEvent/DocOpen/CFM/AESV2/Length 16>>>>"+
-			"/StmF/StdCF/StrF/Identity>>",
-		enc.P, oHex, uHex,
+			"/StmF/StdCF/StrF/%s>>",
+		enc.P, oHex, uHex, strF,
 	))
 }
