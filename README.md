@@ -362,8 +362,10 @@ pdfer/
 
 | Category | Feature | Status |
 |---|---|---|
-| **Encryption** | RC4 40/128-bit, AES 128/256-bit read | ✅ |
+| **Encryption** | RC4 40/128-bit, AES-128 read | ✅ |
 | | AES-128 write | ✅ |
+| | AES-256 password verification | ✅ |
+| | AES-256 content decryption / write | ⚠️ not spec-conformant (see GAPS.md) |
 | | Owner-password auth (R≤4) | ✅ |
 | | Permission flags | ✅ |
 | **Page ops** | Merge, split, extract, delete | ✅ |
