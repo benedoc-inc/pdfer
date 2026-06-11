@@ -128,6 +128,33 @@ and an empty `OwnerID` when the owner is not a typed schema entity.)
 
 ### P1 — High impact
 
+#### AES-256 (V5) content crypto is not spec-conformant
+Password verification and file-key derivation for V5/R6 are correct (SHA-256
+R6 KDF, `/U`/`/O` validation, `/UE`/`/OE` unwrapping — well covered by
+`key_derivation_v5_test.go`). But per-object encryption and decryption route
+V5 through the V4-era scheme: an MD5("key + objnum + gennum + sAlT") key
+truncated to 16 bytes (`core/encrypt/decrypt.go` V==5 branch, mirrored by
+`EncryptObject`). Spec AESV3 (ISO 32000-1 §7.6.2) uses the 32-byte file key
+directly for every object, with no per-object derivation.
+
+Consequences:
+- **Read**: genuine external AES-256 PDFs (Acrobat X+ password-security
+  default) verify the password successfully but decrypt streams and strings
+  to garbage — a confusing failure mode, since authentication appears to work.
+- **Write**: `write.SetupEncryptionWithPasswords` / `SetupAES256Encryption`
+  output declares `/CFM /AESV3` but is encrypted with the non-spec scheme, so
+  it round-trips within pdfer only; conformant readers cannot open it.
+
+Not currently hit by the test suite: `tests/e2e_aes256_test.go` asserts
+password verification and key length only (never decrypted content), and its
+external-file variants skip without a `test_aes256.pdf` fixture or qpdf.
+
+**Workaround**: pre-decrypt AES-256 inputs with an external tool (e.g.
+`qpdf --decrypt`); use the default AES-128 `EncryptPDF` path for output.
+
+**Files**: `core/encrypt/decrypt.go`, `core/encrypt/encrypt_object.go`,
+`core/write/encryption_v5.go`
+
 #### ~~Redaction is incomplete (content streams only)~~ ✅ Fixed in v1.3.0
 `Redact` now handles three of the four previously missing surfaces:
 - **Annotation objects** — every annotation object whose `/Rect` overlaps a
