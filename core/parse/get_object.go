@@ -261,10 +261,10 @@ func extractDirectObjectContent(pdfBytes []byte, objNum int, offset int64, encry
 	// Stream object: trim to endstream and optionally decrypt.
 	streamStart := streamKeywordPos(content)
 	if streamStart != -1 {
-		endstreamPos := bytes.Index(content, []byte("endstream"))
-		if endstreamPos == -1 {
-			endstreamPos = len(content)
-		}
+		// Bound the endstream search to after the stream data (honouring a
+		// direct /Length) so payload bytes containing the literal "endstream"
+		// don't truncate the stream early.
+		endstreamPos := endstreamKeywordPos(content, streamStart)
 		content = content[:endstreamPos+len("endstream")]
 
 		if encryptInfo != nil {
@@ -336,46 +336,4 @@ func extractDirectObjectContent(pdfBytes []byte, objNum int, offset int64, encry
 	}
 
 	return content, genNum, nil
-}
-
-// streamKeywordPos returns the index of the "stream" keyword in an object
-// body, or -1 for non-stream objects. The search starts after the object's
-// dictionary: a naive bytes.Index would match "stream" inside dictionary
-// names such as /Subtype /application#2Foctet-stream and misplace the stream
-// data when decrypting.
-func streamKeywordPos(content []byte) int {
-	from := 0
-	if dictStart := bytes.Index(content, []byte("<<")); dictStart != -1 {
-		depth := 0
-		inString := false
-		for i := dictStart; i < len(content); i++ {
-			c := content[i]
-			if inString {
-				switch c {
-				case '\\':
-					i++ // skip escaped byte
-				case ')':
-					inString = false
-				}
-				continue
-			}
-			switch c {
-			case '(':
-				inString = true
-			case '<':
-				depth++
-			case '>':
-				depth--
-				if depth == 0 {
-					from = i + 1
-					i = len(content)
-				}
-			}
-		}
-	}
-	rel := bytes.Index(content[from:], []byte("stream"))
-	if rel == -1 {
-		return -1
-	}
-	return from + rel
 }
