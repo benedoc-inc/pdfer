@@ -89,6 +89,15 @@ func endstreamKeywordPos(content []byte, streamStart int) int {
 
 	rel := bytes.Index(content[searchFrom:], []byte("endstream"))
 	if rel == -1 {
+		// A /Length larger than the real stream data (a common malformation,
+		// e.g. one that counts a trailing EOL) pushes searchFrom past the real
+		// "endstream". Fall back to a full scan from the stream data start so
+		// the stream isn't silently dropped.
+		if searchFrom > streamDataStart {
+			if rel = bytes.Index(content[streamDataStart:], []byte("endstream")); rel != -1 {
+				return streamDataStart + rel
+			}
+		}
 		return len(content)
 	}
 	return searchFrom + rel

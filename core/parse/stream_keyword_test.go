@@ -108,6 +108,28 @@ func TestEndstreamKeywordPos_NoLengthFallback(t *testing.T) {
 	}
 }
 
+// TestEndstreamKeywordPos_OverlongLengthFallback verifies that an inaccurate
+// /Length that overshoots the real stream data (a common malformation) does not
+// cause the closing marker to be missed: the search falls back to a full scan
+// from the stream data start rather than returning len(content) and silently
+// dropping the stream.
+func TestEndstreamKeywordPos_OverlongLengthFallback(t *testing.T) {
+	// Real data is "abc" (3 bytes) but /Length claims 99, pushing the bounded
+	// search past the trailing "endstream".
+	content := []byte("<</Length 99>>\nstream\nabc\nendstream")
+	streamStart := streamKeywordPos(content)
+	if streamStart == -1 {
+		t.Fatal("stream keyword not found")
+	}
+	pos := endstreamKeywordPos(content, streamStart)
+	if pos >= len(content) {
+		t.Fatalf("endstreamKeywordPos returned %d (>= len %d); marker missed", pos, len(content))
+	}
+	if string(content[pos:]) != "endstream" {
+		t.Fatalf("endstreamKeywordPos landed on %q, want the trailing marker", content[pos:])
+	}
+}
+
 // TestParseXRefStreamFull_PayloadEndstreamMarker verifies the xref-stream
 // parser does not truncate the compressed payload at an "endstream" literal
 // inside it. The payload is stored (zlib NoCompression) so the literal bytes

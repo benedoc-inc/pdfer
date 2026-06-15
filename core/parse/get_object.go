@@ -265,7 +265,11 @@ func extractDirectObjectContent(pdfBytes []byte, objNum int, offset int64, encry
 		// direct /Length) so payload bytes containing the literal "endstream"
 		// don't truncate the stream early.
 		endstreamPos := endstreamKeywordPos(content, streamStart)
-		content = content[:endstreamPos+len("endstream")]
+		end := endstreamPos + len("endstream")
+		if end > len(content) {
+			end = len(content)
+		}
+		content = content[:end]
 
 		if encryptInfo != nil {
 			dictPart := content[:streamStart]
