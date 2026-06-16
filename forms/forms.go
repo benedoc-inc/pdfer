@@ -162,12 +162,25 @@ func (w *XFAFormWrapper) GetValues() map[string]interface{} {
 	return make(map[string]interface{})
 }
 
+// isFormAuthError reports whether an AcroForm extraction error is an
+// authentication/decryption failure (wrong password, etc.) that must surface
+// to the caller, rather than a benign "this PDF has no AcroForm" that should
+// fall through to XFA detection. ExtractAcroForm wraps decrypt errors with
+// fmt.Errorf, so unwrap to the *PDFError before classifying.
+func isFormAuthError(err error) bool {
+	var pe *types.PDFError
+	return errors.As(err, &pe) && types.IsEncryptionError(pe)
+}
+
 // Detect detects the form type in a PDF
 func Detect(pdfBytes []byte, password []byte, verbose bool) (FormType, error) {
 	// Try AcroForm first
 	acroForm, err := acroform.ExtractAcroForm(pdfBytes, password, verbose)
 	if err == nil && acroForm != nil && len(acroForm.Fields) > 0 {
 		return FormTypeAcroForm, nil
+	}
+	if isFormAuthError(err) {
+		return FormTypeUnknown, err
 	}
 
 	// Try XFA
@@ -190,6 +203,9 @@ func Extract(pdfBytes []byte, password []byte, verbose bool) (Form, error) {
 			pdfBytes: pdfBytes,
 			password: password,
 		}, nil
+	}
+	if isFormAuthError(err) {
+		return nil, err
 	}
 
 	// Try XFA — decrypt first if the PDF is encrypted, since XFA stream
