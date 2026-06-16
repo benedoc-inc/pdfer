@@ -436,9 +436,15 @@ type xfaNode struct {
 	Layout string
 
 	// Field interaction
-	Required     bool
-	ReadOnly     bool
-	Hidden       bool
+	Required bool
+	ReadOnly bool
+	Hidden   bool
+	// Presence is the verbatim authored presence attribute on this node only
+	// ("visible"|"invisible"|"hidden"|"inactive"), "" when unset. Hidden rolls
+	// this together with ancestor presence; Presence preserves the per-node
+	// authored value so consumers can distinguish own vs inherited hidden-ness
+	// (and the invisible/inactive variants the bool collapses).
+	Presence     string
 	Options      []XFAOption
 	OptionValues []string // data values from <items save="1">
 	Validation   *XFAValidation
@@ -720,6 +726,7 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 							node.Name = attr.Value
 						}
 					case "presence":
+						node.Presence = attr.Value
 						if attr.Value != "visible" {
 							node.Hidden = true
 						}
@@ -756,6 +763,7 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 					case "layout":
 						node.Layout = attr.Value
 					case "presence":
+						node.Presence = attr.Value
 						if attr.Value != "visible" {
 							node.Hidden = true
 						}
@@ -797,6 +805,7 @@ func parseXFATemplate(xfaXML string, verbose bool) (*xfaTemplateResult, error) {
 							leaf.Required = true
 						}
 					case "presence":
+						leaf.Presence = attr.Value
 						leaf.Hidden = attr.Value != "visible"
 					case "access":
 						if attr.Value == "readOnly" || attr.Value == "protected" || attr.Value == "nonInteractive" {
@@ -1740,6 +1749,7 @@ func extractAllElements(root *xfaNode, schema *types.FormSchema) {
 					Role:       "button",
 					Label:      resolveInteractiveLabel(node),
 					Hidden:     parentHidden || node.Hidden,
+					Presence:   node.Presence,
 					PageNumber: node.PageNumber,
 					Section:    section,
 					Occur:      node.Occur,
@@ -1758,6 +1768,7 @@ func extractAllElements(root *xfaNode, schema *types.FormSchema) {
 					Role:       "draw",
 					Label:      resolveDrawText(node),
 					Hidden:     parentHidden || node.Hidden,
+					Presence:   node.Presence,
 					PageNumber: node.PageNumber,
 					Section:    section,
 					Occur:      node.Occur,
@@ -1796,6 +1807,7 @@ func extractAllElements(root *xfaNode, schema *types.FormSchema) {
 				Role:      "pageArea",
 				Label:     label,
 				Hidden:    parentHidden || node.Hidden,
+				Presence:  node.Presence,
 				Occur:     node.Occur,
 				Bind:      node.BindMeta,
 				// PageNumber and Section intentionally omitted: pageAreas are
@@ -2089,6 +2101,7 @@ func buildSection(node, parent *xfaNode, parentPath []string, schema *types.Form
 		Tooltip:     node.ToolTip,
 		Interactive: interactive,
 		Hidden:      nodeHidden,
+		Presence:    node.Presence,
 		Layout:      node.Layout,
 		Width:       node.W,
 		Height:      node.H,
@@ -2170,6 +2183,7 @@ func emitExclGroup(node *xfaNode, path []string, somSeg string, qIdx *int, paren
 		Section:    sectionName(path),
 		PageNumber: node.PageNumber,
 		Hidden:     parentHidden || node.Hidden,
+		Presence:   node.Presence,
 		Occur:      node.Occur,
 		Bind:       node.BindMeta,
 	}
@@ -2213,6 +2227,7 @@ func emitField(node *xfaNode, path []string, somSeg string, qIdx *int, parentHid
 					Section:    sectionName(path),
 					PageNumber: node.PageNumber,
 					Hidden:     parentHidden || node.Hidden,
+					Presence:   node.Presence,
 					Occur:      node.Occur,
 					Bind:       node.BindMeta,
 				}, true
@@ -2234,6 +2249,7 @@ func emitField(node *xfaNode, path []string, somSeg string, qIdx *int, parentHid
 			Section:    sectionName(path),
 			PageNumber: node.PageNumber,
 			Hidden:     parentHidden || node.Hidden,
+			Presence:   node.Presence,
 			Occur:      node.Occur,
 			Bind:       node.BindMeta,
 		}, true
@@ -2280,6 +2296,7 @@ func emitDraw(node *xfaNode, path []string, parent *xfaNode, somSeg string, qIdx
 			Type:       types.ResponseTypeSeparator,
 			ReadOnly:   true,
 			Hidden:     parentHidden || node.Hidden,
+			Presence:   node.Presence,
 			Section:    sectionName(path),
 			PageNumber: node.PageNumber,
 			Properties: props,
@@ -2312,6 +2329,7 @@ func emitDraw(node *xfaNode, path []string, parent *xfaNode, somSeg string, qIdx
 			Type:        types.ResponseTypeImage,
 			ReadOnly:    true,
 			Hidden:      parentHidden || node.Hidden,
+			Presence:    node.Presence,
 			Section:     sectionName(path),
 			PageNumber:  node.PageNumber,
 			Properties:  props,
@@ -2351,6 +2369,7 @@ func emitDraw(node *xfaNode, path []string, parent *xfaNode, somSeg string, qIdx
 		Type:        types.ResponseTypeDisplay,
 		ReadOnly:    true,
 		Hidden:      parentHidden || node.Hidden,
+		Presence:    node.Presence,
 		Section:     sectionName(path),
 		PageNumber:  node.PageNumber,
 		Properties:  props,
@@ -2378,6 +2397,7 @@ func convertNodeToQuestion(node *xfaNode, index int, section string, parentHidde
 		Required:    node.Required,
 		ReadOnly:    node.ReadOnly,
 		Hidden:      parentHidden || node.Hidden,
+		Presence:    node.Presence,
 		PageNumber:  node.PageNumber,
 		Section:     section,
 		Occur:       node.Occur,
