@@ -97,23 +97,28 @@ func ParseXRefStreamFull(pdfBytes []byte, startXRef int64, verbose bool) (*XRefR
 	}
 
 	// Find and decompress stream content
-	streamKeywordPos := bytes.Index(xrefSection[dictStart:], []byte("stream"))
-	if streamKeywordPos == -1 {
+	streamKeywordStart := streamKeywordPos(xrefSection)
+	if streamKeywordStart == -1 {
 		return nil, fmt.Errorf("stream keyword not found")
 	}
-	streamKeywordStart := dictStart + streamKeywordPos
 
 	streamDataStart := streamKeywordStart + 6
 	for streamDataStart < len(xrefSection) && (xrefSection[streamDataStart] == '\r' || xrefSection[streamDataStart] == '\n' || xrefSection[streamDataStart] == ' ' || xrefSection[streamDataStart] == '\t') {
 		streamDataStart++
 	}
 
-	streamEndPos := bytes.Index(xrefSection[streamDataStart:], []byte("endstream"))
+	// Honour a direct /Length so the compressed payload (which may contain the
+	// literal bytes "endstream") can't truncate the stream early.
+	endSearch := streamDataStart
+	if n := directStreamLength(xrefSection[dictStart:streamKeywordStart]); n > 0 && streamDataStart+n <= len(xrefSection) {
+		endSearch = streamDataStart + n
+	}
+	streamEndPos := bytes.Index(xrefSection[endSearch:], []byte("endstream"))
 	if streamEndPos == -1 {
 		return nil, fmt.Errorf("endstream not found")
 	}
 
-	streamContent := xrefSection[streamDataStart : streamDataStart+streamEndPos]
+	streamContent := xrefSection[streamDataStart : endSearch+streamEndPos]
 
 	// Decompress (xref streams are NOT encrypted)
 	var decompressed []byte
@@ -289,27 +294,23 @@ func GetObjectFromStream(pdfBytes []byte, objNum int, streamObjNum int, indexInS
 		return nil, fmt.Errorf("object stream dictionary not found")
 	}
 
-	// Find dictionary end to get dict content
-	dictEnd := bytes.Index(objSection[dictStart:], []byte(">>"))
-	if dictEnd == -1 {
-		return nil, fmt.Errorf("dictionary end not found")
+	// Find the stream keyword (located after the balanced dictionary, honouring
+	// string values) so the dict is bounded correctly below.
+	streamKeyword := streamKeywordPos(objSection)
+	if streamKeyword == -1 {
+		return nil, fmt.Errorf("stream keyword not found in object stream")
 	}
-	dictContent := string(objSection[dictStart : dictStart+dictEnd+2])
 
-	// Get /Length from dictionary
+	// Get /Length from the dictionary. Bound the dict at the stream keyword
+	// rather than the first ">>": a nested dict value (e.g. /DecodeParms <<...>>)
+	// preceding /Length would otherwise close the dict early and lose /Length.
+	dictContent := string(objSection[dictStart:streamKeyword])
 	lengthPattern := regexp.MustCompile(`/Length\s+(\d+)`)
 	lengthMatch := lengthPattern.FindStringSubmatch(dictContent)
 	if lengthMatch == nil {
 		return nil, fmt.Errorf("/Length not found in object stream dictionary")
 	}
 	streamLength, _ := strconv.Atoi(lengthMatch[1])
-
-	// Find stream keyword
-	streamKeyword := bytes.Index(objSection[dictStart:], []byte("stream"))
-	if streamKeyword == -1 {
-		return nil, fmt.Errorf("stream keyword not found in object stream")
-	}
-	streamKeyword += dictStart
 
 	// Skip "stream" and exactly one EOL marker (per PDF spec)
 	streamDataStart := streamKeyword + 6

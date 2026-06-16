@@ -233,8 +233,9 @@ func (p *incrementalParser) findPrevOffset(startXRef int64) (int64, error) {
 	}
 
 	// Cross-reference stream - /Prev is in the stream dictionary
-	// Find the dictionary end (before "stream" keyword)
-	streamIdx := bytes.Index(section, []byte("stream"))
+	// Find the dictionary end (the "stream" keyword, located after the dict so
+	// a name/string containing "stream" doesn't truncate it prematurely).
+	streamIdx := streamKeywordPos(section)
 	if streamIdx == -1 {
 		streamIdx = min(2000, len(section))
 	}
