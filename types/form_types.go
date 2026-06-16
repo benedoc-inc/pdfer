@@ -20,7 +20,8 @@ type FormElement struct {
 	OwnerPath  string                 `json:"owner_path"`
 	Role       string                 `json:"role"` // "button" | "draw" | "pageArea"
 	Label      string                 `json:"label,omitempty"`
-	Hidden     bool                   `json:"hidden,omitempty"`      // static presence != "visible" on this node or an ancestor subform
+	Hidden     bool                   `json:"hidden,omitempty"`      // rolled-up static presence: hidden on this node or an ancestor subform
+	Presence   string                 `json:"presence,omitempty"`    // verbatim authored presence on THIS node only: "visible"|"invisible"|"hidden"|"inactive"; "" when unset. Unlike Hidden, never inherits from ancestors
 	PageNumber int                    `json:"page_number,omitempty"` // field/draw "page" attribute; 0 for pageAreas and unannotated nodes
 	Section    string                 `json:"section,omitempty"`     // nearest enclosing subform name; empty for pageAreas and top-level nodes
 	Properties map[string]interface{} `json:"properties,omitempty"`
@@ -34,15 +35,16 @@ type FormElement struct {
 // the flat Questions slice on FormSchema is the canonical store.
 type FormSection struct {
 	Name        string        `json:"name"`
-	Path        string        `json:"path"`              // SOM-style dot-path from root, e.g. "form1.section2.sub"; same-named siblings carry "[i]" suffixes (XFA only)
-	Label       string        `json:"label,omitempty"`   // human-readable label from XFA subform caption; empty when not specified
-	Tooltip     string        `json:"tooltip,omitempty"` // accessibility tooltip (e.g. IMDRF TOC chapter references)
-	Interactive bool          `json:"interactive"`       // true if the section contains any data-bound fields
-	Hidden      bool          `json:"hidden,omitempty"`  // static presence != "visible" on this subform or an ancestor subform
-	Layout      string        `json:"layout,omitempty"`  // XFA layout mode: position|tb|lr-tb|row|table
-	Width       string        `json:"width,omitempty"`   // subform w attribute (mm/in/pt)
-	Height      string        `json:"height,omitempty"`  // subform h attribute (mm/in/pt)
-	Content     []string      `json:"content,omitempty"` // static display text from non-interactive sections
+	Path        string        `json:"path"`               // SOM-style dot-path from root, e.g. "form1.section2.sub"; same-named siblings carry "[i]" suffixes (XFA only)
+	Label       string        `json:"label,omitempty"`    // human-readable label from XFA subform caption; empty when not specified
+	Tooltip     string        `json:"tooltip,omitempty"`  // accessibility tooltip (e.g. IMDRF TOC chapter references)
+	Interactive bool          `json:"interactive"`        // true if the section contains any data-bound fields
+	Hidden      bool          `json:"hidden,omitempty"`   // rolled-up static presence: hidden on this subform or an ancestor subform
+	Presence    string        `json:"presence,omitempty"` // verbatim authored presence on THIS subform only: "visible"|"invisible"|"hidden"|"inactive"; "" when unset. Unlike Hidden, never inherits from ancestors
+	Layout      string        `json:"layout,omitempty"`   // XFA layout mode: position|tb|lr-tb|row|table
+	Width       string        `json:"width,omitempty"`    // subform w attribute (mm/in/pt)
+	Height      string        `json:"height,omitempty"`   // subform h attribute (mm/in/pt)
+	Content     []string      `json:"content,omitempty"`  // static display text from non-interactive sections
 	Children    []FormSection `json:"children,omitempty"`
 	Questions   []string      `json:"questions,omitempty"` // question IDs in document order
 	Scripts     []string      `json:"scripts,omitempty"`   // FormScript IDs for subform-level events, in declaration order
@@ -91,7 +93,8 @@ type Question struct {
 	Default     interface{}            `json:"default,omitempty"`     // Default value
 	Required    bool                   `json:"required"`              // Is field required?
 	ReadOnly    bool                   `json:"read_only"`             // Is field read-only?
-	Hidden      bool                   `json:"hidden"`                // Is field initially hidden?
+	Hidden      bool                   `json:"hidden"`                // Rolled-up static presence: hidden on this node or an ancestor subform
+	Presence    string                 `json:"presence,omitempty"`    // verbatim authored presence on THIS node only: "visible"|"invisible"|"hidden"|"inactive"; "" when unset. Unlike Hidden, never inherits from ancestors
 	Properties  map[string]interface{} `json:"properties,omitempty"`  // Additional properties (position, size, etc.)
 	PageNumber  int                    `json:"page_number,omitempty"` // Which page the field appears on
 	Section     string                 `json:"section,omitempty"`     // Parent subform / section name; matches the parent FormSection.Path's last segment (may include "[i]" for XFA same-named-sibling disambiguation)

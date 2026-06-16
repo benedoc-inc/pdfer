@@ -1227,6 +1227,99 @@ func TestPresenceHiddenField(t *testing.T) {
 	}
 }
 
+// TestOwnPresenceVsRolledUpHidden verifies the issue #35 distinction: Hidden is
+// the rolled-up value (own ∨ ancestor presence), while Presence carries only the
+// node's own authored presence attribute and never inherits from ancestors. A
+// node inside a hidden subform that authors no presence reports Hidden=true but
+// Presence="" — so a consumer can tell inherited hidden-ness apart from authored
+// hidden-ness, and recover the invisible/inactive variants the bool collapses.
+func TestOwnPresenceVsRolledUpHidden(t *testing.T) {
+	xfaXML := `<?xml version="1.0"?>
+<template>
+  <subform name="root">
+    <subform name="hiddenContainer" presence="hidden">
+      <field name="inheritedHidden">
+        <ui><textEdit/></ui>
+      </field>
+      <field name="ownVisible" presence="visible">
+        <ui><textEdit/></ui>
+      </field>
+      <field name="ownInactive" presence="inactive">
+        <ui><textEdit/></ui>
+      </field>
+    </subform>
+    <field name="ownInvisible" presence="invisible">
+      <ui><textEdit/></ui>
+    </field>
+    <field name="plainVisible">
+      <ui><textEdit/></ui>
+    </field>
+  </subform>
+</template>`
+
+	form, err := ParseXFAForm(xfaXML, false)
+	if err != nil {
+		t.Fatalf("ParseXFAForm() error = %v", err)
+	}
+
+	byName := map[string]*types.Question{}
+	for i := range form.Questions {
+		byName[form.Questions[i].Name] = &form.Questions[i]
+	}
+
+	cases := []struct {
+		name         string
+		wantHidden   bool
+		wantPresence string
+	}{
+		// Inherits hidden from the container but authored nothing itself.
+		{"inheritedHidden", true, ""},
+		// Authored visible, yet rolled-up Hidden is true via the hidden ancestor.
+		{"ownVisible", true, "visible"},
+		// Authored inactive — Hidden true, own variant preserved.
+		{"ownInactive", true, "inactive"},
+		// Authored invisible at top level — own variant preserved, no ancestor.
+		{"ownInvisible", true, "invisible"},
+		// Plain field, no presence anywhere.
+		{"plainVisible", false, ""},
+	}
+	for _, tc := range cases {
+		q := byName[tc.name]
+		if q == nil {
+			t.Errorf("%s not found", tc.name)
+			continue
+		}
+		if q.Hidden != tc.wantHidden {
+			t.Errorf("%s: Hidden = %v, want %v", tc.name, q.Hidden, tc.wantHidden)
+		}
+		if q.Presence != tc.wantPresence {
+			t.Errorf("%s: Presence = %q, want %q", tc.name, q.Presence, tc.wantPresence)
+		}
+	}
+
+	// The container subform itself: own and rolled-up presence both "hidden".
+	var container *types.FormSection
+	var walk func(secs []types.FormSection)
+	walk = func(secs []types.FormSection) {
+		for i := range secs {
+			if secs[i].Name == "hiddenContainer" {
+				container = &secs[i]
+			}
+			walk(secs[i].Children)
+		}
+	}
+	walk(form.Sections)
+	if container == nil {
+		t.Fatal("hiddenContainer section not found")
+	}
+	if !container.Hidden {
+		t.Error("hiddenContainer should have Hidden=true")
+	}
+	if container.Presence != "hidden" {
+		t.Errorf("hiddenContainer Presence = %q, want \"hidden\"", container.Presence)
+	}
+}
+
 func TestPresenceVisibleField(t *testing.T) {
 	xfaXML := `<?xml version="1.0"?>
 <template>
