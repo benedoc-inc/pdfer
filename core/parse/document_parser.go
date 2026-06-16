@@ -453,8 +453,11 @@ func ParseRawObject(pdfBytes []byte, objNum int, objGen int, offset int64) (*PDF
 	obj.RawBytes = section[:endOffset]
 	obj.EndOffset = offset + int64(endOffset)
 
-	// Check if this is a stream object
-	streamIdx := bytes.Index(obj.RawBytes, []byte("stream"))
+	// Check if this is a stream object. The keyword is located after the
+	// dictionary so a "stream" inside a name or string value (e.g. /Subtype
+	// /application#2Foctet-stream or /F (data-stream.txt)) neither flags a
+	// plain dictionary as a stream nor truncates the dictionary scan.
+	streamIdx := streamKeywordPos(obj.RawBytes)
 	if streamIdx != -1 {
 		obj.IsStream = true
 
@@ -490,10 +493,10 @@ func ParseRawObject(pdfBytes []byte, objNum int, objGen int, offset int64) (*PDF
 			streamDataStart++
 		}
 
-		// Find endstream
-		endstreamIdx := bytes.Index(obj.RawBytes[streamDataStart:], []byte("endstream"))
-		if endstreamIdx != -1 {
-			streamDataEnd := streamDataStart + endstreamIdx
+		// Find endstream after the stream data (honouring a direct /Length) so
+		// payload bytes containing the literal "endstream" don't truncate early.
+		if endIdx := endstreamKeywordPos(obj.RawBytes, streamIdx); endIdx < len(obj.RawBytes) {
+			streamDataEnd := endIdx
 			// Trim trailing EOL before endstream
 			if streamDataEnd > streamDataStart && obj.RawBytes[streamDataEnd-1] == '\n' {
 				streamDataEnd--

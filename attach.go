@@ -5,6 +5,7 @@ import (
 	"compress/zlib"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -29,6 +30,13 @@ func EmbedAttachments(pdfBytes []byte, files []FileAttachment) ([]byte, error) {
 // EmbedAttachmentsWithPassword appends file attachments to pdfBytes via an
 // incremental update, supplying the user or owner password for encrypted
 // documents (pass nil for unencrypted ones).
+//
+// Attachments already embedded in the document are preserved: the existing
+// /EmbeddedFiles name tree is merged with the new entries (flattened into a
+// single sorted leaf node), and sibling name trees under the catalog's /Names
+// dictionary (/Dests, /JavaScript, ...) are carried over. When a new file's
+// name collides with an existing entry (or another file in the same batch) it
+// is renamed with a -1, -2, ... suffix before the extension.
 //
 // For encrypted PDFs the appended embedded-file streams are encrypted with the
 // document's keys, string values follow the document's /StrF crypt filter, and
@@ -57,18 +65,20 @@ func EmbedAttachmentsWithPassword(pdfBytes []byte, files []FileAttachment, passw
 		return nil, fmt.Errorf("read catalog: %w", err)
 	}
 
+	// Existing /Names dictionary (inline or indirect): its /EmbeddedFiles tree
+	// is merged with the new entries, and its other name trees are preserved.
+	entries, siblings := attachExistingNames(pdf, catalogBody)
+	used := make(map[string]bool, len(entries)+len(files))
+	for _, e := range entries {
+		used[e.key] = true
+	}
+
 	upd, err := incremental.New(pdfBytes, trailer, pdf.Encryption())
 	if err != nil {
 		return nil, err
 	}
 
 	// One embedded-file stream object + one filespec dict object per file.
-	type attachment struct {
-		name       string
-		filespecNo int
-	}
-	attachments := make([]attachment, 0, len(files))
-
 	for _, f := range files {
 		mimeType := f.MimeType
 		if mimeType == "" {
@@ -85,7 +95,8 @@ func EmbedAttachmentsWithPassword(pdfBytes []byte, files []FileAttachment, passw
 		}
 
 		filespecNo := upd.Reserve()
-		escapedName := pdfStringEscape(f.Name)
+		name := attachUniqueName(f.Name, used)
+		escapedName := pdfStringEscape(name)
 		filespec := fmt.Sprintf(
 			"<</Type /Filespec /F (%s) /UF (%s) /EF <</F %d 0 R>>>>",
 			escapedName, escapedName, streamNo,
@@ -94,15 +105,22 @@ func EmbedAttachmentsWithPassword(pdfBytes []byte, files []FileAttachment, passw
 			return nil, err
 		}
 
-		attachments = append(attachments, attachment{name: f.Name, filespecNo: filespecNo})
+		entries = append(entries, nameTreeEntry{key: name, ref: filespecNo})
 	}
 
-	// /Names object: EmbeddedFiles name tree (flat, no kids).
+	// Name-tree keys must be lexically sorted (ISO 32000-1 §7.9.6). Go string
+	// comparison is byte-wise, matching the spec's ordering.
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].key < entries[j].key })
+
+	// /Names object: sibling trees carried over + the merged EmbeddedFiles
+	// name tree (flat, no kids).
 	namesNo := upd.Reserve()
 	var names bytes.Buffer
-	names.WriteString("<</EmbeddedFiles <</Names [")
-	for _, a := range attachments {
-		fmt.Fprintf(&names, " (%s) %d 0 R", pdfStringEscape(a.name), a.filespecNo)
+	names.WriteString("<<")
+	names.Write(siblings)
+	names.WriteString("/EmbeddedFiles <</Names [")
+	for _, e := range entries {
+		fmt.Fprintf(&names, " (%s) %d 0 R", pdfStringEscape(e.key), e.ref)
 	}
 	names.WriteString(" ]>>>>")
 	if err := upd.AddObject(namesNo, 0, names.Bytes()); err != nil {
@@ -115,6 +133,54 @@ func EmbedAttachmentsWithPassword(pdfBytes []byte, files []FileAttachment, passw
 	}
 
 	return upd.Bytes()
+}
+
+// nameTreeEntry is one key/filespec pair of an EmbeddedFiles name tree.
+type nameTreeEntry struct {
+	key string // decoded tree key (the display name)
+	ref int    // filespec object number
+}
+
+// attachExistingNames reads the catalog's /Names dictionary and returns the
+// entries of its /EmbeddedFiles name tree plus the remaining dictionary body
+// (sibling name trees such as /Dests) with the /EmbeddedFiles entry stripped,
+// ready to splice into a replacement /Names dictionary. Both the inline-dict
+// and indirect-reference forms of /Names are handled.
+func attachExistingNames(pdf *parse.PDF, catalogBody []byte) ([]nameTreeEntry, []byte) {
+	namesDict, err := attachResolveSubDict(pdf, catalogBody, "Names")
+	if err != nil || namesDict == nil {
+		return nil, nil
+	}
+
+	var entries []nameTreeEntry
+	if rootNode, err := attachResolveSubDict(pdf, namesDict, "EmbeddedFiles"); err == nil && rootNode != nil {
+		// Best effort: an unreadable subtree keeps the entries found so far.
+		_ = attachCollectNameTree(pdf, rootNode, &entries, 0)
+	}
+
+	return entries, attachStripDictKey(attachDictInner(namesDict), "EmbeddedFiles")
+}
+
+// attachUniqueName returns name if unused, otherwise inserts a -1, -2, ...
+// suffix before the extension until the result is unique. The chosen name is
+// recorded in used.
+func attachUniqueName(name string, used map[string]bool) string {
+	if !used[name] {
+		used[name] = true
+		return name
+	}
+	ext := ""
+	if dot := strings.LastIndex(name, "."); dot > 0 {
+		ext = name[dot:]
+	}
+	base := name[:len(name)-len(ext)]
+	for i := 1; ; i++ {
+		candidate := fmt.Sprintf("%s-%d%s", base, i, ext)
+		if !used[candidate] {
+			used[candidate] = true
+			return candidate
+		}
+	}
 }
 
 // ListAttachments returns the embedded files reachable from the PDF's
@@ -206,6 +272,119 @@ func attachWalkNameTree(pdf *parse.PDF, node []byte, out *[]FileAttachment, dept
 		}
 	}
 	return nil
+}
+
+// attachCollectNameTree recurses through an EmbeddedFiles name-tree node,
+// collecting the (key, filespec ref) pairs of every leaf /Names array. Unlike
+// attachWalkNameTree it does not resolve the filespecs: the pairs are reused
+// as-is when the tree is rewritten, so the existing objects stay referenced.
+func attachCollectNameTree(pdf *parse.PDF, node []byte, out *[]nameTreeEntry, depth int) error {
+	if depth > 64 {
+		return fmt.Errorf("name tree nested too deeply")
+	}
+	if kids := attachFindArray(node, "Kids"); kids != nil {
+		for _, ref := range attachArrayRefs(kids) {
+			kidBody, err := pdf.GetObject(ref)
+			if err != nil {
+				continue
+			}
+			if err := attachCollectNameTree(pdf, kidBody, out, depth+1); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if names := attachFindArray(node, "Names"); names != nil {
+		*out = append(*out, attachLeafEntries(names)...)
+	}
+	return nil
+}
+
+// attachLeafEntries scans a leaf /Names array, returning each string key
+// (literal or hex form) paired with the object number of the filespec
+// reference that follows it. Malformed tails are dropped.
+func attachLeafEntries(arr []byte) []nameTreeEntry {
+	refPat := regexp.MustCompile(`^(\d+)\s+\d+\s+R`)
+	var entries []nameTreeEntry
+	i := 0
+	for i < len(arr) {
+		for i < len(arr) && attachIsSpace(arr[i]) {
+			i++
+		}
+		if i >= len(arr) {
+			break
+		}
+		var key string
+		switch {
+		case arr[i] == '(':
+			end := attachLiteralEnd(arr, i)
+			if end < 0 {
+				return entries
+			}
+			key = pdfStringUnescape(arr[i+1 : end])
+			i = end + 1
+		case arr[i] == '<' && (i+1 >= len(arr) || arr[i+1] != '<'):
+			end := bytes.IndexByte(arr[i:], '>')
+			if end < 0 {
+				return entries
+			}
+			key = attachHexDecode(arr[i+1 : i+end])
+			i += end + 1
+		default:
+			return entries
+		}
+		for i < len(arr) && attachIsSpace(arr[i]) {
+			i++
+		}
+		m := refPat.FindSubmatch(arr[i:])
+		if m == nil {
+			return entries
+		}
+		ref, err := strconv.Atoi(string(m[1]))
+		if err != nil {
+			return entries
+		}
+		entries = append(entries, nameTreeEntry{key: key, ref: ref})
+		i += len(m[0])
+	}
+	return entries
+}
+
+func attachIsSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f' || c == 0
+}
+
+// attachHexDecode decodes a PDF hex string body (the bytes between < and >).
+// Whitespace is skipped and an odd trailing digit is padded with 0, per
+// ISO 32000-1 §7.3.4.3.
+func attachHexDecode(s []byte) string {
+	var b strings.Builder
+	hi := byte(0)
+	have := false
+	for _, c := range s {
+		var v byte
+		switch {
+		case c >= '0' && c <= '9':
+			v = c - '0'
+		case c >= 'a' && c <= 'f':
+			v = c - 'a' + 10
+		case c >= 'A' && c <= 'F':
+			v = c - 'A' + 10
+		default:
+			continue
+		}
+		if have {
+			b.WriteByte(hi<<4 | v)
+			have = false
+		} else {
+			hi = v
+			have = true
+		}
+	}
+	if have {
+		b.WriteByte(hi << 4)
+	}
+	return b.String()
 }
 
 // attachReadFilespec resolves a /Filespec object and its embedded-file stream
@@ -413,10 +592,20 @@ func attachFindString(dict []byte, key string) string {
 	if idx < 0 || idx >= len(dict) || dict[idx] != '(' {
 		return ""
 	}
-	// Scan to the matching ) honouring backslash escapes and nested literals.
+	end := attachLiteralEnd(dict, idx)
+	if end < 0 {
+		return ""
+	}
+	return pdfStringUnescape(dict[idx+1 : end])
+}
+
+// attachLiteralEnd scans a PDF literal string opening at data[start] == '('
+// and returns the index of its matching ')', honouring backslash escapes and
+// nested unescaped parens, or -1 when unterminated.
+func attachLiteralEnd(data []byte, start int) int {
 	depth := 0
-	for i := idx; i < len(dict); i++ {
-		switch dict[i] {
+	for i := start; i < len(data); i++ {
+		switch data[i] {
 		case '\\':
 			i++ // skip the escaped byte
 		case '(':
@@ -424,11 +613,11 @@ func attachFindString(dict []byte, key string) string {
 		case ')':
 			depth--
 			if depth == 0 {
-				return pdfStringUnescape(dict[idx+1 : i])
+				return i
 			}
 		}
 	}
-	return ""
+	return -1
 }
 
 // attachFindSubDict returns the bytes between (and excluding) the << >> of the
@@ -522,19 +711,27 @@ func attachMatchDelimited(data []byte, start int, open, close byte) int {
 }
 
 // pdfStringUnescape reverses pdfStringEscape for the common escapes produced
-// by this package and standard writers: \\ \( \) and \r \n \t.
+// by this package and standard writers: \\ \( \) \r \n \t and octal \ddd.
 func pdfStringUnescape(s []byte) string {
 	var b strings.Builder
 	for i := 0; i < len(s); i++ {
 		if s[i] == '\\' && i+1 < len(s) {
 			i++
-			switch s[i] {
-			case 'n':
+			switch {
+			case s[i] == 'n':
 				b.WriteByte('\n')
-			case 'r':
+			case s[i] == 'r':
 				b.WriteByte('\r')
-			case 't':
+			case s[i] == 't':
 				b.WriteByte('\t')
+			case s[i] >= '0' && s[i] <= '7':
+				v := 0
+				for d := 0; d < 3 && i < len(s) && s[i] >= '0' && s[i] <= '7'; d++ {
+					v = v<<3 | int(s[i]-'0')
+					i++
+				}
+				i--
+				b.WriteByte(byte(v))
 			default:
 				b.WriteByte(s[i])
 			}
@@ -566,18 +763,81 @@ func pdfNameUnescape(s string) string {
 }
 
 // injectNamesRef returns a copy of catalogBody with /Names N 0 R added or
-// replaced. It strips any pre-existing top-level /Names entry and appends
-// a fresh one before the closing >>.
+// replaced. It strips any pre-existing /Names entry — indirect reference or
+// inline dictionary — and appends a fresh one before the closing >>.
 func injectNamesRef(catalogBody []byte, namesNo int) []byte {
-	s := string(catalogBody)
-	namesPat := regexp.MustCompile(`/Names\s+\d+\s+\d+\s+R`)
-	s = namesPat.ReplaceAllString(s, "")
+	s := string(attachStripDictKey(catalogBody, "Names"))
 	end := strings.LastIndex(s, ">>")
 	if end == -1 {
 		return []byte(fmt.Sprintf("<</Names %d 0 R>>", namesNo))
 	}
 	newRef := fmt.Sprintf("/Names %d 0 R", namesNo)
 	return []byte(s[:end] + newRef + s[end:])
+}
+
+// attachDictInner returns the content between the outer << >> of a dictionary
+// object (as returned by GetObject, which includes the "N G obj"/"endobj"
+// wrapper), or body unchanged when it is already inner content (as returned
+// by attachFindSubDict for inline dictionaries).
+func attachDictInner(body []byte) []byte {
+	i := 0
+	for i < len(body) && attachIsSpace(body[i]) {
+		i++
+	}
+	if m := regexp.MustCompile(`^\d+\s+\d+\s+obj\b`).Find(body[i:]); m != nil {
+		i += len(m)
+		for i < len(body) && attachIsSpace(body[i]) {
+			i++
+		}
+	}
+	if i+1 < len(body) && body[i] == '<' && body[i+1] == '<' {
+		if end := attachMatchDelimited(body, i, '<', '>'); end > i {
+			return body[i+2 : end-1]
+		}
+	}
+	return body[i:]
+}
+
+// attachStripDictKey returns dict with its first /key entry and the entry's
+// value removed. Dictionary, array, string (literal and hex), indirect
+// reference, and single-token values are recognised; dict is returned
+// unchanged when key is absent or its value cannot be delimited.
+func attachStripDictKey(dict []byte, key string) []byte {
+	loc := regexp.MustCompile(`/` + regexp.QuoteMeta(key) + `\b`).FindIndex(dict)
+	if loc == nil {
+		return dict
+	}
+	i := loc[1]
+	for i < len(dict) && attachIsSpace(dict[i]) {
+		i++
+	}
+	if i >= len(dict) {
+		return dict
+	}
+	end := -1 // index of the value's last byte
+	switch {
+	case dict[i] == '<' && i+1 < len(dict) && dict[i+1] == '<':
+		end = attachMatchDelimited(dict, i, '<', '>')
+	case dict[i] == '[':
+		end = attachMatchDelimited(dict, i, '[', ']')
+	case dict[i] == '(':
+		end = attachLiteralEnd(dict, i)
+	case dict[i] == '<':
+		if e := bytes.IndexByte(dict[i:], '>'); e >= 0 {
+			end = i + e
+		}
+	default:
+		if m := regexp.MustCompile(`^(\d+\s+\d+\s+R|/?[^\s/<>\[\]()]+)`).Find(dict[i:]); m != nil {
+			end = i + len(m) - 1
+		}
+	}
+	if end < 0 {
+		return dict
+	}
+	out := make([]byte, 0, len(dict)-(end+1-loc[0]))
+	out = append(out, dict[:loc[0]]...)
+	out = append(out, dict[end+1:]...)
+	return out
 }
 
 func compressBytes(data []byte) []byte {

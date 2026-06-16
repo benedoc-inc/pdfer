@@ -259,13 +259,17 @@ func extractDirectObjectContent(pdfBytes []byte, objNum int, offset int64, encry
 	content = objData[contentStart:endobjPos]
 
 	// Stream object: trim to endstream and optionally decrypt.
-	streamStart := bytes.Index(content, []byte("stream"))
+	streamStart := streamKeywordPos(content)
 	if streamStart != -1 {
-		endstreamPos := bytes.Index(content, []byte("endstream"))
-		if endstreamPos == -1 {
-			endstreamPos = len(content)
+		// Bound the endstream search to after the stream data (honouring a
+		// direct /Length) so payload bytes containing the literal "endstream"
+		// don't truncate the stream early.
+		endstreamPos := endstreamKeywordPos(content, streamStart)
+		end := endstreamPos + len("endstream")
+		if end > len(content) {
+			end = len(content)
 		}
-		content = content[:endstreamPos+len("endstream")]
+		content = content[:end]
 
 		if encryptInfo != nil {
 			dictPart := content[:streamStart]
