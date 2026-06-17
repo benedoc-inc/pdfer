@@ -43,6 +43,9 @@ func NewPDFManipulator(pdfBytes []byte, password []byte, verbose bool) (*PDFMani
 			}
 			continue
 		}
+		if parse.IsCrossRefContainerObject(obj) {
+			continue // xref/objstm containers; the writer regenerates them
+		}
 		objects[objNum] = obj
 	}
 

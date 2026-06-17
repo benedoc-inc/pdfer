@@ -56,6 +56,9 @@ func EncryptPDF(pdfBytes []byte, userPassword, ownerPassword []byte, verbose boo
 		if objErr != nil {
 			continue
 		}
+		if parse.IsCrossRefContainerObject(body) {
+			continue // xref/objstm containers; the writer regenerates them
+		}
 		dictBytes, streamBytes := encryptSplitContent(body)
 		if streamBytes != nil {
 			w.SetRawStreamObject(n, dictBytes, streamBytes)
