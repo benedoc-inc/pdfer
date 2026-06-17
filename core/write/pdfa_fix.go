@@ -63,6 +63,9 @@ func FixPDFA(pdfBytes []byte, password []byte) ([]byte, error) {
 		if objErr != nil {
 			continue
 		}
+		if parse.IsCrossRefContainerObject(body) {
+			continue // xref/objstm containers; the writer regenerates them
+		}
 		w.SetObject(n, body)
 	}
 
@@ -136,6 +139,9 @@ func ConvertToPDFA(pdfBytes []byte, conformance PDFAConformance) ([]byte, error)
 		body, objErr := pdf.GetObjectContent(n)
 		if objErr != nil {
 			continue
+		}
+		if parse.IsCrossRefContainerObject(body) {
+			continue // xref/objstm containers; the writer regenerates them
 		}
 		if n == rootNum {
 			body = []byte(convertPDFARemoveEncryptRef(string(body)))

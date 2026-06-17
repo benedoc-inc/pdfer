@@ -333,6 +333,9 @@ func decryptForXFA(pdfBytes []byte, password []byte, verbose bool) ([]byte, erro
 		if objErr != nil {
 			continue
 		}
+		if parse.IsCrossRefContainerObject(body) {
+			continue // xref/objstm containers; the writer regenerates them
+		}
 		if n == rootNum {
 			body = xfaRemoveEncryptRef(body)
 		}

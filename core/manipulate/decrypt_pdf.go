@@ -48,6 +48,9 @@ func DecryptPDF(pdfBytes []byte, password []byte, verbose bool) ([]byte, error) 
 		if objErr != nil {
 			continue
 		}
+		if parse.IsCrossRefContainerObject(body) {
+			continue // xref/objstm containers; the writer regenerates them
+		}
 		if n == rootNum {
 			body = decryptRemoveEncryptRef(body)
 		}

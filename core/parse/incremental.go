@@ -284,7 +284,18 @@ func (p *incrementalParser) parseTraditionalxrefSection(startXRef int64) (*xrefS
 	}
 
 	xrefData := p.pdfBytes[startXRef:]
-	xrefStr := string(xrefData[:min(10000, len(xrefData))])
+	// A traditional xref section ends at the "trailer" keyword. Read the whole
+	// section up to (and including) that keyword rather than a fixed byte cap:
+	// each entry is 20 bytes, so a document with more than ~500 objects has an
+	// xref table longer than any small fixed window, and truncating it silently
+	// drops every object beyond the cut — the parser then can't resolve the
+	// catalog of a rebuilt PDF/A or encrypted file (issue #26). Fall back to the
+	// remaining bytes when no trailer is found (malformed/streamed input).
+	scanEnd := len(xrefData)
+	if ti := bytes.Index(xrefData, []byte("trailer")); ti != -1 {
+		scanEnd = ti + len("trailer")
+	}
+	xrefStr := string(xrefData[:scanEnd])
 
 	// Parse xref entries
 	lines := regexp.MustCompile(`\r?\n`).Split(xrefStr, -1)
