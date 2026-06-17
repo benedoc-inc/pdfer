@@ -186,9 +186,18 @@ func ParseCrossReferenceTableWithEncryption(pdfBytes []byte, startXRef int64, en
 func ParseTraditionalXRefTable(pdfBytes []byte, startXRef int64) (map[int]int64, error) {
 	objMap := make(map[int]int64)
 
-	// Read from startxref position
+	// Read from startxref position. A traditional xref section ends at the
+	// "trailer" keyword; read the whole section up to (and including) it rather
+	// than a fixed byte cap. Each entry is 20 bytes, so a document with more than
+	// ~500 objects has an xref table longer than any small fixed window, and
+	// truncating it silently drops every object beyond the cut (issue #26). Fall
+	// back to the remaining bytes when no trailer is found (malformed input).
 	xrefSection := pdfBytes[startXRef:]
-	xrefStr := string(xrefSection[:min(10000, len(xrefSection))])
+	scanEnd := len(xrefSection)
+	if ti := bytes.Index(xrefSection, []byte("trailer")); ti != -1 {
+		scanEnd = ti + len("trailer")
+	}
+	xrefStr := string(xrefSection[:scanEnd])
 
 	// Find xref keyword
 	xrefPos := strings.Index(xrefStr, "xref")

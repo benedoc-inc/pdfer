@@ -217,8 +217,10 @@ func parseTraditionalXRefRaw(pdfBytes []byte, startXRef int64, xref *XRefData) (
 	// Find end of xref table (at "trailer" keyword)
 	trailerIdx := bytes.Index(section, []byte("trailer"))
 	if trailerIdx == -1 {
-		// No trailer found - look for end of entries
-		trailerIdx = min(10000, len(section))
+		// No trailer found (malformed/streamed input) - read the remaining bytes
+		// rather than a fixed window, which would silently drop entries past the
+		// cut for tables with more than ~500 objects (issue #26).
+		trailerIdx = len(section)
 	}
 
 	xref.RawBytes = section[:trailerIdx]
