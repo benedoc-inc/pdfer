@@ -320,6 +320,44 @@ its own `contentType`. The child-element form appears to be uncaptured.
 appears in `FormSchema.Scripts` with `Event: "validate"`. The attribute form
 can stay where it is or be normalized into the same shape.
 
+### 7. Form-packet (`<form>`) persistence — write side landed
+
+**Context.** A dynamic XFA document (e.g. an FDA eSTAR) has three persistence
+surfaces, not one: the `<datasets>` packet (user data), the AcroForm shadow
+(`/V` + appearances, for static XFA so non-XFA viewers show values), and the
+`<form>` packet — Acrobat's saved Form-DOM deltas (revealed pages, instance
+counts, swapped values). Acrobat re-applies the `<form>` deltas on open *only*
+if the packet's `checksum` attribute still matches what it recomputes; a stale
+or absent checksum makes it discard them. eSTARs rely on this heavily, so a
+faithfully partially-filled eSTAR must write this packet, not just the datasets.
+
+**Landed (`forms/xfa/form_packet.go`, `form_packet_gen.go`).**
+
+- Read side: the `<form>` packet is now a first-class `XFAStreams.Form` field
+  (previously it fell into the `Resources` catch-all).
+- `SetXFAFormPacket` replaces the packet via the same encryption-aware
+  incremental-update machinery as the datasets fill — original bytes preserved
+  as a prefix, signatures over the prior revision intact.
+- `BuildFormPacket` / `ParseFormPacketPresence` build and round-trip a minimal
+  presence-only skeleton purely by walking the template against a caller-supplied
+  presence set — pdfer persists structure; deciding *what* to reveal stays with
+  the caller.
+
+**Checksum boundary.** The `checksum` digest is computed over the template +
+datasets packets. pdfer deliberately ships **no** digest algorithm: callers pass
+a `FormChecksumFunc` to stamp a real, Acrobat-honored value, or `nil` to preserve
+whatever checksum the packet already carries. Because the digest covers the
+datasets, a caller changing both must write the datasets first so the stamped
+value stays valid.
+
+**Exposure.** This is an advanced sub-package API (`xfa.SetXFAFormPacket`), not
+part of the unified `Form` interface — it requires a caller-supplied checksummer,
+so it can't be a turnkey `Form.Fill` operation.
+
+**Deferred.** Adding a brand-new `<form>` entry to a PDF that lacks one (the
+FDA-distributed forms already carry one); a combined "write datasets + form
+packet" helper.
+
 ---
 
 ## What I would *not* add
