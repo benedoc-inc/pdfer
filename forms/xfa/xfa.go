@@ -113,6 +113,10 @@ type XFAStreams struct {
 	XMP           *XFAStreamInfo `json:"xmp,omitempty"`
 	Signature     *XFAStreamInfo `json:"signature,omitempty"`
 	SourceSet     *XFAStreamInfo `json:"sourceSet,omitempty"`
+	// Form holds the XFA `form` packet, which carries Acrobat's saved Form-DOM
+	// deltas (revealed pages, instance counts, swapped values). SetXFAFormPacket
+	// replaces it; most PDFs preserve it byte-for-byte.
+	Form *XFAStreamInfo `json:"form,omitempty"`
 	// Resources holds any additional XFA packet streams not matched by name above.
 	// These are typically image or font resources referenced via $rr: hrefs in the template.
 	Resources map[string]*XFAStreamInfo `json:"resources,omitempty"`
@@ -299,6 +303,8 @@ func ExtractAllXFAStreams(pdfBytes []byte, encryptInfo *types.PDFEncryption, ver
 			streams.Signature = streamInfo
 		case "sourceSet":
 			streams.SourceSet = streamInfo
+		case "form":
+			streams.Form = streamInfo
 		default:
 			if verbose {
 				log.Printf("Unknown XFA stream type (resource): %s", streamName)
