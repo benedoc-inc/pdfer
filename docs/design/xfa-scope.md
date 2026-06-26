@@ -338,10 +338,16 @@ faithfully partially-filled eSTAR must write this packet, not just the datasets.
 - `SetXFAFormPacket` replaces the packet via the same encryption-aware
   incremental-update machinery as the datasets fill — original bytes preserved
   as a prefix, signatures over the prior revision intact.
-- `BuildFormPacket` / `ParseFormPacketPresence` build and round-trip a minimal
-  presence-only skeleton purely by walking the template against a caller-supplied
-  presence set — pdfer persists structure; deciding *what* to reveal stays with
-  the caller.
+- `BuildFormPacketWithOverrides` / `ParseFormPacket` build and round-trip a
+  minimal skeleton purely by walking the template against caller-supplied
+  `NodeOverride`s — each addressing one node by a typed `NodePath` (lossless
+  structural identity: distinguishes repeating-group instances and anonymous
+  nodes, unlike a SOM dot-path) and carrying any attribute Acrobat honors
+  (`presence`, `access`, `locale`, `h`, …). pdfer persists structure; deciding
+  *what* to reveal stays with the caller.
+- The presence-only `BuildFormPacket` / `ParseFormPacketPresence` / `PresenceSet`
+  trio is retained as **deprecated** source-compatible shims over the above (they
+  were the v2.8.0 surface); new callers should use the override API.
 
 **Checksum boundary.** The `checksum` digest is computed over the template +
 datasets packets. pdfer deliberately ships **no** digest algorithm: callers pass
