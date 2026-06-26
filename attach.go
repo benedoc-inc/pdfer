@@ -18,6 +18,13 @@ type FileAttachment struct {
 	Name     string // filename to display in the PDF attachment panel
 	Data     []byte // raw file contents
 	MimeType string // MIME type, e.g. "application/pdf" or "image/jpeg"
+	// Key optionally sets the /Names/EmbeddedFiles tree key (the data-object
+	// "name" Acrobat exposes as dataObject.name), decoupling it from the display
+	// filename (/F, /UF). When empty the key defaults to the filename, preserving
+	// prior behavior. Callers that need a specific key — e.g. eSTAR, whose runtime
+	// only recognizes attachments whose key is a yyyy-mm-ddTHH:MM:ss timestamp —
+	// set it explicitly. Keys are still de-duplicated for uniqueness.
+	Key string
 }
 
 // EmbedAttachments appends file attachments to an unencrypted pdfBytes via an
@@ -105,7 +112,14 @@ func EmbedAttachmentsWithPassword(pdfBytes []byte, files []FileAttachment, passw
 			return nil, err
 		}
 
-		entries = append(entries, nameTreeEntry{key: name, ref: filespecNo})
+		// Tree key defaults to the display name (prior behavior); an explicit
+		// FileAttachment.Key overrides it, de-duplicated independently so it never
+		// collides with another entry's key.
+		key := name
+		if f.Key != "" {
+			key = attachUniqueName(f.Key, used)
+		}
+		entries = append(entries, nameTreeEntry{key: key, ref: filespecNo})
 	}
 
 	// Name-tree keys must be lexically sorted (ISO 32000-1 §7.9.6). Go string
