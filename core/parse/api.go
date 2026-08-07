@@ -278,6 +278,17 @@ func (p *PDF) HasObject(objNum int) bool {
 	return ok
 }
 
+// objectStreamOffset returns the byte offset of an object-stream container
+// from the xref, or 0 when the xref has no direct entry for it (the extractor
+// then falls back to scanning).
+func (p *PDF) objectStreamOffset(streamObjNum int) int {
+	ref, ok := p.xref.Objects[streamObjNum]
+	if !ok || ref.InStream {
+		return 0
+	}
+	return int(ref.Offset)
+}
+
 // GetObject returns the complete bytes of a PDF object by number, including the
 // "N G obj\n" header and "endobj" footer. This is the form most parsers and
 // extractors want: they can regex-match or walk the content while retaining the
@@ -294,8 +305,11 @@ func (p *PDF) GetObject(objNum int) ([]byte, error) {
 	}
 
 	if ref.InStream {
-		// Object is in an object stream - extract it
-		return GetObjectFromStream(p.raw, objNum, ref.StreamObjNum, ref.StreamIndex, p.encryption, p.opts.Verbose)
+		// Object is in an object stream - extract it. The container's own byte
+		// offset comes from the xref so the extractor need not scan for it (see
+		// GetObjectFromStreamAt).
+		return GetObjectFromStreamAt(p.raw, objNum, ref.StreamObjNum, ref.StreamIndex,
+			p.objectStreamOffset(ref.StreamObjNum), p.encryption, p.opts.Verbose)
 	}
 
 	// Direct object - get from byte offset
@@ -315,7 +329,8 @@ func (p *PDF) GetObjectContent(objNum int) ([]byte, error) {
 		return nil, types.NewPDFErrorf(types.ErrCodeObjectNotFound, "object %d not found", objNum).WithContext("object_number", objNum)
 	}
 	if ref.InStream {
-		return GetObjectFromStream(p.raw, objNum, ref.StreamObjNum, ref.StreamIndex, p.encryption, p.opts.Verbose)
+		return GetObjectFromStreamAt(p.raw, objNum, ref.StreamObjNum, ref.StreamIndex,
+			p.objectStreamOffset(ref.StreamObjNum), p.encryption, p.opts.Verbose)
 	}
 	content, _, err := extractDirectObjectContent(p.raw, objNum, ref.Offset, p.encryption, p.opts.Verbose)
 	return content, err
