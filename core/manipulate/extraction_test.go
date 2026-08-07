@@ -100,8 +100,59 @@ func TestExtractPagesMaterializesInheritedAttributes(t *testing.T) {
 	if !strings.Contains(got, "/MediaBox[0 0 300 400]") && !strings.Contains(got, "/MediaBox [0 0 300 400]") {
 		t.Errorf("inherited /MediaBox was lost — the extracted page has no size:\n%s", got)
 	}
-	if !strings.Contains(got, "/Resources") {
-		t.Errorf("inherited /Resources was lost — the extracted page has no fonts:\n%s", got)
+
+	// A bare `strings.Contains(got, "/Resources")` is satisfied by broken output
+	// like "/Resources 5" (a dangling integer) or "/Resources null", so it can't
+	// tell a real materialization from a lost one. Parse the extract and verify
+	// the inherited /Resources is a valid indirect reference whose target — and
+	// that target's font — actually survived into the output.
+	m, err := NewPDFManipulator(out, nil, false)
+	if err != nil {
+		t.Fatalf("extracted PDF does not parse: %v", err)
+	}
+	pages, err := m.getAllPageObjectNumbers()
+	if err != nil || len(pages) != 1 {
+		t.Fatalf("extracted page tree: pages=%v err=%v", pages, err)
+	}
+	page := string(m.objects[pages[0]])
+
+	res := dictValue(page, "/Resources")
+	if !refAtStart.MatchString(res) {
+		t.Fatalf("inherited /Resources materialized as %q, not a valid indirect "+
+			"reference — the resource object was lost:\n%s", res, page)
+	}
+	var resNum int
+	if _, err := fmt.Sscanf(res, "%d", &resNum); err != nil {
+		t.Fatalf("could not parse /Resources reference %q: %v", res, err)
+	}
+	resObj, ok := m.objects[resNum]
+	if !ok {
+		t.Fatalf("/Resources points at object %d, absent from the extract:\n%s", resNum, page)
+	}
+	if !strings.Contains(string(resObj), "/Font") {
+		t.Errorf("resources object %d carries no /Font:\n%s", resNum, string(resObj))
+	}
+	if !strings.Contains(got, "/BaseFont/Helvetica") {
+		t.Errorf("the inherited resources' font was not carried into the extract:\n%s", got)
+	}
+
+	// The page must carry exactly one /Parent, pointing at the new /Pages node —
+	// not a duplicate, not a reference remapped onto some unrelated object, and
+	// materializing inherited attributes must not have clobbered /Contents.
+	if n := strings.Count(page, "/Parent"); n != 1 {
+		t.Errorf("extracted page has %d /Parent entries, want 1:\n%s", n, page)
+	}
+	parent := dictValue(page, "/Parent")
+	var parentNum int
+	if _, err := fmt.Sscanf(parent, "%d", &parentNum); err != nil {
+		t.Fatalf("could not parse /Parent reference %q: %v", parent, err)
+	}
+	if !strings.Contains(string(m.objects[parentNum]), "/Type/Pages") {
+		t.Errorf("/Parent points at object %d, which is not the /Pages node:\n%s",
+			parentNum, string(m.objects[parentNum]))
+	}
+	if !strings.Contains(page, "/Contents") {
+		t.Errorf("materializing inherited attributes clobbered /Contents:\n%s", page)
 	}
 }
 
@@ -133,6 +184,30 @@ func TestExtractPagesNullsReferencesToDroppedObjects(t *testing.T) {
 	if !strings.Contains(string(out), "/Dest[null") {
 		t.Errorf("reference to the dropped page was not nulled — it now points at "+
 			"whatever object took that number:\n%s", string(out))
+	}
+}
+
+// TestExtractPagesDoesNotRewriteStreamBodies pins that reference remapping stays
+// inside object dictionaries and never touches stream bodies. A stream body can
+// contain bytes that look like an indirect reference ("999 0 R" here); rewriting
+// such a false match to "null" would both corrupt the content and change its
+// length so it no longer matches the declared /Length.
+func TestExtractPagesDoesNotRewriteStreamBodies(t *testing.T) {
+	src := buildPDF([]string{
+		"<</Type/Catalog/Pages 2 0 R>>",
+		"<</Type/Pages/Kids[3 0 R]/Count 1/MediaBox[0 0 300 400]>>",
+		"<</Type/Page/Parent 2 0 R/Contents 4 0 R>>",
+		"<</Length 18>>\nstream\nBT (999 0 R) Tj ET\nendstream",
+	}, 1)
+
+	out, err := ExtractPages(src, []int{1}, nil, false)
+	if err != nil {
+		t.Fatalf("ExtractPages: %v", err)
+	}
+	got := string(out)
+	if !strings.Contains(got, "BT (999 0 R) Tj ET") {
+		t.Errorf("stream body was rewritten — a reference-like sequence inside it "+
+			"was mangled during remapping:\n%s", got)
 	}
 }
 

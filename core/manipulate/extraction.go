@@ -58,9 +58,26 @@ func ExtractPages(pdfBytes []byte, pageNumbers []int, password []byte, verbose b
 		inherited[objNum] = resolveInheritedAttrs(manipulator.objects, objNum)
 	}
 
+	// Inherited attributes may themselves be, or contain, references to objects
+	// that only the discarded /Pages node pointed at — e.g. `/Resources 5 0 R`,
+	// or an inline `/Resources<</Font 8 0 R>>`. Those targets are unreachable
+	// from the page itself, so seed the dependency walk with them; otherwise the
+	// materialized page would carry a reference to an object that was never
+	// collected and would be nulled out.
+	inheritedSeeds := make(map[int]bool)
+	for _, attrs := range inherited {
+		for _, v := range attrs {
+			for _, m := range refPattern.FindAllStringSubmatch(v, -1) {
+				if refNum, err := strconv.Atoi(m[1]); err == nil && refNum > 0 {
+					inheritedSeeds[refNum] = true
+				}
+			}
+		}
+	}
+
 	// Collect all objects reachable from the selected pages, excluding the old
 	// page tree (we build a fresh one below).
-	deps := collectPageDependencies(manipulator.objects, selectedPageObjNums)
+	deps := collectPageDependencies(manipulator.objects, selectedPageObjNums, inheritedSeeds)
 
 	// Assign new sequential object numbers to every dependency.
 	objNumMap := make(map[int]int, len(deps))
@@ -81,12 +98,27 @@ func ExtractPages(pdfBytes []byte, pageNumbers []int, password []byte, verbose b
 		obj := manipulator.objects[oldObjNum]
 
 		if selectedPageObjNums[oldObjNum] {
-			objStr := setDictValue(string(obj), "/Parent", fmt.Sprintf("%d 0 R", pagesObjNum))
-			// Materialize what this page used to inherit.
+			// Materialize what this page used to inherit, then remap — the
+			// inherited values may reference old-numbered objects (e.g.
+			// /Resources 5 0 R) that must be renumbered along with the page.
+			objStr := string(obj)
 			for key, value := range inherited[oldObjNum] {
 				objStr = setDictValue(objStr, key, value)
 			}
-			obj = []byte(objStr)
+			// Drop the page's old /Parent before remapping. It points into the
+			// discarded source page tree; leaving it would be rewritten to a
+			// dangling "null" wedged against the following key ("null/Contents"),
+			// which the value scanner then mis-parses. Removing it lets the new
+			// /Parent be appended cleanly below.
+			objStr = parentEntry.ReplaceAllLiteralString(objStr, "")
+			remapped := remapExtractedRefs([]byte(objStr), objNumMap)
+			// Point /Parent at the new Pages node LAST. pagesObjNum is already
+			// in the new numbering, so it must not pass through remapExtractedRefs
+			// — otherwise it collides with whatever old object happens to share
+			// that number and gets rewritten to the wrong target.
+			remapped = []byte(setDictValue(string(remapped), "/Parent", fmt.Sprintf("%d 0 R", pagesObjNum)))
+			writer.SetObject(newObjNum, remapped)
+			continue
 		}
 
 		writer.SetObject(newObjNum, remapExtractedRefs(obj, objNumMap))
@@ -115,6 +147,10 @@ func ExtractPages(pdfBytes []byte, pageNumbers []int, password []byte, verbose b
 
 var refPattern = regexp.MustCompile(`(\d+)\s+\d+\s+R`)
 
+// parentEntry matches a page's `/Parent N G R` entry, used to strip the stale
+// parent pointer before a page is rehomed under a freshly built /Pages node.
+var parentEntry = regexp.MustCompile(`/Parent\s+\d+\s+\d+\s+R`)
+
 // collectPageDependencies returns the set of object numbers transitively
 // reachable from the selected pages, WITHOUT descending through the page tree.
 //
@@ -128,10 +164,18 @@ var refPattern = regexp.MustCompile(`(\d+)\s+\d+\s+R`)
 //
 // The filter is therefore applied at ENQUEUE time, by object type: /Pages
 // nodes are never entered, and a /Page is entered only if it was selected.
-func collectPageDependencies(objects map[int][]byte, selectedPageObjNums map[int]bool) map[int]bool {
+func collectPageDependencies(objects map[int][]byte, selectedPageObjNums map[int]bool, extraSeeds map[int]bool) map[int]bool {
 	collected := make(map[int]bool, len(objects))
-	queue := make([]int, 0, len(selectedPageObjNums))
+	queue := make([]int, 0, len(selectedPageObjNums)+len(extraSeeds))
 	for objNum := range selectedPageObjNums {
+		if _, ok := objects[objNum]; ok {
+			queue = append(queue, objNum)
+		}
+	}
+	// Extra seeds (e.g. objects referenced by inherited attributes) are enqueued
+	// directly; they and their transitive dependencies are then collected the
+	// same way as anything reachable from a page.
+	for objNum := range extraSeeds {
 		if _, ok := objects[objNum]; ok {
 			queue = append(queue, objNum)
 		}
@@ -200,7 +244,16 @@ func isPageTreeObject(obj []byte, objNum int, selected map[int]bool) bool {
 // so an unmapped reference there means something different and this rewrite
 // would mask it.
 func remapExtractedRefs(obj []byte, objNumMap map[int]int) []byte {
-	return []byte(refPattern.ReplaceAllStringFunc(string(obj), func(match string) string {
+	// References live only in the dictionary; a stream body is opaque bytes
+	// that must not be rewritten. A false `N G R` match inside compressed or
+	// binary stream data would be turned into "null", both corrupting the data
+	// and changing its length so it no longer matches the declared /Length. So
+	// split the object at the stream keyword and remap only the dictionary head.
+	head, tail := obj, []byte(nil)
+	if loc := streamKeyword.FindIndex(obj); loc != nil {
+		head, tail = obj[:loc[0]], obj[loc[0]:]
+	}
+	remapped := refPattern.ReplaceAllStringFunc(string(head), func(match string) string {
 		var objNum, genNum int
 		if _, err := fmt.Sscanf(match, "%d %d R", &objNum, &genNum); err != nil {
 			return match
@@ -209,8 +262,15 @@ func remapExtractedRefs(obj []byte, objNumMap map[int]int) []byte {
 			return fmt.Sprintf("%d 0 R", newObjNum)
 		}
 		return "null"
-	}))
+	})
+	return append([]byte(remapped), tail...)
 }
+
+// streamKeyword locates the `stream` keyword that opens a stream body. Per ISO
+// 32000-1 §7.3.8.1 it is followed by CRLF or a bare LF; the first such match in
+// an object is always the opening keyword (the dictionary preceding it does not
+// contain one), so everything from here on is body bytes, not references.
+var streamKeyword = regexp.MustCompile(`stream\r?\n`)
 
 // resolveInheritedAttrs walks a page's /Parent chain and returns the values of
 // inheritable attributes the page does not define itself. Nothing is returned
@@ -270,11 +330,18 @@ func resolveInheritedAttrs(objects map[int][]byte, pageObjNum int) map[string]st
 	return out
 }
 
-// dictValue reads a dictionary entry, handling the inline-dictionary form that
-// extractDictValue does not: /Resources is frequently written inline
+// refAtStart matches an indirect reference (`N G R`) anchored at the start of
+// the string it is applied to.
+var refAtStart = regexp.MustCompile(`^\d+\s+\d+\s+R`)
+
+// dictValue reads a dictionary entry, handling two forms extractDictValue does
+// not. The inline-dictionary form: /Resources is frequently written inline
 // (`/Resources<</Font<<...>>>>`) rather than as an indirect reference, and
 // extractDictValue stops at the `<`, so an inherited inline /Resources would
-// otherwise read as absent and be dropped.
+// otherwise read as absent and be dropped. The indirect-reference form:
+// extractDictValue's `key\s+([^\s<>]+)` captures only the first token, so
+// `/Resources 5 0 R` would read as "5" — an invalid bare integer, not a
+// reference — losing the generation and `R` and, worse, the link to object 5.
 func dictValue(dictStr, key string) string {
 	if idx := strings.Index(dictStr, key); idx >= 0 {
 		i := idx + len(key)
@@ -285,6 +352,9 @@ func dictValue(dictStr, key string) string {
 			if d := extractInlineDict(dictStr, i); d != "" {
 				return d
 			}
+		}
+		if ref := refAtStart.FindString(dictStr[i:]); ref != "" {
+			return ref
 		}
 	}
 	return extractDictValue(dictStr, key)

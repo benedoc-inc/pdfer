@@ -173,15 +173,29 @@ func setDictValue(dictStr, key, value string) string {
 	// Check if key already exists
 	existingValue := extractDictValue(dictStr, key)
 	if existingValue != "" {
+		// Indirect-reference value (e.g. "/Parent 2 0 R"): replace the whole
+		// `N G R`, not just its first token. The single-token pattern below
+		// would rewrite "/Parent 2 0 R" to "/Parent 3 0 R 0 R" and, because the
+		// verification then reads back only "3", give up and append a second
+		// /Parent — leaving the dictionary with a duplicate malformed key.
+		refValPattern := regexp.MustCompile(regexp.QuoteMeta(key) + `\s+\d+\s+\d+\s+R`)
+		if refValPattern.MatchString(dictStr) {
+			return refValPattern.ReplaceAllLiteralString(dictStr, key+" "+value)
+		}
 		// Replace existing value
 		// Try to match and replace with space (e.g., "/Count 3" -> "/Count 2")
 		// Use word boundary or whitespace to ensure we match the full value
 		pattern := regexp.MustCompile(regexp.QuoteMeta(key) + `\s+([^\s<>]+)`)
 		if pattern.MatchString(dictStr) {
-			replaced := pattern.ReplaceAllString(dictStr, key+" "+value)
-			// Verify the replacement worked
+			replaced := pattern.ReplaceAllLiteralString(dictStr, key+" "+value)
+			// Verify the replacement worked. extractDictValue returns only the
+			// first whitespace-delimited token, so for a multi-token value like
+			// "3 0 R" (a single-token existing value such as "null" being
+			// promoted to a reference) compare against its first token — a strict
+			// newValue == value check would spuriously fail and fall through to
+			// appending a duplicate key.
 			newValue := extractDictValue(replaced, key)
-			if newValue == value {
+			if fields := strings.Fields(value); len(fields) > 0 && newValue == fields[0] {
 				return replaced
 			}
 		}

@@ -454,6 +454,16 @@ func GetObjectFromStreamAt(pdfBytes []byte, objNum int, streamObjNum int, indexI
 	return objectData, nil
 }
 
+// objHeaderRe and objHeaderScanRe are hoisted to package scope so they compile
+// once rather than on every objHeaderAt/locateObjectStream call — these run per
+// in-stream-object lookup, and a PDF 1.5+ file can hold thousands. Both capture
+// the object number so the caller compares it, instead of baking the number
+// into the pattern (which forced a fresh MustCompile each time).
+var (
+	objHeaderRe     = regexp.MustCompile(`^\s*(\d+)\s+\d+\s+obj`)
+	objHeaderScanRe = regexp.MustCompile(`\b(\d+)\s+\d+\s+obj`)
+)
+
 // objHeaderAt reports whether "N G obj" for object objNum starts at offset in
 // pdfBytes, tolerating leading whitespace. Used to validate an xref offset
 // before trusting it: a stale or slightly-wrong offset should fall back to the
@@ -466,7 +476,12 @@ func objHeaderAt(pdfBytes []byte, objNum, offset int) bool {
 	if len(rest) > 64 {
 		rest = rest[:64]
 	}
-	return regexp.MustCompile(fmt.Sprintf(`^\s*%d\s+\d+\s+obj`, objNum)).Match(rest)
+	m := objHeaderRe.FindSubmatch(rest)
+	if m == nil {
+		return false
+	}
+	n, err := strconv.Atoi(string(m[1]))
+	return err == nil && n == objNum
 }
 
 // locateObjectStream returns the byte offset of object stream streamObjNum,
@@ -479,11 +494,19 @@ func locateObjectStream(pdfBytes []byte, streamObjNum, streamOffset int) (int, e
 	// there to stop object 11 matching the "11" inside "111 0 obj"; a word
 	// boundary rules that out too (the digit after "11" is a word character,
 	// so \b11\s fails) WITHOUT requiring the header to begin a line — which
-	// nothing in the spec guarantees and which real files do not do. Also
-	// generation-agnostic; the old pattern hardcoded generation 0.
-	re := regexp.MustCompile(fmt.Sprintf(`\b%d\s+\d+\s+obj`, streamObjNum))
-	if m := re.FindIndex(pdfBytes); m != nil {
-		return m[0], nil
+	// nothing in the spec guarantees and which real files do not do. The regex
+	// is generation-agnostic and captures the object number; we scan forward,
+	// skipping headers for other objects, and return the first that matches.
+	for searchFrom := 0; searchFrom < len(pdfBytes); {
+		loc := objHeaderScanRe.FindSubmatchIndex(pdfBytes[searchFrom:])
+		if loc == nil {
+			break
+		}
+		n, err := strconv.Atoi(string(pdfBytes[searchFrom+loc[2] : searchFrom+loc[3]]))
+		if err == nil && n == streamObjNum {
+			return searchFrom + loc[0], nil
+		}
+		searchFrom += loc[1]
 	}
 	return 0, fmt.Errorf("object stream %d not found", streamObjNum)
 }
