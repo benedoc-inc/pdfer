@@ -115,9 +115,12 @@ surface entirely; `FormSchema.Scripts []FormScript` now exposes verbatim
 script bodies with their event activity, language (`javascript` | `formcalc`),
 SOM owner path, and owner ID, leaving interpretation to the caller. See the
 **Forms** section of the README for usage and the type comment on
-`types.FormScript` for known gaps (scripts attached to nodes pdfer does not
-surface — decorative `<draw>`, `bind="none"` non-AddAttachment buttons,
-`<pageArea>` events, per-option `<field>`s collapsed into an `<exclGroup>`).
+`types.FormScript` for owner-reference semantics. (The follow-on gap — scripts
+attached to nodes pdfer did not surface, such as decorative `<draw>`s,
+`bind="none"` non-AddAttachment buttons, `<pageArea>` events, and per-option
+`<field>`s collapsed into an `<exclGroup>` — was closed by the orphan-script
+extraction in `88b6989`; such scripts are now extracted with `OwnerPath` set
+and an empty `OwnerID` when the owner is not a typed schema entity.)
 
 ---
 
@@ -194,6 +197,33 @@ walking `/Kids` for `/Page` leaves when it is missing or implausible.
 
 **File**: `content/extract/metadata.go`; tests in `page_count_test.go`
 
+#### AES-256 (V5) content crypto is not spec-conformant
+Password verification and file-key derivation for V5/R6 are correct (SHA-256
+R6 KDF, `/U`/`/O` validation, `/UE`/`/OE` unwrapping — well covered by
+`key_derivation_v5_test.go`). But per-object encryption and decryption route
+V5 through the V4-era scheme: an MD5("key + objnum + gennum + sAlT") key
+truncated to 16 bytes (`core/encrypt/decrypt.go` V==5 branch, mirrored by
+`EncryptObject`). Spec AESV3 (ISO 32000-1 §7.6.2) uses the 32-byte file key
+directly for every object, with no per-object derivation.
+
+Consequences:
+- **Read**: genuine external AES-256 PDFs (Acrobat X+ password-security
+  default) verify the password successfully but decrypt streams and strings
+  to garbage — a confusing failure mode, since authentication appears to work.
+- **Write**: `write.SetupEncryptionWithPasswords` / `SetupAES256Encryption`
+  output declares `/CFM /AESV3` but is encrypted with the non-spec scheme, so
+  it round-trips within pdfer only; conformant readers cannot open it.
+
+Not currently hit by the test suite: `tests/e2e_aes256_test.go` asserts
+password verification and key length only (never decrypted content), and its
+external-file variants skip without a `test_aes256.pdf` fixture or qpdf.
+
+**Workaround**: pre-decrypt AES-256 inputs with an external tool (e.g.
+`qpdf --decrypt`); use the default AES-128 `EncryptPDF` path for output.
+
+**Files**: `core/encrypt/decrypt.go`, `core/encrypt/encrypt_object.go`,
+`core/write/encryption_v5.go`
+
 #### ~~Redaction is incomplete (content streams only)~~ ✅ Fixed in v1.3.0
 `Redact` now handles three of the four previously missing surfaces:
 - **Annotation objects** — every annotation object whose `/Rect` overlaps a
@@ -212,6 +242,20 @@ by `Redact`. Call `RedactMetadata` separately for document-level metadata.
 ---
 
 ### P2 — Medium impact
+
+#### Strings in PDFs encrypted by pdfer ≤ v2.5.0 are no longer transparently decrypted (accepted)
+pdfer ≤ v2.5.0 declared `/StrF /Identity` in the encryption dictionary while
+nevertheless AES-encrypting string values; the old read path compensated with
+a heuristic (attempt decryption of hex strings ≥ 32 decoded bytes). Since the
+string-crypto chokepoint refactor, both read and write paths honor the declared
+`/StrF`, which is the spec-correct behavior and fixes silent mangling of
+genuine `/StrF /Identity` documents — but string values in files encrypted by
+pdfer ≤ v2.5.0 now come back as ciphertext. **This break is accepted**: such
+files were never readable by conformant external readers anyway (the
+declaration contradicted the bytes). Workaround for affected files: decrypt
+with a pdfer ≤ v2.5.0 build, then re-encrypt with the current version.
+
+**Files**: `core/encrypt/strings.go`, `core/encrypt/encrypt.go`
 
 #### ~~Annotation appearance streams missing for most subtypes~~ ✅ Fixed in v1.7.0
 `AnnotationBuilder.build()` produced structurally valid annotation dicts but no

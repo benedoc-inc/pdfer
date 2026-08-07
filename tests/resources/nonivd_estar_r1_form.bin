@@ -1,0 +1,2556 @@
+<form checksum="ZjXTLSIL0g6FjJzFsAXo5zOPIF8=" xmlns="http://www.xfa.org/schema/xfa-form/2.8/"
+><subform name="root"
+><instanceManager name="_GeneralIntroduction"
+/><subform name="GeneralIntroduction"
+><draw name="GIHeading102" presence="visible"
+/><draw name="GIText102" presence="visible"
+/><draw name="GIHeading103" presence="hidden"
+/><field name="GITextField130"
+><value
+><exData contentType="text/html"
+><body xmlns="http://www.w3.org/1999/xhtml" xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/"
+><p style="margin-top:0in;margin-bottom:0in;"
+>A major version update will consist of policy changes, regulatory changes, or major changes to the template and will be denoted by a major version number increment (e.g.<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>1</span
+>.2 to<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>2</span
+>.0). A minor version update will consist of other changes and will be denoted by a minor version number increment (e.g. 1.<span style="text-decoration:underline"
+>2</span
+> to 1.<span style="text-decoration:underline"
+>3</span
+>). eSTARs updated with policy or regulatory changes will be made available before the implementation date of those changes, and the previous eSTAR will be removed on the implementation date.<span style="xfa-spacerun:yes"
+> </span
+><span style="font-weight:bold"
+>If you do not submit using the major version that is currently implemented, you may receive additional information requests related to the changes.</span
+></p
+><p style="margin-top:0in;margin-bottom:0in;;font-weight:bold"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;;font-weight:bold;text-decoration:underline"
+>Version History<span style="font-weight:normal;font-style:italic;text-decoration:none"
+><span style="xfa-spacerun:yes"
+> </span
+></span
+><span style="font-weight:normal;text-decoration:none"
+>(the deployment dates were based on the underlined changes)</span
+></p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>6.2 (2026-02-17):<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>A Real-World Data subsection was added within the Clinical Evidence section according to the Real-World Evidence guidance document. The Cover Letter help text was updated to convey information from the RWE guidance document</span
+>. Clinical Testing is now referred to as Clinical Evidence, consistent with IMDRF terminology.</p
+><p style="margin-top:0in;margin-bottom:0in;;text-decoration:underline"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>6.1 (2026-02-02):<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>The PMA QMS section was updated to align with the new Quality Management System Regulation. Minor help text changes were made to the Biocompatibility Attachment G question and citations were changed in multiple places to align with the QMSR</span
+>. Age groups were added to the Indications for Use section to align with the "Premarket Assessment of Pediatric Medical Devices" guidance. A bug that occurred when modifying the Study Title in the Bench or Clinical attachment questions only after importing data from another eSTAR was fixed. The De Novo alternative practices textbox question in the Device Description section was removed since it was no longer needed. The De Novo classification summary is now requested as an attachment instead of in a textbox.</p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>6.0 (2025-10-01):<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>De Novo text now reflects the required use of eSTAR for De Novos. The option to use eSTAR for PMA 30-Day Notice supplements is now enabled.</span
+> The functionality for Health Canada Additional Information responses was enabled. All the Health Canada help text was enabled. The option to organize attachments by Study Title was added to the Bench and Clinical testing attachments. A button that will delete all deficiency responses was added to the Additional Information section to allow for quick deletion when replying to a second Additional Information request. The biocompatibility color additive help text was updated with additional information.</p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>5.6 (2025-07-10):<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>The Cybersecurity section now includes an alternative workflow with fewer questions to account for changes in the updated FDA Cybersecurity guidance</span
+>. All other IMDRF harmonized attachment questions now use the international help text model (including very minor text changes); Health Canada help text will remain disabled for all sections but Cover Letter and Labeling until approved. A notable number of typo and cosmetic fixes were made. The PMA SSED help text was updated to account for a dead link. Additional guidance information was added to the Clinical Summary textbox help text. FDA Human Factors guidance information was added to the Bench Testing help text. The Sterility packaging test methods help text was updated with examples and references.</p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>5.5 (2025-02-12):<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>References to<span style="xfa-spacerun:yes"
+> </span
+></span
+><span style="text-decoration:underline"
+>"</span
+><span style="text-decoration:underline"
+>gender</span
+><span style="text-decoration:underline"
+>"</span
+><span style="text-decoration:underline"
+> were removed or changed to<span style="xfa-spacerun:yes"
+> </span
+></span
+><span style="text-decoration:underline"
+>"</span
+><span style="text-decoration:underline"
+>sex.</span
+><span style="text-decoration:underline"
+>"</span
+> All harmonized help text in the Administrative Information, Device Description, and Indications for Use sections now uses the international help text model. The Indications for Use section now uses the eSTAR model instead of the Form 3881 format, in preparation for the inclusion of additional jurisdictions. Modifications were made to ensure unacceptable attachment types can't be added. Certain text boxes (e.g. Labeling) were reformatted to allow more text entry to prevent text cutoff when the eSTAR is printed out to a flat PDF. A modification was made to the validation process to preclude an issue that would have occurred when switching from a complete 30-Day Notice to an incomplete 180-Day Supplement. A bug was fixed that caused a standard deleted from a complete DoC to make the DoC inappropriately incomplete. Minor updates to PCCP AI/ML help text to account for published guidance. The content for PMA 30-Day Notice was added, but the option is disabled until it is approved to deploy. Rich text was reverted to plain text in the Additional Information section due to a bug in PDF-XChange Editor.</p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>5.4 (2024-11-21):<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>Information was added to the help text of the 510(k) Summary, SSED, Device Description summary, and PCCP question according to PCCP policy clarifications</span
+>.<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>The Device Description attachment help text for FDA was changed due to clarified Technical Screening criteria and also to be aligned with the international version of the help text</span
+>. The link provided in the FDA Classification section for a primary product code (e.g., GEI) now goes to the Product Classification website, which was recently updated to include device specific guidance documents. We are evaluating the use of rich text in textboxes (highlight text and right-click for options) by first adding this feature to the deficiency and response textboxes in the Additional Information section (FoxIt isn't capable of supporting this feature). The ability to reference attachments in eSTAR in the Additional Information section was added below the response textbox. The Standards help text was updated to describe the various ways standards can be added for FDA. The main Cybersecurity help text was updated to clarify alternatives to our recommendations are acceptable with justifications. The Cybersecurity Management Plan help text was modified to refer to the guidance, and the Risks section was removed, since an evaluation of the risks is only needed by the reviewer. The ability to sign the built-in T&amp;A Statement when using FoxIt PDF Reader was disabled due to the tendency for this to corrupt PDFs. eSTAR now asks whether a correspondent or consultant exists in the Applicant Information section with a dropdown (the button was removed).</p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>5.3 (2024-06-26): The T&amp;A Statement now includes fields for the name and company to ensure they are provided.<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>Multiple minor changes were made based on the upcoming final IMDRF TOC document updates, most notably Software help text updates.</span
+> The Environment of Use subsection in the Wireless Technology section was removed, since it was redundant with content in the Cybersecurity section.</p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>5.2 (2024-03-29):<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>The deployment date was chosen to coincide with the release of 513(g) content in the PreSTAR.</span
+> The inclusion of more than 10 standards will no longer cause an Import to run very slowly. An attachment counter was added in the Verification section. A workaround was added to allow the proper display of an eSTAR in Adobe Acrobat Pro when it was prepared with PDF-XChange Editor and formatted text was copied to a textbox. A new international Help Text model was implemented in the Cover Letter and Labeling section to obtain feedback. The wireless function security question was removed from the Wireless Technology section, since it was redundant with content in the Cybersecurity section. AI/ML help text was added to the Software Description attachment question.</p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>5.1 (2024-01-08):<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>Hydrogen Peroxide updated as an Established Category A sterilization method, consistent with updated Sterility Guidance</span
+>.</p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>5.0 (2023-12-06): PMA content enabled for FDA. Initial international pilot updates (not publicly available yet). EMC Labeling consolidated into a single question, due to typical single citation provided.<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>Guide for Cybersecurity guidance document content added</span
+>. Pyrogenicity testing options, help text, and EtO residuals question updated in Sterility section. Popup message added if Adobe Acrobat Reader is used. ISO 18562 information added to Biocompatibility section. Cross-section change reminders added to help texts in Device Description section. Clinical Testing section will now display when using PDF-XChange Editor.</p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>4.3 (2023-10-02): Standard recognition number can now be used to autopopulate standard information. Texts updated to clarify eCopy option is no longer permitted for 510(k)s. Reprocessed SUD directions clarified with popup message. ISO 17050-2 attachment question removed, content now collected in respective sections. Declaration of Conformity no longer requires electronic signature.<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>Off-The-Shelf Software guidance content built into Software section help texts</span
+>.<span style="xfa-spacerun:yes"
+> </span
+></p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>4.2 (2023-09-11):<span style="xfa-spacerun:yes"
+>  </span
+><span style="text-decoration:underline"
+>Resolved bug preventing Additional Information responses from being deleted</span
+>.</p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>4.1 (2023-09-08):<span style="xfa-spacerun:yes"
+>  </span
+>Removed ASCA specific questions from Biocompatibility section, FDA will rely on complete reports instead.<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>EMC section updated to include content for the IVD standard IEC 61326-2-6</span
+>. Minor text changes related to ASCA.<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>Added Attachment G option from new Biocompatibility Guidance</span
+>. Inadvertent warning message no longer displays when a Package Validation type of attachment is deleted.</p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>4.0 (2023-06-12):<span style="xfa-spacerun:yes"
+>  </span
+><span style="text-decoration:underline"
+>Software section updated according to FDA Software Guidance document</span
+>. Fixed bug in EMC section where if a user indicated no recognized standard was used and then chose a risk categorization above this question, content would display inadvertently. Added textbox for describing unsolicited Additional Information in Additional Information section. New 1 GB attachment size limit added to accommodate CDRH Portal restriction.</p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>3.0 (2023-03-29):<span style="xfa-spacerun:yes"
+>  </span
+>Updated FDA Accessories section to simplify data collection and include policies on kits and components. Question regarding safe use of magnets was added to Labeling. Resolved two bugs in Sterility introduced when PMA content added in Version 2.2: Sterility information will now be displayed after using the Import function, and the Sterility indicator will now change properly when switching between FDA PMA and other FDA submission types. PCCP checkbox added to Device Description.<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>Animal Testing guidance information added</span
+>. Combination product questions updated.<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>Cybersecurity help text updated per Section 524B of the FD&amp;C Act</span
+>.</p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>2.2 (2023-01-10):<span style="xfa-spacerun:yes"
+>  </span
+><span style="text-decoration:underline"
+>FDA PMA and Health Canada content finalized, disabled for all but pilot participants</span
+>. Biocompatibility contact type information added.</p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>2.1 (2022-10-07):<span style="xfa-spacerun:yes"
+>  </span
+>Grey text in FDA standards selection no longer disappears when an SDO is selected. Warning message now displays after attempting to attach a corrupt document, previously nothing would happen. Device specific guidance database updated. Resolved bug where removed attachment message may display more than once.<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>Updated text of four Guidance and Special Controls questions to include classification regulation requirements to be consistent with RTA Guidance recommendations</span
+>.</p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>2.0 (2022-06-06):<span style="xfa-spacerun:yes"
+>  </span
+>Bug fixed where clinical trials forms would incorrectly display if the user chose Traditional and indicated there was Clinical Testing, then changed the 510(k) Type to Special. If an attachment is deleted from the Attachment Pane instead of using the<span style="xfa-spacerun:yes"
+> </span
+>"Delete Attachment" button, upon completion of the eSTAR a warning will now be presented advising to remove the attachment with the button instead.<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>EMC content updated to be consistent with the updated EMC guidance document</span
+>.</p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>1.2 (2022-03-11):<span style="xfa-spacerun:yes"
+>  </span
+><span style="text-decoration:underline"
+>Attachment types (e.g., .zip file) that cannot be saved from or opened in dynamic PDFs are no longer permitted</span
+>. Attachments not added with the Add Attachment buttons will be removed once the eSTAR becomes complete.<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>For proper processing on receipt, eSTAR prevents special characters in attachment names intended for FDA review</span
+>. Resolved rare bug where removal of an incomplete DoC from a complete Administrative Documents section would render this section incomplete. Attachments added in FoxIt will now open with the Open Attachment button after the eSTAR is saved, closed, then reopened.</p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>1.1 (2021-12-17):<span style="xfa-spacerun:yes"
+>  </span
+><span style="text-decoration:underline"
+>Directions are now visible again at the end of eSTAR</span
+>.</p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>1.0 (2021-11-29):<span style="xfa-spacerun:yes"
+>  </span
+>De Novo Classification content was incorporated to allow De Novo request using eSTAR. Multiple changes to address bugs when eSTAR is used with FoxIt (FoxIt staff are working to resolve bugs in their app still). Cybersecurity and Interoperability sections modified to be properly IMDRF harmonized. Minor additions from IMDRF TOC. Design Controls for Special 510(k)s was updated. Biocompatibility Cytotoxicity Study Controls question updated. Biocompatibility Cytotoxicity, Sensitization, and Irritation Extract Appearance question updated. A popup message will now occur after a signature is applied to promote saving validation changes that occur after the signature is applied.<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>ASCA test report content now included in EMC and Biocompatibility sections</span
+>. Attachment validation added ensuring unique name is used. Description added to attachments in Attachments Pane.</p
+><p style="margin-top:0in;margin-bottom:0in;;font-weight:bold"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>0.7 (2021-05-27): Extensive under the hood refinements, minor additions, and minor modifications. Multiple rare bugs fixed. Help text messages that displayed in landscape for some users now display in portrait.<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>Added Safety and Performance content to multiple sections</span
+>. Updated and alphabetized Standards lists. Updated Classification lists. Country list and codes updated to GENC. Relevant IMDRF TOC content now fully integrated. Reprocessing/Sterility attachment help text updated. Application Sub-Type options modified.</p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>0.6 (2020-12-15): Reprocessing &amp; Sterility Guidance and Special Controls Adherence will no longer display when N/A.</p
+><p style="margin-top:0in;margin-bottom:0in;"
+>Popup warning message added to multiple textboxes when Device Specific Guidance data not provided, and is</p
+><p style="margin-top:0in;margin-bottom:0in;"
+>potentially applicable. Popup warning message added when "No" or "0" are provided to multiple questions, but</p
+><p style="margin-top:0in;margin-bottom:0in;"
+>presumably should be included.<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>Technical Screening advisory updated on page 2</span
+>. Biocompatibility material count</p
+><p style="margin-top:0in;margin-bottom:0in;"
+>question updated to allow justification consolidation. Trade Name &amp; Page #'s added to footer.</p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>0.5 (2020-09-08): Ophthalmic classification now displays proper regulations. Device Description/Accessories section</p
+><p style="margin-top:0in;margin-bottom:0in;"
+>no longer refers to Components, consistent with updated RTA guidance. Electronic signatures validation no longer as</p
+><p style="margin-top:0in;margin-bottom:0in;"
+>stringent. De Novo content complete, disabled until releasable. Delete Attachment confirmation added. Added</p
+><p style="margin-top:0in;margin-bottom:0in;"
+>redundant "Add Standard" button.<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>Added clinical patient preference questions</span
+>.</p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>0.4 (2020-02-26): CDR, EMC &amp; Wireless sections added. Standard addition bug fixed.<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>Form is now fully 508</span
+></p
+><p style="margin-top:0in;margin-bottom:0in;;text-decoration:underline"
+>compliant<span style="text-decoration:none"
+>. Device specific guidance document link will appear when an applicable primary product code is entered in</span
+></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>the Classification section. Dropdown added to Other Labeling, Reprocessing/Sterility/Shelf-Life, Bench Testing, and</p
+><p style="margin-top:0in;margin-bottom:0in;"
+>Clinical Testing attachments that allow attachment type to be chosen.</p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>0.3 (2019-05-09)): Fixed minor bugs, submission fees info moved to help text, tabbing sequence issue resolved,</p
+><p style="margin-top:0in;margin-bottom:0in;;text-decoration:underline"
+>animal-derived materials question added to Device Description (based on new guidance)<span style="text-decoration:none"
+>, message now advises that</span
+></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>deleting attachments is not possible when eSTAR is signed. Scripts password protected. Cybersecurity section added.</p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>0.2 (2019-03-18): Biocompatibility Tests added. All dates now ISO 8601 standardized. Phone and Fax number<span style="xfa-spacerun:yes"
+>     </span
+></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>validations fixed.<span style="xfa-spacerun:yes"
+> </span
+><span style="text-decoration:underline"
+>Bug preventing valid eSTAR from becoming invalid fixed</span
+>. Bug preventing Pre-Submission<span style="xfa-spacerun:yes"
+> </span
+></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>Correspondence section from contributing to validation fixed. Type search works for Medical Specialty and Regulation<span style="xfa-spacerun:yes"
+> </span
+></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>dropdowns. IFU Form background no longer grainy. Med Specialty alpha ordered by name not code.</p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+>0.1 (2019-01-07): Evaluation version, not for use.</p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+><p style="margin-top:0in;margin-bottom:0in;"
+><br
+/></p
+></body
+></exData
+></value
+></field
+></subform
+><instanceManager name="_ApplicationType"
+/><subform name="ApplicationType"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><exclGroup name="ATRadioButton100"
+><field name="ATRadioButton101"
+><value
+><text
+>1</text
+></value
+></field
+><field name="ATRadioButton102" access="readOnly"
+/></exclGroup
+><exclGroup name="ATRadioButton050"
+><field name="English"
+><value
+><text
+>1</text
+></value
+></field
+><field name="Portuguese"
+><value
+><text xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:nil="true"
+/></value
+></field
+></exclGroup
+><instanceManager name="_USA"
+/><subform name="USA"
+><draw name="ATYesIndicator110"
+><border
+><fill
+><color value="51,153,102"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Complete</toolTip
+></assist
+></draw
+><draw name="ATNoIndicator110"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Complete</toolTip
+></assist
+></draw
+><exclGroup name="ATRadioButton110"
+><field name="ATRadioButton111"
+><value
+><text
+>1</text
+></value
+></field
+></exclGroup
+><field name="ShowK" presence="visible"
+><caption
+><value
+><text
+>Show Application Introduction</text
+></value
+></caption
+></field
+><draw name="ATTextK" presence="hidden"
+/><draw name="ATTextK2" presence="hidden"
+/><field name="ShowD" presence="hidden"
+><caption
+><value
+><text
+>Show Application Introduction</text
+></value
+></caption
+></field
+><draw name="ATTextD" presence="hidden"
+/><field name="ShowP" presence="hidden"
+><caption
+><value
+><text
+>Show Application Introduction</text
+></value
+></caption
+></field
+><draw name="ATTextP" presence="hidden"
+/><draw name="ATYesIndicator114" presence="hidden"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="ATNoIndicator114" presence="hidden"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="ATText114" presence="hidden"
+/><exclGroup name="ATRadioButton114" presence="hidden"
+><field name="ATRadioButton114g" access="readOnly"
+/><field name="ATRadioButton114h" access="readOnly"
+/><field name="ATRadioButton114i" access="readOnly"
+/></exclGroup
+><field name="ShowPType" presence="hidden"
+><caption
+><value
+><text
+>Show Application Type Introduction</text
+></value
+></caption
+></field
+><draw name="ATTextPType" presence="hidden"
+/><draw name="ATYesIndicator115" presence="visible"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="ATNoIndicator115" presence="visible"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="ATText115" presence="visible"
+/><exclGroup name="ATRadioButton115" presence="visible"
+/><field name="ShowKType" presence="visible"
+><caption
+><value
+><text
+>Show Application Type Introduction</text
+></value
+></caption
+></field
+><draw name="ATTextKType" presence="hidden"
+/><draw name="ATTextKType2" presence="hidden"
+/><draw name="ATYesIndicator116" presence="hidden"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="ATNoIndicator116" presence="hidden"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="ATText116" presence="hidden"
+/><field name="ATDropDownList116" presence="hidden"
+/><draw name="ATYesIndicator117" presence="hidden"
+/><draw name="ATNoIndicator117" presence="hidden"
+/><instanceManager name="_ATCheckboxGroup117"
+/><subform name="ATCheckboxGroup117" presence="hidden"
+><field name="ATCheckBox117a"
+/><field name="ATCheckBox117b"
+/><field name="ATCheckBox117c"
+/><field name="ATCheckBox117d"
+/><field name="ATCheckBox117e"
+/><field name="ATCheckBox117f"
+/><field name="ATCheckBox117g"
+/><field name="ATCheckBox117h"
+/><field name="ATCheckBox117i"
+/><field name="ATCheckBox117j"
+/><field name="ATCheckBox117k"
+/><field name="ATCheckBox117l"
+/></subform
+></subform
+><instanceManager name="_CDN"
+/><subform name="CDN"
+><exclGroup name="ATRadioButton120"
+><field name="ATRadioButton121" access="readOnly"
+/></exclGroup
+><field name="ShowHC"
+><caption
+><value
+><text
+>Show Application Introduction</text
+></value
+></caption
+></field
+><draw name="ATTextHC" presence="hidden"
+/></subform
+><instanceManager name="_ApplicationSubType"
+/><subform name="ApplicationSubType" presence="visible"
+><draw name="ATYesIndicator130"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="ATNoIndicator130"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><exclGroup name="ATRadioButton130"
+><field name="ATRadioButton131" access="open"
+/><field name="ATRadioButton132" access="open" presence="hidden"
+/><field name="ATRadioButton133" access="open"
+><caption
+><font
+><fill
+><color value="0,0,0"
+/></fill
+></font
+></caption
+></field
+><field name="ATRadioButton134" access="readOnly"
+/></exclGroup
+><draw name="ATYesIndicator135" presence="hidden"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="ATNoIndicator135" presence="hidden"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><field name="ATTextField135" presence="hidden"
+/></subform
+></subform
+><instanceManager name="_CoverLetter"
+/><subform name="CoverLetter" presence="visible"
+/><instanceManager name="_AdministrativeInformation"
+/><subform name="AdministrativeInformation" presence="visible"
+><instanceManager name="_ApplicantInformation"
+/><subform name="ApplicantInformation" presence="visible"
+><field name="ADTextField170" locale="en_US"
+/></subform
+><instanceManager name="_CorrespondentInformation"
+/><subform name="CorrespondentInformation"
+><field name="ADTextField370" locale="en_US"
+/></subform
+><instanceManager name="_RelatedSubmissions"
+/><subform name="RelatedSubmissions" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><instanceManager name="_NSE510k"
+/><subform name="NSE510k" presence="hidden"
+/></subform
+><instanceManager name="_Standards"
+/><subform name="Standards" presence="visible"
+/></subform
+><instanceManager name="_DeviceDescription"
+/><subform name="DeviceDescription" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><instanceManager name="_Devices"
+/><subform name="Devices" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><field name="AddDevice" presence="visible"
+/><draw name="DDText105" presence="visible"
+/><instanceManager name="_Device"
+/><subform name="Device" presence="visible"
+/></subform
+><instanceManager name="_GeneralConsiderations"
+/><subform name="GeneralConsiderations" presence="hidden"
+/><instanceManager name="_GeneralCharacteristics"
+/><subform name="GeneralCharacteristics" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="DDYesIndicator110" presence="visible"
+/><draw name="DDNoIndicator110" presence="visible"
+/><field name="DDDropDownList110" presence="visible"
+/><field name="DDTips110" presence="visible"
+/><draw name="DDYesIndicator210" presence="visible"
+/><draw name="DDNoIndicator210" presence="visible"
+/><instanceManager name="_DDCheckboxGroup210"
+/><subform name="DDCheckboxGroup210" presence="visible"
+/><field name="DDTips210" presence="visible"
+/><draw name="DDYesIndicator230" presence="visible"
+/><draw name="DDNoIndicator230" presence="visible"
+/><field name="DDDropDownList230" presence="visible"
+/><field name="DDTips230" presence="visible"
+/><draw name="DDYesIndicator251" presence="visible"
+/><draw name="DDNoIndicator251" presence="visible"
+/><instanceManager name="_DDCheckboxGroup251"
+/><subform name="DDCheckboxGroup251" presence="visible"
+/><field name="DDTips251" presence="visible"
+/><draw name="DDYesIndicator350" presence="hidden"
+/><draw name="DDNoIndicator350" presence="hidden"
+/><field name="DDAddAttachment350" presence="hidden"
+/><draw name="DDText350" presence="hidden"
+/><field name="DDTips350" presence="hidden"
+/></subform
+><instanceManager name="_Description"
+/><subform name="Description" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="DDText401" presence="visible"
+/></subform
+><instanceManager name="_ComponentsAccessories"
+/><subform name="ComponentsAccessories" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="DDYesIndicator430"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="DDNoIndicator430"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="DDYesIndicator460" presence="hidden"
+/><draw name="DDNoIndicator460" presence="hidden"
+/><draw name="DDText460" presence="hidden"
+/><field name="DDDropDownList460" presence="hidden"
+/><field name="DDTips460" presence="hidden"
+/><draw name="DDYesIndicator463" presence="hidden"
+/><draw name="DDNoIndicator463" presence="hidden"
+/><field name="DDAddAttachment463" presence="hidden"
+/><draw name="DDText463" presence="hidden"
+/><draw name="DDYesIndicator466" presence="hidden"
+/><draw name="DDNoIndicator466" presence="hidden"
+/><field name="DDAddAttachment466" presence="hidden"
+/><draw name="DDText466" presence="hidden"
+/><field name="DDTips466" presence="hidden"
+/><draw name="DDYesIndicator470" presence="hidden"
+/><draw name="DDNoIndicator470" presence="hidden"
+/><field name="DDAddAttachment470" presence="hidden"
+/><draw name="DDText470" presence="hidden"
+/></subform
+><instanceManager name="_Guidance"
+/><subform name="Guidance" presence="visible"
+/></subform
+><instanceManager name="_IndicationsForUse"
+/><subform name="IndicationsForUse" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><instanceManager name="_SubandDevice"
+/><subform name="SubandDevice"
+><draw name="IUYesIndicator130"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="IUNoIndicator130"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><field name="IUTextField130"
+/></subform
+></subform
+><instanceManager name="_Classification"
+/><subform name="Classification" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><instanceManager name="_USAKnownClassification"
+/><subform name="USAKnownClassification" presence="visible"
+><draw name="DDText529" presence="hidden"
+><value
+><text
+/></value
+></draw
+><field name="DDText531" h="0.001in"
+><caption
+><value
+><text
+/></value
+></caption
+></field
+></subform
+><instanceManager name="_USAProposedClassification"
+/><subform name="USAProposedClassification" presence="hidden"
+/></subform
+><instanceManager name="_MarketingHistory"
+/><subform name="MarketingHistory" presence="hidden"
+/><instanceManager name="_PredicatesSE"
+/><subform name="PredicatesSE" presence="visible"
+/><instanceManager name="_RiskManagement"
+/><subform name="RiskManagement" presence="hidden"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+></subform
+><instanceManager name="_Labeling"
+/><subform name="Labeling" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="LBText1"
+><value
+><text
+>You must submit proposed labels, labeling, and advertisements sufficient to describe the device, its intended use, and the directions for its use. Where applicable, photographs or engineering drawings should be supplied (21 CFR 807.87(e)). We also strongly recommend you consult standard AAMI ANSI ES60601-1 Section 7 for applicable labeling that may be important for your device if it is electrical (consult ISO 14708-1 instead for implantable components).</text
+></value
+></draw
+><instanceManager name="_GeneralLabeling"
+/><subform name="GeneralLabeling" presence="visible"
+/><instanceManager name="_Packaging"
+/><subform name="Packaging" presence="visible"
+/><instanceManager name="_Instructions"
+/><subform name="Instructions" presence="visible"
+/><instanceManager name="_OtherLabeling"
+/><subform name="OtherLabeling" presence="visible"
+/><instanceManager name="_SpecificLabeling"
+/><subform name="SpecificLabeling" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="LBYesIndicator460" presence="hidden"
+/><draw name="LBNoIndicator460" presence="hidden"
+/><field name="LBDropDownList460" presence="hidden"
+/><draw name="LBYesIndicator470" presence="hidden"
+/><draw name="LBNoIndicator470" presence="hidden"
+/><draw name="LBText470" presence="hidden"
+/><field name="LBTextField470" presence="hidden"
+/></subform
+><instanceManager name="_Guidance"
+/><subform name="Guidance" presence="visible"
+/></subform
+><instanceManager name="_ReprocSter"
+/><subform name="ReprocSter" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="RPText1"
+><value
+><text
+>Since the answers you provided in the Device Description section indicate reprocessing and sterility information is needed, be aware that the Reprocessing section covers devices that are sterilized by the end user, while the Sterility section covers devices that are packaged as sterile.</text
+></value
+></draw
+><instanceManager name="_Reprocessing"
+/><subform name="Reprocessing" presence="visible"
+><draw name="RPText110a" presence="hidden"
+/><draw name="RPText110b" presence="hidden"
+/><draw name="RPText110c" presence="hidden"
+/><field name="RPTips110c" presence="hidden"
+/></subform
+><instanceManager name="_Sterility"
+/><subform name="Sterility" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="STYesIndicator105" presence="visible"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="STNoIndicator105" presence="visible"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><field name="STDropDownList105" presence="visible"
+/><field name="STTips105" presence="visible"
+/><draw name="STYesIndicator107" presence="hidden"
+/><draw name="STNoIndicator107" presence="hidden"
+/><field name="STAddAttachment107" presence="hidden"
+/><draw name="STText107" presence="hidden"
+/><field name="STTips107" presence="hidden"
+/></subform
+><instanceManager name="_Guidance"
+/><subform name="Guidance" presence="visible"
+/><instanceManager name="_ShelfLife"
+/><subform name="ShelfLife" presence="visible"
+><draw name="SLText130"
+><value
+><text
+>Provide a summary of the methods used to support the sterility and performance of the device over its proposed shelf-life. Alternatively, provide a rationale for why testing to establish shelf-life is not applicable.</text
+></value
+></draw
+><break before="auto"
+/></subform
+><instanceManager name="_ReprocSterDocs"
+/><subform name="ReprocSterDocs" presence="visible"
+/></subform
+><instanceManager name="_Biocompatibility"
+/><subform name="Biocompatibility" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="BCText1"
+><value
+><text
+>Based on the answer provided in the Device Description section, biocompatibility information is needed.</text
+></value
+></draw
+><instanceManager name="_PatientMaterials"
+/><subform name="PatientMaterials" presence="visible"
+><instanceManager name="_PatientMaterial"
+/><subform name="PatientMaterial"
+><instanceManager name="_Cytotoxicity"
+/><subform name="Cytotoxicity"
+><break before="auto"
+/></subform
+><instanceManager name="_Sensitization"
+/><subform name="Sensitization"
+><break before="auto"
+/></subform
+><instanceManager name="_Irritation"
+/><subform name="Irritation"
+><break before="auto"
+/></subform
+><instanceManager name="_AcuteSys"
+/><subform name="AcuteSys"
+><break before="auto"
+/></subform
+><instanceManager name="_SubacuteTox"
+/><subform name="SubacuteTox"
+><break before="auto"
+/></subform
+><instanceManager name="_Genotoxicity"
+/><subform name="Genotoxicity"
+><break before="auto"
+/></subform
+><instanceManager name="_Implantation"
+/><subform name="Implantation"
+><break before="auto"
+/></subform
+><instanceManager name="_Hemocompatibility"
+/><subform name="Hemocompatibility"
+><break before="auto"
+/></subform
+><instanceManager name="_ChronicTox"
+/><subform name="ChronicTox"
+><break before="auto"
+/></subform
+><instanceManager name="_Carcinogenicity"
+/><subform name="Carcinogenicity"
+><break before="auto"
+/></subform
+></subform
+></subform
+><instanceManager name="_BiocompatibilityDocs"
+/><subform name="BiocompatibilityDocs" presence="visible"
+/></subform
+><instanceManager name="_SoftwareCyber"
+/><subform name="SoftwareCyber" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="SWText1"
+><value
+><text
+>Based on the answers provided in the Device Description section, software, cybersecurity, and interoperability information is needed.</text
+></value
+></draw
+><instanceManager name="_Software"
+/><subform name="Software" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><instanceManager name="_SoftwareDocLevel"
+/><subform name="SoftwareDocLevel" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+></subform
+><instanceManager name="_SoftwareDocs"
+/><subform name="SoftwareDocs" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><break before="auto"
+/></subform
+></subform
+><instanceManager name="_Cybersecurity"
+/><subform name="Cybersecurity" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="CSYesIndicator412" presence="visible"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="CSNoIndicator412" presence="visible"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="CSText412" presence="visible"
+/><field name="CSDropDownList412" presence="visible"
+/><field name="CSTips412" presence="visible"
+/><instanceManager name="_RMReport"
+/><subform name="RMReport" presence="visible"
+/><instanceManager name="_RMThreatModel"
+/><subform name="RMThreatModel" presence="visible"
+/><instanceManager name="_RMRiskAssessment"
+/><subform name="RMRiskAssessment" presence="visible"
+/><instanceManager name="_RMSBOM"
+/><subform name="RMSBOM" presence="visible"
+/><instanceManager name="_ChangeImpact"
+/><subform name="ChangeImpact" presence="visible"
+/><instanceManager name="_UnresolvedAnomalies"
+/><subform name="UnresolvedAnomalies" presence="visible"
+/><instanceManager name="_Metrics"
+/><subform name="Metrics" presence="visible"
+/><instanceManager name="_Controls"
+/><subform name="Controls" presence="visible"
+><field name="CSTextField595"
+/></subform
+><instanceManager name="_ArchViews"
+/><subform name="ArchViews" presence="visible"
+/><instanceManager name="_Testing"
+/><subform name="Testing" presence="visible"
+/><instanceManager name="_Labeling"
+/><subform name="Labeling" presence="visible"
+/><instanceManager name="_ManagementPlan"
+/><subform name="ManagementPlan" presence="visible"
+/><break before="auto"
+/></subform
+><instanceManager name="_Interoperability"
+/><subform name="Interoperability" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="CSYesIndicator240" presence="visible"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="CSNoIndicator240" presence="visible"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><field name="CSDropDownList240" presence="visible"
+/><field name="CSTips240" presence="visible"
+/><instanceManager name="_ElectronicInterface"
+/><subform name="ElectronicInterface" presence="hidden"
+><draw name="YesIndicator" presence="visible"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator" presence="visible"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="CSHeading242" presence="visible"
+/><draw name="CSYesIndicator245" presence="visible"
+/><draw name="CSNoIndicator245" presence="visible"
+/><field name="CSTextField245" presence="visible"
+/><draw name="CSYesIndicator250" presence="visible"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="CSNoIndicator250" presence="visible"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><field name="CSDropDownList250" presence="visible"
+/></subform
+><break before="auto"
+/></subform
+></subform
+><instanceManager name="_EMCWireless"
+/><subform name="EMCWireless" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="EMText1"
+><value
+><text
+>Based on the answers provided in the Device Description section, EMC and wireless technology information is needed.</text
+></value
+></draw
+><instanceManager name="_EMC"
+/><subform name="EMC" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+></subform
+><instanceManager name="_Wireless"
+/><subform name="Wireless" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><break before="auto"
+/></subform
+><instanceManager name="_EMCEMTSummary"
+/><subform name="EMCEMTSummary" presence="visible"
+/><instanceManager name="_EMCEMTDocs"
+/><subform name="EMCEMTDocs" presence="visible"
+/></subform
+><instanceManager name="_PerformanceTesting"
+/><subform name="PerformanceTesting" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="PTYesIndicator130"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="PTNoIndicator130"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="PTYesIndicator200" presence="hidden"
+/><draw name="PTNoIndicator200" presence="hidden"
+/><field name="PTAddAttachment200" presence="hidden"
+/><draw name="PTText200" presence="hidden"
+/><draw name="PTYesIndicator210" presence="hidden"
+/><draw name="PTNoIndicator210" presence="hidden"
+/><field name="PTAddAttachment210" presence="hidden"
+/><draw name="PTText210" presence="hidden"
+/><field name="PTTips210" presence="hidden"
+/><instanceManager name="_PMNSummaries"
+/><subform name="PMNSummaries" presence="visible"
+/><instanceManager name="_BenchTesting"
+/><subform name="BenchTesting"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="PTYesIndicator410" presence="visible"
+/><draw name="PTNoIndicator410" presence="visible"
+/><field name="PTTextField410" presence="visible"
+/></subform
+><instanceManager name="_AnimalTesting"
+/><subform name="AnimalTesting"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="PTYesIndicator510" presence="visible"
+/><draw name="PTNoIndicator510" presence="visible"
+/><field name="PTTextField510" presence="visible"
+/><draw name="PTYesIndicator530" presence="visible"
+/><draw name="PTNoIndicator530" presence="visible"
+/><field name="PTAddAttachment530" presence="visible"
+/><draw name="PTText530" presence="visible"
+/><field name="PTTips530" presence="visible"
+/><draw name="PTYesIndicator540" presence="visible"
+/><draw name="PTNoIndicator540" presence="visible"
+/><field name="PTAddAttachment540" presence="visible"
+/><draw name="PTText540" presence="visible"
+/><field name="PTTips540" presence="visible"
+/><draw name="PTYesIndicator550" presence="visible"
+/><draw name="PTNoIndicator550" presence="visible"
+/><draw name="PTText550" presence="visible"
+/><field name="PTTips550" presence="visible"
+/><field name="PTTextField550" presence="visible"
+/></subform
+><instanceManager name="_ClinicalTesting"
+/><subform name="ClinicalTesting" presence="hidden"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="PTYesIndicator610" presence="visible"
+/><draw name="PTNoIndicator610" presence="visible"
+/><field name="PTTextField610" presence="visible"
+/><instanceManager name="_RWD"
+/><subform name="RWD" presence="visible"
+/><instanceManager name="_PROPPI"
+/><subform name="PROPPI" presence="visible"
+/><instanceManager name="_CDR"
+/><subform name="CDR" presence="visible"
+><break before="auto"
+/></subform
+><instanceManager name="_GeneralClinical"
+/><subform name="GeneralClinical" presence="hidden"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+></subform
+><break before="auto"
+/></subform
+><instanceManager name="_Guidance"
+/><subform name="Guidance" presence="visible"
+/></subform
+><instanceManager name="_QualityManagement"
+/><subform name="QualityManagement" presence="hidden"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><instanceManager name="_Procedures"
+/><subform name="Procedures"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+></subform
+><instanceManager name="_FacilitiesInfo"
+/><subform name="FacilitiesInfo"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+></subform
+></subform
+><instanceManager name="_PAS"
+/><subform name="PAS" presence="hidden"
+/><instanceManager name="_References"
+/><subform name="References" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="RFYesIndicator110"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="RFNoIndicator110"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><field name="RFDropDownList110"
+><caption
+><value
+><text
+>Is literature referenced in the submission?</text
+></value
+></caption
+></field
+><draw name="RFYesIndicator120" presence="hidden"
+/><draw name="RFNoIndicator120" presence="hidden"
+/><field name="RFAddAttachment120" presence="hidden"
+/><draw name="RFText120" presence="hidden"
+><value
+><text
+>Please add legible reprints or a summary of each article in English.</text
+></value
+></draw
+><field name="RFTips120" presence="hidden"
+/><draw name="RFYesIndicator130" presence="hidden"
+/><draw name="RFNoIndicator130" presence="hidden"
+/><draw name="RFText130" presence="hidden"
+><value
+><text
+>Please include a discussion of how each article is applicable to support the submission.</text
+></value
+></draw
+><field name="RFTips130" presence="hidden"
+/><field name="RFTextField130" presence="hidden"
+><assist
+><toolTip
+>Please include a discussion of how each article is applicable to support the submission.</toolTip
+></assist
+></field
+></subform
+><instanceManager name="_AdministrativeDocumentation"
+/><subform name="AdministrativeDocumentation" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="ADYesIndicator807" presence="hidden"
+/><draw name="ADNoIndicator807" presence="hidden"
+/><field name="ADAddAttachment807" presence="hidden"
+/><draw name="ADText807" presence="hidden"
+/><field name="ADTips807" presence="hidden"
+/><draw name="ADYesIndicator809" presence="hidden"
+/><draw name="ADNoIndicator809" presence="hidden"
+/><field name="ADAddAttachment809" presence="hidden"
+/><draw name="ADText809" presence="hidden"
+/><field name="ADTips809" presence="hidden"
+/><draw name="ADYesIndicator812" presence="hidden"
+/><draw name="ADNoIndicator812" presence="hidden"
+/><field name="ADAddAttachment812" presence="hidden"
+/><draw name="ADText812" presence="hidden"
+/><field name="ADTips812" presence="hidden"
+/><draw name="ADYesIndicator820" presence="hidden"
+/><draw name="ADNoIndicator820" presence="hidden"
+/><field name="ADAddAttachment820" presence="hidden"
+/><draw name="ADText820" presence="hidden"
+/><field name="ADTips820" presence="hidden"
+/><draw name="ADYesIndicator830" presence="hidden"
+/><draw name="ADNoIndicator830" presence="hidden"
+/><field name="ADAddAttachment830" presence="hidden"
+/><draw name="ADText830" presence="hidden"
+/><field name="ADTips830" presence="hidden"
+/><draw name="ADYesIndicator845" presence="hidden"
+/><draw name="ADNoIndicator845" presence="hidden"
+/><field name="ADAddAttachment845" presence="hidden"
+/><draw name="ADText845" presence="hidden"
+/><field name="ADTips845" presence="hidden"
+/><draw name="ADYesIndicator855" presence="hidden"
+/><draw name="ADNoIndicator855" presence="hidden"
+/><instanceManager name="_ADCheckboxGroup855"
+/><subform name="ADCheckboxGroup855" presence="hidden"
+/><field name="ADTips855" presence="hidden"
+/><draw name="ADText860" presence="visible"
+/><draw name="ADYesIndicator870" presence="visible"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="ADNoIndicator870" presence="visible"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="ADText870" presence="visible"
+/><field name="ADDropDownList870" presence="visible"
+/><draw name="ADYesIndicator880" presence="hidden"
+/><draw name="ADNoIndicator880" presence="hidden"
+/><field name="ADAddAttachment880" presence="hidden"
+/><draw name="ADText880" presence="hidden"
+/><draw name="ADYesIndicator890" presence="visible"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="ADNoIndicator890" presence="visible"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="ADText890" presence="visible"
+/><field name="ADDropDownList890" presence="visible"
+/><field name="ADTips890" presence="visible"
+/><draw name="ADYesIndicator900" presence="hidden"
+/><draw name="ADNoIndicator900" presence="hidden"
+/><field name="ADAddAttachment900" presence="hidden"
+/><draw name="ADText900" presence="hidden"
+/><draw name="ADYesIndicator920" presence="visible"
+/><draw name="ADNoIndicator920" presence="visible"
+/><field name="ADTextField920" presence="visible"
+/><field name="ADTips920" presence="visible"
+/><field name="ShowUF" presence="visible"
+><caption
+><value
+><text
+>Show User Fee Introduction</text
+></value
+></caption
+></field
+><draw name="TextUF" presence="hidden"
+/><instanceManager name="_TAStatement"
+/><subform name="TAStatement" presence="hidden"
+><field name="DateField1" access="readOnly"
+/></subform
+><instanceManager name="_DoC"
+/><subform name="DoC" presence="hidden"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><field name="DCTextField140"
+/><instanceManager name="_Standards"
+/><subform name="Standards"
+/></subform
+><instanceManager name="_PMNSummary"
+/><subform name="PMNSummary" presence="hidden"
+><field name="KNumber"
+><caption
+><value
+><text
+>510(k) #:</text
+></value
+></caption
+></field
+><field name="SavedDate"
+><value
+><text
+/></value
+></field
+><field name="SSTextField220"
+/><field name="SSTextField240"
+/><field name="SSTextField260"
+/></subform
+></subform
+><instanceManager name="_Amendment"
+/><subform name="Amendment" presence="hidden"
+/><instanceManager name="_Verification"
+/><subform name="Verification" presence="visible"
+><draw name="YesIndicator"
+><border
+><fill
+><color value="255,255,255"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="NoIndicator"
+><border
+><fill
+><color value="255,0,0"
+/></fill
+></border
+><assist
+><toolTip
+>Required Question Incomplete</toolTip
+></assist
+></draw
+><draw name="VRText1"
+><value
+><text
+/></value
+></draw
+><draw name="VRText2"
+><value
+><text
+/></value
+></draw
+><field name="CompletionCheck"
+/><field name="attachMsg"
+><value
+><integer
+>0</integer
+></value
+></field
+><field name="Version"
+/><field name="FormID"
+/><field name="ViewerType"
+/><field name="SavedTime"
+/></subform
+><pageSet
+><pageArea name="Page3"
+/></pageSet
+><pageSet
+><pageArea name="Page1"
+><field name="CurrentPage"
+><value
+><float
+>2.00000000</float
+></value
+></field
+><field name="PageCount"
+><value
+><float
+>23.00000000</float
+></value
+></field
+></pageArea
+><pageArea name="Page1"
+><field name="CurrentPage"
+><value
+><float
+>3.00000000</float
+></value
+></field
+><field name="PageCount"
+><value
+><float
+>23.00000000</float
+></value
+></field
+></pageArea
+><pageArea name="Page1"
+><field name="CurrentPage"
+><value
+><float
+>4.00000000</float
+></value
+></field
+><field name="PageCount"
+><value
+><float
+>23.00000000</float
+></value
+></field
+></pageArea
+><pageArea name="Page1"
+><field name="CurrentPage"
+><value
+><float
+>5.00000000</float
+></value
+></field
+><field name="PageCount"
+><value
+><float
+>23.00000000</float
+></value
+></field
+></pageArea
+><pageArea name="Page2"
+/></pageSet
+><pageSet
+><pageArea name="Page1"
+><field name="CurrentPage"
+><value
+><float
+>7.00000000</float
+></value
+></field
+><field name="PageCount"
+><value
+><float
+>23.00000000</float
+></value
+></field
+></pageArea
+><pageArea name="Page1"
+><field name="CurrentPage"
+><value
+><float
+>8.00000000</float
+></value
+></field
+><field name="PageCount"
+><value
+><float
+>23.00000000</float
+></value
+></field
+></pageArea
+><pageArea name="Page1"
+><field name="CurrentPage"
+><value
+><float
+>9.00000000</float
+></value
+></field
+><field name="PageCount"
+><value
+><float
+>23.00000000</float
+></value
+></field
+></pageArea
+><pageArea name="Page1"
+><field name="CurrentPage"
+><value
+><float
+>10.00000000</float
+></value
+></field
+><field name="PageCount"
+><value
+><float
+>23.00000000</float
+></value
+></field
+></pageArea
+><pageArea name="Page1"
+><field name="CurrentPage"
+><value
+><float
+>11.00000000</float
+></value
+></field
+><field name="PageCount"
+><value
+><float
+>23.00000000</float
+></value
+></field
+></pageArea
+><pageArea name="Page1"
+><field name="CurrentPage"
+><value
+><float
+>12.00000000</float
+></value
+></field
+><field name="PageCount"
+><value
+><float
+>23.00000000</float
+></value
+></field
+></pageArea
+><pageArea name="Page1"
+><field name="CurrentPage"
+><value
+><float
+>13.00000000</float
+></value
+></field
+><field name="PageCount"
+><value
+><float
+>23.00000000</float
+></value
+></field
+></pageArea
+><pageArea name="Page1"
+><field name="CurrentPage"
+><value
+><float
+>14.00000000</float
+></value
+></field
+><field name="PageCount"
+><value
+><float
+>23.00000000</float
+></value
+></field
+></pageArea
+><pageArea name="Page1"
+><field name="CurrentPage"
+><value
+><float
+>15.00000000</float
+></value
+></field
+><field name="PageCount"
+><value
+><float
+>23.00000000</float
+></value
+></field
+></pageArea
+><pageArea name="Page1"
+><field name="CurrentPage"
+><value
+><float
+>16.00000000</float
+></value
+></field
+><field name="PageCount"
+><value
+><float
+>23.00000000</float
+></value
+></field
+></pageArea
+><pageArea name="Page1"
+><field name="CurrentPage"
+><value
+><float
+>17.00000000</float
+></value
+></field
+><field name="PageCount"
+><value
+><float
+>23.00000000</float
+></value
+></field
+></pageArea
+><pageArea name="Page1"
+><field name="CurrentPage"
+><value
+><float
+>18.00000000</float
+></value
+></field
+><field name="PageCount"
+><value
+><float
+>23.00000000</float
+></value
+></field
+></pageArea
+><pageArea name="Page1"
+><field name="CurrentPage"
+><value
+><float
+>19.00000000</float
+></value
+></field
+><field name="PageCount"
+><value
+><float
+>23.00000000</float
+></value
+></field
+></pageArea
+><pageArea name="Page1"
+><field name="CurrentPage"
+><value
+><float
+>20.00000000</float
+></value
+></field
+><field name="PageCount"
+><value
+><float
+>23.00000000</float
+></value
+></field
+></pageArea
+><pageArea name="Page1"
+><field name="CurrentPage"
+><value
+><float
+>21.00000000</float
+></value
+></field
+><field name="PageCount"
+><value
+><float
+>23.00000000</float
+></value
+></field
+></pageArea
+><pageArea name="Page1"
+><field name="CurrentPage"
+><value
+><float
+>22.00000000</float
+></value
+></field
+><field name="PageCount"
+><value
+><float
+>23.00000000</float
+></value
+></field
+></pageArea
+><pageArea name="Page1"
+><field name="CurrentPage"
+><value
+><float
+>23.00000000</float
+></value
+></field
+><field name="PageCount"
+><value
+><float
+>23.00000000</float
+></value
+></field
+></pageArea
+></pageSet
+></subform
+></form
+>

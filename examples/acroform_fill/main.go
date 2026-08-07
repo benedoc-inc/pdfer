@@ -6,8 +6,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/benedoc-inc/pdfer/forms/acroform"
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/forms/acroform"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 func main() {

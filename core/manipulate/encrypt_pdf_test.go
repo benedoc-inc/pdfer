@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/core/encrypt"
-	"github.com/benedoc-inc/pdfer/core/parse"
-	"github.com/benedoc-inc/pdfer/core/write"
+	"github.com/benedoc-inc/pdfer/v2/core/encrypt"
+	"github.com/benedoc-inc/pdfer/v2/core/parse"
+	"github.com/benedoc-inc/pdfer/v2/core/write"
 )
 
 // buildPlainPDF builds a one-page PDF with a single text run (no encryption).
@@ -52,6 +52,20 @@ func TestEncryptSplitContent_Stream(t *testing.T) {
 func TestEncryptSplitContent_StreamCRLF(t *testing.T) {
 	raw := "<</Length 5>>\nstream\r\nHello\nendstream"
 	_, s := encryptSplitContent([]byte(raw))
+	if string(s) != "Hello" {
+		t.Errorf("stream bytes = %q, want %q", s, "Hello")
+	}
+}
+
+func TestEncryptSplitContent_NoNewlineBeforeStream(t *testing.T) {
+	// Some producers put the stream keyword right after >>. Missing this split
+	// routes the binary stream through the string-encryption walker (and leaves
+	// the stream itself unencrypted).
+	raw := "<</Filter/FlateDecode/Length 5>>stream\nHello\nendstream"
+	d, s := encryptSplitContent([]byte(raw))
+	if !strings.HasSuffix(string(d), ">>") || strings.Contains(string(d), "stream") {
+		t.Errorf("dict bytes wrong: %q", d)
+	}
 	if string(s) != "Hello" {
 		t.Errorf("stream bytes = %q, want %q", s, "Hello")
 	}

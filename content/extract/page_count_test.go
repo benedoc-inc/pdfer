@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/core/parse"
+	"github.com/benedoc-inc/pdfer/v2/core/parse"
 )
 
 // TestPageCountIsPagesNotObjects is the regression test for

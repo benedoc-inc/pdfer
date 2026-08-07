@@ -4,8 +4,9 @@
 P2 is a draft proposal still under consideration. Open for discussion — file
 an issue or open a PR to suggest changes.
 
-**Implementation status:** P1 #1 closed by commit `88b6989` (orphan-script
-extraction). P1 #2 and #3 remain open and tracked here.
+**Implementation status:** P1 is complete. #1 closed by commit `88b6989`
+(orphan-script extraction), #2 by PR #16 (`fbe109a`, `FormSchema.Elements`),
+#3 by the occur/bind metadata extraction (v2.6.0).
 
 ---
 
@@ -24,8 +25,8 @@ it.**
 | Change | Priority | Status | Why |
 |---|---|---|---|
 | Export all scripts, regardless of whether their owner node is emitted as a Question | **P1** | **Done** (`88b6989`) | The current emission filter drops the script-bearing nodes (`bind="none"` buttons, event-bearing draws, `<pageArea>` events) that renderers most need. This is the single largest fidelity gap. |
-| Surface event-bearing and `bind="none"` nodes via a parallel `Elements` collection | **P1** | Planned | Renderers need these nodes addressable in the schema; keeping them out of `Questions` preserves the "Question = thing a user answers" invariant. |
-| Parse and expose `<occur>` and `<bind>` metadata on Questions and Sections | **P1** | Planned | Without this, renderers can't tell which subforms are repeatable or what they bind to — i.e. can't implement dynamic XFA at all. |
+| Surface event-bearing and `bind="none"` nodes via a parallel `Elements` collection | **P1** | **Done** (PR #16, `fbe109a`) | Renderers need these nodes addressable in the schema; keeping them out of `Questions` preserves the "Question = thing a user answers" invariant. |
+| Parse and expose `<occur>` and `<bind>` metadata on Questions and Sections | **P1** | **Done** (v2.6.0) | Without this, renderers can't tell which subforms are repeatable or what they bind to — i.e. can't implement dynamic XFA at all. |
 | Ship a SOM path parser + schema resolver as `forms/xfa/som` | **P2** | Draft | Single correct implementation everyone needs; co-located with the schema it operates on. |
 | Add data-DOM cursor API (`GetDataValue` / `SetDataValue` / `ListDataChildren` by SOM path) | **P2** | Draft | Current `UpdateXFAValues` is name-keyed and regex-based; renderers doing real binding need path-keyed access. |
 | Capture `<validate><script>` child elements as regular FormScripts | **P2** | Draft | Currently only the `scriptTest` attribute form is captured; the child-element form is not. |
@@ -137,6 +138,11 @@ caring which one.
 
 ### 2. Surface event-bearing and `bind="none"` nodes via a parallel `Elements` collection
 
+**Status: Done (PR #16, commit `fbe109a`).** `FormSchema.Elements` surfaces
+`bind="none"` buttons, event-bearing draws, and pageAreas as typed
+`FormElement` entries; `populateScriptBackRefs` fills `OwnerID` for
+element-owned scripts. The original problem statement is preserved below.
+
 **Problem.** `emitField` currently drops `bind="none"` button nodes as "UI
 trigger (Help Text, Show Intro, etc.)", with a hardcoded exception for
 `AddAttachment`. `emitDraw` drops any draw with `len(node.Events) > 0` as
@@ -182,6 +188,16 @@ removed in favor of treating all `bind="none"` buttons uniformly via
 `Elements`.
 
 ### 3. Parse and expose `<occur>` and `<bind>` metadata
+
+**Status: Done (v2.6.0).** `types.Occur` and `types.Bind` are populated on
+`Question`, `FormSection`, and `FormElement` (the last for symmetry — the
+doc below predates the Elements collection). Occur values are normalized to
+XFA spec defaults at parse time (min=1; max=min; initial=min; `max="-1"`
+unbounded) and stay nil when the template has no `<occur>`. Bind `Match`
+defaults to `"once"` when the attribute is absent; `Ref` is surfaced
+verbatim. The metadata feeds no emission filter — the `bind="none"` leaf
+drop stays keyed to the pre-existing internal string field. The original
+problem statement is preserved below.
 
 **Problem.** This is the missing piece for any renderer that wants to do
 dynamic XFA. Currently:
@@ -303,6 +319,44 @@ its own `contentType`. The child-element form appears to be uncaptured.
 **Fix.** Treat the child-element form the same as any other event — its body
 appears in `FormSchema.Scripts` with `Event: "validate"`. The attribute form
 can stay where it is or be normalized into the same shape.
+
+### 7. Form-packet (`<form>`) persistence — write side landed
+
+**Context.** A dynamic XFA document (e.g. an FDA eSTAR) has three persistence
+surfaces, not one: the `<datasets>` packet (user data), the AcroForm shadow
+(`/V` + appearances, for static XFA so non-XFA viewers show values), and the
+`<form>` packet — Acrobat's saved Form-DOM deltas (revealed pages, instance
+counts, swapped values). Acrobat re-applies the `<form>` deltas on open *only*
+if the packet's `checksum` attribute still matches what it recomputes; a stale
+or absent checksum makes it discard them. eSTARs rely on this heavily, so a
+faithfully partially-filled eSTAR must write this packet, not just the datasets.
+
+**Landed (`forms/xfa/form_packet.go`, `form_packet_gen.go`).**
+
+- Read side: the `<form>` packet is now a first-class `XFAStreams.Form` field
+  (previously it fell into the `Resources` catch-all).
+- `SetXFAFormPacket` replaces the packet via the same encryption-aware
+  incremental-update machinery as the datasets fill — original bytes preserved
+  as a prefix, signatures over the prior revision intact.
+- `BuildFormPacket` / `ParseFormPacketPresence` build and round-trip a minimal
+  presence-only skeleton purely by walking the template against a caller-supplied
+  presence set — pdfer persists structure; deciding *what* to reveal stays with
+  the caller.
+
+**Checksum boundary.** The `checksum` digest is computed over the template +
+datasets packets. pdfer deliberately ships **no** digest algorithm: callers pass
+a `FormChecksumFunc` to stamp a real, Acrobat-honored value, or `nil` to preserve
+whatever checksum the packet already carries. Because the digest covers the
+datasets, a caller changing both must write the datasets first so the stamped
+value stays valid.
+
+**Exposure.** This is an advanced sub-package API (`xfa.SetXFAFormPacket`), not
+part of the unified `Form` interface — it requires a caller-supplied checksummer,
+so it can't be a turnkey `Form.Fill` operation.
+
+**Deferred.** Adding a brand-new `<form>` entry to a PDF that lacks one (the
+FDA-distributed forms already carry one); a combined "write datasets + form
+packet" helper.
 
 ---
 

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/benedoc-inc/pdfer/core/encrypt"
-	"github.com/benedoc-inc/pdfer/resources/font"
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/core/encrypt"
+	"github.com/benedoc-inc/pdfer/v2/resources/font"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // PageSize represents standard page dimensions in points (1 point = 1/72 inch)

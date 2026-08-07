@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/benedoc-inc/pdfer/content/extract"
-	"github.com/benedoc-inc/pdfer/forms"
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/content/extract"
+	"github.com/benedoc-inc/pdfer/v2/forms"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // ComparisonResult represents the result of comparing two PDFs

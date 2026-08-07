@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/benedoc-inc/pdfer/core/parse"
+	"github.com/benedoc-inc/pdfer/v2/core/parse"
 )
 
 // FixPDFA attempts to repair common PDF/A conformance violations and return a
@@ -62,6 +62,9 @@ func FixPDFA(pdfBytes []byte, password []byte) ([]byte, error) {
 		body, objErr := pdf.GetObjectContent(n)
 		if objErr != nil {
 			continue
+		}
+		if parse.IsCrossRefContainerObject(body) {
+			continue // xref/objstm containers; the writer regenerates them
 		}
 		w.SetObject(n, body)
 	}
@@ -136,6 +139,9 @@ func ConvertToPDFA(pdfBytes []byte, conformance PDFAConformance) ([]byte, error)
 		body, objErr := pdf.GetObjectContent(n)
 		if objErr != nil {
 			continue
+		}
+		if parse.IsCrossRefContainerObject(body) {
+			continue // xref/objstm containers; the writer regenerates them
 		}
 		if n == rootNum {
 			body = []byte(convertPDFARemoveEncryptRef(string(body)))

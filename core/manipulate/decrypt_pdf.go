@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/benedoc-inc/pdfer/core/parse"
-	"github.com/benedoc-inc/pdfer/core/write"
+	"github.com/benedoc-inc/pdfer/v2/core/parse"
+	"github.com/benedoc-inc/pdfer/v2/core/write"
 )
 
 // DecryptPDF produces a fully decrypted, plaintext PDF from an encrypted one.
@@ -47,6 +47,9 @@ func DecryptPDF(pdfBytes []byte, password []byte, verbose bool) ([]byte, error) 
 		body, objErr := pdf.GetObjectContent(n)
 		if objErr != nil {
 			continue
+		}
+		if parse.IsCrossRefContainerObject(body) {
+			continue // xref/objstm containers; the writer regenerates them
 		}
 		if n == rootNum {
 			body = decryptRemoveEncryptRef(body)

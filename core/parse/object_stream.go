@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/core/encrypt"
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/core/encrypt"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // ObjectStreamEntry represents an object stored in an object stream (Type 2 xref entry)
@@ -97,23 +97,28 @@ func ParseXRefStreamFull(pdfBytes []byte, startXRef int64, verbose bool) (*XRefR
 	}
 
 	// Find and decompress stream content
-	streamKeywordPos := bytes.Index(xrefSection[dictStart:], []byte("stream"))
-	if streamKeywordPos == -1 {
+	streamKeywordStart := streamKeywordPos(xrefSection)
+	if streamKeywordStart == -1 {
 		return nil, fmt.Errorf("stream keyword not found")
 	}
-	streamKeywordStart := dictStart + streamKeywordPos
 
 	streamDataStart := streamKeywordStart + 6
 	for streamDataStart < len(xrefSection) && (xrefSection[streamDataStart] == '\r' || xrefSection[streamDataStart] == '\n' || xrefSection[streamDataStart] == ' ' || xrefSection[streamDataStart] == '\t') {
 		streamDataStart++
 	}
 
-	streamEndPos := bytes.Index(xrefSection[streamDataStart:], []byte("endstream"))
+	// Honour a direct /Length so the compressed payload (which may contain the
+	// literal bytes "endstream") can't truncate the stream early.
+	endSearch := streamDataStart
+	if n := directStreamLength(xrefSection[dictStart:streamKeywordStart]); n > 0 && streamDataStart+n <= len(xrefSection) {
+		endSearch = streamDataStart + n
+	}
+	streamEndPos := bytes.Index(xrefSection[endSearch:], []byte("endstream"))
 	if streamEndPos == -1 {
 		return nil, fmt.Errorf("endstream not found")
 	}
 
-	streamContent := xrefSection[streamDataStart : streamDataStart+streamEndPos]
+	streamContent := xrefSection[streamDataStart : endSearch+streamEndPos]
 
 	// Decompress (xref streams are NOT encrypted)
 	var decompressed []byte
@@ -299,27 +304,23 @@ func GetObjectFromStreamAt(pdfBytes []byte, objNum int, streamObjNum int, indexI
 		return nil, fmt.Errorf("object stream dictionary not found")
 	}
 
-	// Find dictionary end to get dict content
-	dictEnd := bytes.Index(objSection[dictStart:], []byte(">>"))
-	if dictEnd == -1 {
-		return nil, fmt.Errorf("dictionary end not found")
+	// Find the stream keyword (located after the balanced dictionary, honouring
+	// string values) so the dict is bounded correctly below.
+	streamKeyword := streamKeywordPos(objSection)
+	if streamKeyword == -1 {
+		return nil, fmt.Errorf("stream keyword not found in object stream")
 	}
-	dictContent := string(objSection[dictStart : dictStart+dictEnd+2])
 
-	// Get /Length from dictionary
+	// Get /Length from the dictionary. Bound the dict at the stream keyword
+	// rather than the first ">>": a nested dict value (e.g. /DecodeParms <<...>>)
+	// preceding /Length would otherwise close the dict early and lose /Length.
+	dictContent := string(objSection[dictStart:streamKeyword])
 	lengthPattern := regexp.MustCompile(`/Length\s+(\d+)`)
 	lengthMatch := lengthPattern.FindStringSubmatch(dictContent)
 	if lengthMatch == nil {
 		return nil, fmt.Errorf("/Length not found in object stream dictionary")
 	}
 	streamLength, _ := strconv.Atoi(lengthMatch[1])
-
-	// Find stream keyword
-	streamKeyword := bytes.Index(objSection[dictStart:], []byte("stream"))
-	if streamKeyword == -1 {
-		return nil, fmt.Errorf("stream keyword not found in object stream")
-	}
-	streamKeyword += dictStart
 
 	// Skip "stream" and exactly one EOL marker (per PDF spec)
 	streamDataStart := streamKeyword + 6
@@ -475,12 +476,16 @@ func locateObjectStream(pdfBytes []byte, streamObjNum, streamOffset int) (int, e
 	if streamOffset > 0 && objHeaderAt(pdfBytes, streamObjNum, streamOffset) {
 		return streamOffset, nil
 	}
-	// Fallback scan, bounded by \b rather than start-of-line. The anchor was
-	// there to stop object 11 matching the "11" inside "111 0 obj"; a word
-	// boundary rules that out too (the digit after "11" is a word character,
-	// so \b11\s fails) WITHOUT requiring the header to begin a line — which
-	// nothing in the spec guarantees and which real files do not do. Also
-	// generation-agnostic; the old pattern hardcoded generation 0.
+	// Fallback scan, bounded by \b rather than start-of-line. The old ^ anchor
+	// existed to stop object 11 matching the "11" inside "111 0 obj"; a word
+	// boundary rules that out just as well (the digit after "11" is a word
+	// character, so \b11\s fails) without demanding a line start, which nothing
+	// in the spec guarantees and which real files do not provide.
+	//
+	// main reached the same conclusion independently in the boundary-group form
+	// `(^|[^0-9])(N\s+0\s+obj)`; \b is the same rule spelled shorter and needs
+	// no submatch bookkeeping. Kept generation-agnostic here — both earlier
+	// versions hardcoded generation 0.
 	re := regexp.MustCompile(fmt.Sprintf(`\b%d\s+\d+\s+obj`, streamObjNum))
 	if m := re.FindIndex(pdfBytes); m != nil {
 		return m[0], nil

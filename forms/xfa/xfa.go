@@ -11,9 +11,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/core/parse"
-	"github.com/benedoc-inc/pdfer/core/write"
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/core/incremental"
+	"github.com/benedoc-inc/pdfer/v2/core/parse"
+	"github.com/benedoc-inc/pdfer/v2/core/write"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // extractStreamDataFromObject extracts stream data from raw object bytes
@@ -112,6 +113,10 @@ type XFAStreams struct {
 	XMP           *XFAStreamInfo `json:"xmp,omitempty"`
 	Signature     *XFAStreamInfo `json:"signature,omitempty"`
 	SourceSet     *XFAStreamInfo `json:"sourceSet,omitempty"`
+	// Form holds the XFA `form` packet, which carries Acrobat's saved Form-DOM
+	// deltas (revealed pages, instance counts, swapped values). SetXFAFormPacket
+	// replaces it; most PDFs preserve it byte-for-byte.
+	Form *XFAStreamInfo `json:"form,omitempty"`
 	// Resources holds any additional XFA packet streams not matched by name above.
 	// These are typically image or font resources referenced via $rr: hrefs in the template.
 	Resources map[string]*XFAStreamInfo `json:"resources,omitempty"`
@@ -298,6 +303,8 @@ func ExtractAllXFAStreams(pdfBytes []byte, encryptInfo *types.PDFEncryption, ver
 			streams.Signature = streamInfo
 		case "sourceSet":
 			streams.SourceSet = streamInfo
+		case "form":
+			streams.Form = streamInfo
 		default:
 			if verbose {
 				log.Printf("Unknown XFA stream type (resource): %s", streamName)
@@ -434,8 +441,31 @@ func BuildPDFFromXFAStreams(streams *XFAStreams, verbose bool) ([]byte, error) {
 	return builder.BuildFromXFA(xfaStreams)
 }
 
-// UpdateXFAInPDF updates XFA field values in PDF bytes
+// UpdateXFAInPDF updates XFA field values in PDF bytes.
+//
+// Sources whose active xref is a cross-reference stream (PDF 1.5+) are filled
+// via a PDF incremental update — the in-place byte-rewrite below cannot adjust
+// xref-stream offsets (see ErrXRefStreamUnsupported). Classical-xref sources
+// keep the byte-rewrite path.
+//
+// The incremental route opens the source with no password, which only works
+// for unencrypted sources and encrypted ones with an empty user password
+// (e.g. FDA eSTAR templates). Callers holding a password for an encrypted
+// xref-stream source should use UpdateXFAInPDFWithPassword.
 func UpdateXFAInPDF(pdfBytes []byte, formData types.FormData, encryptInfo *types.PDFEncryption, verbose bool) ([]byte, error) {
+	return UpdateXFAInPDFWithPassword(pdfBytes, formData, nil, encryptInfo, verbose)
+}
+
+// UpdateXFAInPDFWithPassword is UpdateXFAInPDF with a password to open
+// sources routed to the incremental path (encrypted xref-stream PDFs cannot
+// be pre-decrypted by the byte-rewrite pipeline, so the password must reach
+// the incremental opener directly). The byte-rewrite path is unchanged: it
+// operates on plaintext bytes and uses encryptInfo as before.
+func UpdateXFAInPDFWithPassword(pdfBytes []byte, formData types.FormData, password []byte, encryptInfo *types.PDFEncryption, verbose bool) ([]byte, error) {
+	if incremental.UsesXRefStream(pdfBytes) {
+		return UpdateXFAInPDFIncremental(pdfBytes, formData, password, verbose)
+	}
+
 	// Find XFA datasets stream. Note: FindXFADatasetsStream returns
 	// already-decompressed XML — ExtractAllXFAStreams runs the bytes through
 	// DecompressStream internally — so we must not call DecompressStream on

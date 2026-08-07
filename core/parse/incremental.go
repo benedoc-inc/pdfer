@@ -233,8 +233,9 @@ func (p *incrementalParser) findPrevOffset(startXRef int64) (int64, error) {
 	}
 
 	// Cross-reference stream - /Prev is in the stream dictionary
-	// Find the dictionary end (before "stream" keyword)
-	streamIdx := bytes.Index(section, []byte("stream"))
+	// Find the dictionary end (the "stream" keyword, located after the dict so
+	// a name/string containing "stream" doesn't truncate it prematurely).
+	streamIdx := streamKeywordPos(section)
 	if streamIdx == -1 {
 		streamIdx = min(2000, len(section))
 	}
@@ -283,7 +284,18 @@ func (p *incrementalParser) parseTraditionalxrefSection(startXRef int64) (*xrefS
 	}
 
 	xrefData := p.pdfBytes[startXRef:]
-	xrefStr := string(xrefData[:min(10000, len(xrefData))])
+	// A traditional xref section ends at the "trailer" keyword. Read the whole
+	// section up to (and including) that keyword rather than a fixed byte cap:
+	// each entry is 20 bytes, so a document with more than ~500 objects has an
+	// xref table longer than any small fixed window, and truncating it silently
+	// drops every object beyond the cut — the parser then can't resolve the
+	// catalog of a rebuilt PDF/A or encrypted file (issue #26). Fall back to the
+	// remaining bytes when no trailer is found (malformed/streamed input).
+	scanEnd := len(xrefData)
+	if ti := bytes.Index(xrefData, []byte("trailer")); ti != -1 {
+		scanEnd = ti + len("trailer")
+	}
+	xrefStr := string(xrefData[:scanEnd])
 
 	// Parse xref entries
 	lines := regexp.MustCompile(`\r?\n`).Split(xrefStr, -1)
@@ -435,15 +447,20 @@ func (p *incrementalParser) parseXRefStreamSection(startXRef int64) (*xrefSectio
 
 // mergeSections merges all xref sections (older entries first, newer override)
 func (p *incrementalParser) mergeSections() {
-	// sections are already ordered oldest to newest
+	// sections are already ordered oldest to newest. A newer revision may
+	// change an object's storage kind (direct <-> in object stream), so an
+	// override must also remove the object from the other map — a stale entry
+	// there would shadow the newer one in consumers that check one map first.
 	for _, section := range p.sections {
 		// Regular objects
 		for objNum, offset := range section.Objects {
 			p.mergedObjs[objNum] = offset
+			delete(p.mergedStreams, objNum)
 		}
 		// Object stream entries
 		for objNum, entry := range section.Streams {
 			p.mergedStreams[objNum] = entry
+			delete(p.mergedObjs, objNum)
 		}
 	}
 

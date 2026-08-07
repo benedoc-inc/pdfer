@@ -1,13 +1,13 @@
 package tests
 
 import (
-	"errors"
+	"bytes"
 	"os"
 	"testing"
 
-	pdfer "github.com/benedoc-inc/pdfer"
-	"github.com/benedoc-inc/pdfer/forms"
-	"github.com/benedoc-inc/pdfer/forms/xfa"
+	pdfer "github.com/benedoc-inc/pdfer/v2"
+	"github.com/benedoc-inc/pdfer/v2/forms"
+	"github.com/benedoc-inc/pdfer/v2/forms/xfa"
 )
 
 // TestFDA3881_Detection verifies that Form 3881 is correctly identified as an XFA form.
@@ -51,14 +51,13 @@ func TestFDA3881_Schema(t *testing.T) {
 	}
 }
 
-// TestFDA3881_Fill_RejectsXRefStream documents that XFA fill currently cannot
-// handle unencrypted PDFs that use cross-reference streams (PDF 1.5+).
-// FDA Form 3881 is exactly that shape. Earlier code path silently produced a
-// structurally-broken output (xref offsets pointing past the resized stream
-// were not updated); we now return ErrXRefStreamUnsupported so callers can
-// detect the limitation. Issue #12 tracks lifting it by switching XFA fill
-// to PDF incremental updates.
-func TestFDA3881_Fill_RejectsXRefStream(t *testing.T) {
+// TestFDA3881_Fill_XRefStreamIncremental verifies that XFA fill works on PDFs
+// whose xref is a cross-reference stream (PDF 1.5+). FDA Form 3881 is exactly
+// that shape. Byte-rewrite cannot patch binary xref streams, so the fill must
+// route through a PDF incremental update (issue #12): the original bytes are
+// preserved verbatim as a prefix, a replacement datasets stream and an
+// xref-stream section are appended, and the filled values are readable back.
+func TestFDA3881_Fill_XRefStreamIncremental(t *testing.T) {
 	pdfBytes := readFDA3881(t)
 
 	form, err := pdfer.ExtractForm(pdfBytes, nil, false)
@@ -77,12 +76,36 @@ func TestFDA3881_Fill_RejectsXRefStream(t *testing.T) {
 		"overthe":     "0",
 	}
 
-	_, err = form.Fill(pdfBytes, fillData, nil, false)
-	if err == nil {
-		t.Fatal("Fill: expected ErrXRefStreamUnsupported for xref-stream input, got nil")
+	filled, err := form.Fill(pdfBytes, fillData, nil, false)
+	if err != nil {
+		t.Fatalf("Fill: %v", err)
 	}
-	if !errors.Is(err, xfa.ErrXRefStreamUnsupported) {
-		t.Errorf("Fill: expected ErrXRefStreamUnsupported, got: %v", err)
+
+	// Incremental update: original revision preserved verbatim, new revision
+	// appended with an xref stream (not a classical trailer, per §7.5.8.4).
+	if !bytes.HasPrefix(filled, pdfBytes) {
+		t.Error("filled PDF must preserve the original bytes as a prefix")
+	}
+	appended := filled[len(pdfBytes):]
+	if !bytes.Contains(appended, []byte("/Type/XRef")) {
+		t.Error("appended revision must use a cross-reference stream")
+	}
+	if bytes.Contains(appended, []byte("trailer")) {
+		t.Error("appended revision must not use a classical trailer")
+	}
+
+	// The filled values must read back from the updated datasets.
+	xfaXML, _, err := xfa.FindXFADatasetsStream(filled, nil, false)
+	if err != nil {
+		t.Fatalf("FindXFADatasetsStream on filled PDF: %v", err)
+	}
+	for field, want := range map[string]string{
+		"number510":  "K241234",
+		"devicename": "InVitro Glucose Monitor",
+	} {
+		if !bytes.Contains(xfaXML, []byte(want)) {
+			t.Errorf("filled datasets missing value %q for field %q", want, field)
+		}
 	}
 }
 

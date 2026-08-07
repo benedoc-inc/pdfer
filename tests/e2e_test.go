@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/benedoc-inc/pdfer/content/extract"
-	"github.com/benedoc-inc/pdfer/core/parse"
-	"github.com/benedoc-inc/pdfer/core/write"
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/content/extract"
+	"github.com/benedoc-inc/pdfer/v2/core/parse"
+	"github.com/benedoc-inc/pdfer/v2/core/write"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // TestE2E_CreateAndParseSimplePDF tests creating a simple PDF and parsing it back

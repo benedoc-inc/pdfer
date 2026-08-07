@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/core/encrypt"
-	"github.com/benedoc-inc/pdfer/core/parse"
-	"github.com/benedoc-inc/pdfer/core/write"
+	"github.com/benedoc-inc/pdfer/v2/core/encrypt"
+	"github.com/benedoc-inc/pdfer/v2/core/parse"
+	"github.com/benedoc-inc/pdfer/v2/core/write"
 )
 
 // PDFManipulator provides functions to modify existing PDFs
@@ -42,6 +42,9 @@ func NewPDFManipulator(pdfBytes []byte, password []byte, verbose bool) (*PDFMani
 				fmt.Printf("Warning: failed to get object %d: %v\n", objNum, err)
 			}
 			continue
+		}
+		if parse.IsCrossRefContainerObject(obj) {
+			continue // xref/objstm containers; the writer regenerates them
 		}
 		objects[objNum] = obj
 	}

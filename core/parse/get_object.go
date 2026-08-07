@@ -7,8 +7,8 @@ import (
 	"regexp"
 	"strconv"
 
-	"github.com/benedoc-inc/pdfer/core/encrypt"
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/core/encrypt"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // ObjectLocation describes where an object is located
@@ -24,7 +24,35 @@ func FindObjectLocation(pdfBytes []byte, objNum int, verbose bool) (*ObjectLocat
 	// ALWAYS use xref table first - it's the authoritative source
 	// Direct search using bytes.Index is dangerous because "5 0 obj" matches inside "265 0 obj"
 
-	// Parse xref to find object
+	// Walk the full revision chain (last startxref, /Prev links, newest entry
+	// wins). Anything else misreads incrementally-updated files: the first
+	// startxref in the file belongs to the OLDEST revision. The chain parse
+	// is memoized per pdfBytes slice — GetObject runs once per field in
+	// form-parsing loops, and re-walking the chain each call would be
+	// O(fields × revisions).
+	if chain, err := mergedXRefChain(pdfBytes, verbose); err == nil {
+		if entry, ok := chain.ObjectStreams[objNum]; ok {
+			if verbose {
+				log.Printf("Object %d is in object stream %d at index %d", objNum, entry.StreamObjNum, entry.IndexInStream)
+			}
+			return &ObjectLocation{
+				IsDirect:      false,
+				StreamObjNum:  entry.StreamObjNum,
+				IndexInStream: entry.IndexInStream,
+			}, nil
+		}
+		if offset, ok := chain.Objects[objNum]; ok {
+			if verbose {
+				log.Printf("Object %d at byte offset %d (from merged xref chain)", objNum, offset)
+			}
+			return &ObjectLocation{IsDirect: true, ByteOffset: offset}, nil
+		}
+	} else if verbose {
+		log.Printf("Incremental xref parse failed (%v), falling back to single-section parse", err)
+	}
+
+	// Fallback: parse only the section at the first startxref (legacy behavior
+	// for files the chain walker cannot handle).
 	startxrefPattern := regexp.MustCompile(`startxref\s+(\d+)`)
 	startxrefMatch := startxrefPattern.FindStringSubmatch(string(pdfBytes))
 	if startxrefMatch == nil {
@@ -89,9 +117,12 @@ func FindObjectLocation(pdfBytes []byte, objNum int, verbose bool) (*ObjectLocat
 
 	// Not found in xref - try regex search for object header with word boundary
 	// Use negative lookbehind equivalent: require whitespace or start of file before objNum
+	// Take the LAST match: with incremental updates the newest definition of an
+	// object appears later in the file.
 	pattern := regexp.MustCompile(fmt.Sprintf(`(^|\s|[\r\n])%d\s+0\s+obj`, objNum))
-	matches := pattern.FindIndex(pdfBytes)
-	if matches != nil {
+	allMatches := pattern.FindAllIndex(pdfBytes, -1)
+	if len(allMatches) > 0 {
+		matches := allMatches[len(allMatches)-1]
 		// Find the actual start of the object number
 		offset := int64(matches[0])
 		// Skip the preceding whitespace/newline
@@ -228,16 +259,29 @@ func extractDirectObjectContent(pdfBytes []byte, objNum int, offset int64, encry
 	content = objData[contentStart:endobjPos]
 
 	// Stream object: trim to endstream and optionally decrypt.
-	streamStart := bytes.Index(content, []byte("stream"))
+	streamStart := streamKeywordPos(content)
 	if streamStart != -1 {
-		endstreamPos := bytes.Index(content, []byte("endstream"))
-		if endstreamPos == -1 {
-			endstreamPos = len(content)
+		// Bound the endstream search to after the stream data (honouring a
+		// direct /Length) so payload bytes containing the literal "endstream"
+		// don't truncate the stream early.
+		endstreamPos := endstreamKeywordPos(content, streamStart)
+		end := endstreamPos + len("endstream")
+		if end > len(content) {
+			end = len(content)
 		}
-		content = content[:endstreamPos+len("endstream")]
+		content = content[:end]
 
 		if encryptInfo != nil {
 			dictPart := content[:streamStart]
+			// Stream dictionaries can carry string values too (e.g. embedded-file
+			// /Desc or /Params dates); decrypt them like any other dict strings.
+			// The /Encrypt dictionary itself is exempt: its strings (/O, /U, ...)
+			// are never encrypted (ISO 32000-1 §7.6.5).
+			if objNum != encryptInfo.EncryptObjNum {
+				if decryptedDict, decErr := encrypt.DecryptStringsInContent(dictPart, objNum, genNum, encryptInfo); decErr == nil {
+					dictPart = decryptedDict
+				}
+			}
 			lengthPattern := regexp.MustCompile(`/Length\s+(\d+)`)
 			lengthMatch := lengthPattern.FindSubmatch(dictPart)
 
@@ -285,8 +329,10 @@ func extractDirectObjectContent(pdfBytes []byte, objNum int, offset int64, encry
 				log.Printf("Decryption failed: %v", decErr)
 			}
 		}
-	} else if encryptInfo != nil {
-		// Dictionary object — decrypt individual string values.
+	} else if encryptInfo != nil && objNum != encryptInfo.EncryptObjNum {
+		// Dictionary object — decrypt individual string values. The /Encrypt
+		// dictionary itself is exempt: its strings (/O, /U, ...) are never
+		// encrypted (ISO 32000-1 §7.6.5).
 		decrypted, decErr := encrypt.DecryptStringsInContent(content, objNum, genNum, encryptInfo)
 		if decErr == nil {
 			content = decrypted

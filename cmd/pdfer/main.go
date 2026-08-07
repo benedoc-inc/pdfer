@@ -5,7 +5,7 @@
 //
 // Subcommands:
 //
-//	pdfer stamp -input a.pdf -output b.pdf [-text DRAFT] [-opacity 0.12] [-angle 45] [-font-size 80]
+//	pdfer stamp -input a.pdf -output b.pdf [-text DRAFT] [-opacity 0.12] [-angle 45] [-font-size 80] [-x 420] [-y 760]
 //	pdfer (no subcommand) — XFA form filling (legacy behaviour)
 package main
 
@@ -16,11 +16,12 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
-	pdfer "github.com/benedoc-inc/pdfer"
-	encrypt "github.com/benedoc-inc/pdfer/core/encrypt"
-	"github.com/benedoc-inc/pdfer/forms/xfa"
-	"github.com/benedoc-inc/pdfer/types"
+	pdfer "github.com/benedoc-inc/pdfer/v2"
+	encrypt "github.com/benedoc-inc/pdfer/v2/core/encrypt"
+	"github.com/benedoc-inc/pdfer/v2/forms/xfa"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 func main() {
@@ -46,6 +47,8 @@ func main() {
 		logFile       = flag.String("log", "", "Path to log file (if empty, logs to stderr)")
 		verify        = flag.Bool("verify", false, "Run verification test with UniPDF instead of filling form")
 		extractSchema = flag.Bool("extract-schema", false, "Extract questionnaire schema from PDF and output as JSON (requires -output)")
+		listAttach    = flag.Bool("list-attachments", false, "List embedded file attachments in the PDF and exit")
+		extractAttach = flag.String("extract-attachments", "", "Extract embedded file attachments into the given directory and exit")
 	)
 	flag.Parse()
 
@@ -70,6 +73,16 @@ func main() {
 			log.Fatal("Error: -output flag is required when using -extract-schema")
 		}
 		handleExtractSchema(*inputPDF, *outputPDF, *verbose)
+		return
+	}
+
+	// Attachment listing / extraction also short-circuit the fill path.
+	if *listAttach {
+		handleListAttachments(*inputPDF)
+		return
+	}
+	if *extractAttach != "" {
+		handleExtractAttachments(*inputPDF, *extractAttach)
 		return
 	}
 
@@ -194,6 +207,9 @@ func handleStamp(args []string) {
 	text := fs.String("text", "CONFIDENTIAL DRAFT", "Stamp text")
 	opacity := fs.Float64("opacity", 0.55, "Opacity 0.0–1.0")
 	fontSize := fs.Float64("font-size", 9.0, "Font size in points")
+	angle := fs.Float64("angle", 0, "Rotation in degrees, counter-clockwise")
+	x := fs.Float64("x", 420, "Stamp X position in points from page origin")
+	y := fs.Float64("y", 760, "Stamp Y position in points from page origin")
 	fs.Parse(args)
 
 	if *input == "" {
@@ -216,10 +232,10 @@ func handleStamp(args []string) {
 		Text:     *text,
 		FontName: "Helvetica-Bold",
 		FontSize: *fontSize,
-		X:        420,
-		Y:        760,
+		X:        *x,
+		Y:        *y,
 		Opacity:  *opacity,
-		Angle:    0,
+		Angle:    *angle,
 		R:        0.55,
 		G:        0.55,
 		B:        0.55,
@@ -354,4 +370,83 @@ func handleExtractSchema(inputPDF, outputJSON string, verbose bool) {
 	fmt.Printf("Input:  %s\n", inputPDF)
 	fmt.Printf("Output: %s\n", outputJSON)
 	fmt.Printf("Questions extracted: %d\n", len(schema.Questions))
+}
+
+// handleListAttachments prints the embedded file attachments found in the PDF.
+func handleListAttachments(inputPDF string) {
+	pdfBytes, err := os.ReadFile(inputPDF)
+	if err != nil {
+		log.Fatalf("Error reading PDF: %v", err)
+	}
+	attachments, err := pdfer.ListAttachments(pdfBytes)
+	if err != nil {
+		log.Fatalf("Error listing attachments: %v", err)
+	}
+	if len(attachments) == 0 {
+		fmt.Println("No embedded file attachments found.")
+		return
+	}
+	fmt.Printf("Found %d attachment(s):\n", len(attachments))
+	for _, a := range attachments {
+		mime := a.MimeType
+		if mime == "" {
+			mime = "(unknown)"
+		}
+		fmt.Printf("  %-40s %10d bytes  %s\n", a.Name, len(a.Data), mime)
+	}
+}
+
+// handleExtractAttachments writes every embedded file attachment into outDir.
+func handleExtractAttachments(inputPDF, outDir string) {
+	pdfBytes, err := os.ReadFile(inputPDF)
+	if err != nil {
+		log.Fatalf("Error reading PDF: %v", err)
+	}
+	attachments, err := pdfer.ListAttachments(pdfBytes)
+	if err != nil {
+		log.Fatalf("Error listing attachments: %v", err)
+	}
+	if len(attachments) == 0 {
+		fmt.Println("No embedded file attachments found.")
+		return
+	}
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		log.Fatalf("Error creating output directory: %v", err)
+	}
+	// Track names already written so colliding base names don't clobber each
+	// other: distinct attachments can share a display name, and filepath.Base
+	// can collapse distinct paths to the same name.
+	used := make(map[string]bool)
+	for _, a := range attachments {
+		// Guard against path traversal from attacker-controlled filenames.
+		name := filepath.Base(filepath.FromSlash(a.Name))
+		if name == "" || name == "." || name == string(filepath.Separator) {
+			name = "attachment"
+		}
+		name = uniqueAttachmentName(name, used)
+		dest := filepath.Join(outDir, name)
+		if err := os.WriteFile(dest, a.Data, 0644); err != nil {
+			log.Fatalf("Error writing %s: %v", dest, err)
+		}
+		fmt.Printf("Extracted %s (%d bytes)\n", dest, len(a.Data))
+	}
+}
+
+// uniqueAttachmentName returns name if unused, otherwise inserts a -1, -2, …
+// suffix before the extension until the result is unique. The chosen name is
+// recorded in used.
+func uniqueAttachmentName(name string, used map[string]bool) string {
+	if !used[name] {
+		used[name] = true
+		return name
+	}
+	ext := filepath.Ext(name)
+	base := name[:len(name)-len(ext)]
+	for i := 1; ; i++ {
+		candidate := fmt.Sprintf("%s-%d%s", base, i, ext)
+		if !used[candidate] {
+			used[candidate] = true
+			return candidate
+		}
+	}
 }

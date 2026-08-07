@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/core/parse"
-	"github.com/benedoc-inc/pdfer/types"
+	"github.com/benedoc-inc/pdfer/v2/core/parse"
+	"github.com/benedoc-inc/pdfer/v2/types"
 )
 
 // AcroForm represents an AcroForm dictionary structure
@@ -46,18 +46,11 @@ type Field struct {
 
 // ParseAcroForm extracts AcroForm structure from a PDF
 func ParseAcroForm(pdfBytes []byte, encryptInfo *types.PDFEncryption, verbose bool) (*AcroForm, error) {
-	// Find AcroForm reference in catalog
-	pdf, err := parse.OpenWithOptions(pdfBytes, parse.ParseOptions{
-		Password: []byte(""),
-		Verbose:  verbose,
-	})
-	if err != nil {
-		return nil, types.WrapError(types.ErrCodeMalformedPDF, "failed to parse PDF", err)
-	}
-
-	// Search for /AcroForm in the PDF
-	// We'll parse directly from bytes for now
-	_ = pdf // May use later for better catalog access
+	// Parse directly from the PDF bytes using the caller-supplied, already-
+	// verified encryptInfo to decrypt object content. We deliberately do not
+	// re-open the PDF here: an empty-password open would wrongly fail password
+	// verification on encrypted input (and did nothing useful besides), since
+	// all real work happens in parseAcroFormFromBytes via parse.GetObject.
 	return parseAcroFormFromBytes(pdfBytes, encryptInfo, verbose)
 }
 

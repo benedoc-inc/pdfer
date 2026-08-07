@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/core/write"
+	"github.com/benedoc-inc/pdfer/v2/core/write"
 )
 
 // maxParentChain bounds the /Parent walk when resolving inherited page

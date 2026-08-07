@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/benedoc-inc/pdfer/core/parse"
-	"github.com/benedoc-inc/pdfer/core/write"
+	"github.com/benedoc-inc/pdfer/v2/core/parse"
+	"github.com/benedoc-inc/pdfer/v2/core/write"
 )
 
 // FlattenForm converts all filled AcroForm widget annotations to static page
@@ -36,10 +36,15 @@ func FlattenForm(pdfBytes []byte, password []byte, verbose bool) ([]byte, error)
 		if objErr != nil {
 			continue
 		}
-		contents[n] = body
+		// Track the true max object number even for skipped containers so a
+		// dropped container's number is never reused when allocating new objects.
 		if n > maxNum {
 			maxNum = n
 		}
+		if parse.IsCrossRefContainerObject(body) {
+			continue // xref/objstm containers; the writer regenerates them
+		}
+		contents[n] = body
 	}
 
 	trailer := pdf.Trailer()
