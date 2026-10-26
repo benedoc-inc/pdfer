@@ -79,17 +79,35 @@ func init() {
 //	SigningCertificateV2 ::= SEQUENCE { certs SEQUENCE OF ESSCertIDv2 }
 //	ESSCertIDv2 ::= SEQUENCE {
 //	  hashAlgorithm AlgorithmIdentifier DEFAULT sha256,
-//	  certHash      OCTET STRING }
+//	  certHash      OCTET STRING,
+//	  issuerSerial  IssuerSerial OPTIONAL }
+//	IssuerSerial ::= SEQUENCE {
+//	  issuer       GeneralNames,
+//	  serialNumber CertificateSerialNumber }
 //
 // hashAlgorithm is OMITTED deliberately: RFC 5035 defaults it to SHA-256, and
 // DER forbids encoding a field that equals its DEFAULT. Emitting it anyway
 // produces a structure some validators reject outright.
+//
+// issuerSerial is included so the attribute is maximally complete: it names the
+// certificate by the same issuer-and-serial the SignerInfo uses, letting a
+// strict verifier cross-check the two identifiers.
 func signingCertificateV2Attr(cert *x509.Certificate) []byte {
 	sum := sha256.Sum256(cert.Raw)
-	certHash := derWrap(0x04, sum[:])    // OCTET STRING
-	essCertIDv2 := derSequence(certHash) // hashAlgorithm defaulted away
-	certsSeq := derSequence(essCertIDv2) // SEQUENCE OF ESSCertIDv2
-	signingCert := derSequence(certsSeq) // SigningCertificateV2
+	certHash := derWrap(0x04, sum[:]) // OCTET STRING
+
+	// IssuerSerial.issuer is a GeneralNames (SEQUENCE OF GeneralName); the
+	// issuer DN travels as the directoryName GeneralName, which is [4] EXPLICIT
+	// because Name is itself a CHOICE and so must be explicitly tagged. The
+	// context-tag bytes are identical either way; we pass the whole Name TLV.
+	serialDER, _ := asn1.Marshal(cert.SerialNumber)
+	directoryName := derContextImplicit(4, cert.RawIssuer) // [4] EXPLICIT Name
+	generalNames := derSequence(directoryName)             // GeneralNames
+	issuerSerial := derSequence(generalNames, serialDER)   // IssuerSerial
+
+	essCertIDv2 := derSequence(certHash, issuerSerial) // hashAlgorithm defaulted away
+	certsSeq := derSequence(essCertIDv2)               // SEQUENCE OF ESSCertIDv2
+	signingCert := derSequence(certsSeq)               // SigningCertificateV2
 	return attr(derOIDs.signingCertificateV2, signingCert)
 }
 

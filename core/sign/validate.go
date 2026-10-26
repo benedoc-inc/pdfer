@@ -1,6 +1,7 @@
 package sign
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/rsa"
@@ -64,6 +65,22 @@ type issuerAndSerial struct {
 type pkcs9Attr struct {
 	Type   asn1.ObjectIdentifier
 	Values asn1.RawValue `asn1:"set"`
+}
+
+// ESS structures for parsing the id-aa-signingCertificateV2 attribute
+// (RFC 5035 §3). hashAlgorithm is DEFAULT sha256, so it is optional on the
+// wire; issuerSerial is OPTIONAL. A conformant DER encoding omits the
+// hashAlgorithm when it equals the default, so the first field actually present
+// in ESSCertIDv2 is usually the certHash OCTET STRING.
+type signingCertificateV2ASN struct {
+	Certs    []essCertIDv2ASN
+	Policies asn1.RawValue `asn1:"optional"`
+}
+
+type essCertIDv2ASN struct {
+	HashAlgorithm pkix.AlgorithmIdentifier `asn1:"optional"`
+	CertHash      []byte
+	IssuerSerial  asn1.RawValue `asn1:"optional"`
 }
 
 // ---- regex patterns for raw PDF scanning ----
@@ -458,6 +475,65 @@ func verifySigInfo(
 		return fmt.Errorf("unsupported public key type %T", cert.PublicKey)
 	}
 
+	// ---- Enforce the signing-certificate binding ----
+	// The signature above only proves the signed attributes were signed by the
+	// embedded certificate's key. It does NOT prove the embedded certificate is
+	// the one the signer intended: an attacker can re-wrap the CMS with a
+	// different certificate carrying the same public key, and the signature
+	// still verifies — but SignerName would then report the swapped identity.
+	// The id-aa-signingCertificateV2 attribute (covered by the signature) binds
+	// a hash of the intended certificate into the signed set; comparing it to
+	// the embedded certificate detects the substitution.
+	if err := checkSigningCertificateV2(si, cert); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// checkSigningCertificateV2 enforces the id-aa-signingCertificateV2 binding
+// (RFC 5035 §3) when the attribute is present: the certHash it carries must
+// equal SHA-256 of the embedded signer certificate. The attribute is covered by
+// the signature, so an attacker cannot alter certHash without breaking the
+// signature — comparing it against the embedded leaf therefore detects a
+// certificate substitution. A signature whose signed attributes omit the
+// attribute is left unchanged (there is nothing to enforce), but one that
+// carries it must match.
+func checkSigningCertificateV2(si signerInfoASN, cert *x509.Certificate) error {
+	rest := si.SignedAttrs.Bytes
+	for len(rest) > 0 {
+		var attr pkcs9Attr
+		remaining, err := asn1.Unmarshal(rest, &attr)
+		if err != nil {
+			break
+		}
+		rest = remaining
+
+		if !attr.Type.Equal(oidSigningCertificateV2) {
+			continue
+		}
+
+		var scv2 signingCertificateV2ASN
+		if _, err := asn1.Unmarshal(attr.Values.Bytes, &scv2); err != nil {
+			return fmt.Errorf("parse signingCertificateV2 attribute: %v", err)
+		}
+		if len(scv2.Certs) == 0 {
+			return fmt.Errorf("signingCertificateV2 attribute carries no ESSCertIDv2")
+		}
+		essCert := scv2.Certs[0]
+
+		// Only SHA-256 is supported. An absent hashAlgorithm is the RFC 5035
+		// default (SHA-256); an explicitly encoded one must name SHA-256 too.
+		if len(essCert.HashAlgorithm.Algorithm) != 0 && !essCert.HashAlgorithm.Algorithm.Equal(oidSHA256) {
+			return fmt.Errorf("signingCertificateV2 uses unsupported hash algorithm %v", essCert.HashAlgorithm.Algorithm)
+		}
+
+		want := sha256.Sum256(cert.Raw)
+		if !bytes.Equal(essCert.CertHash, want[:]) {
+			return fmt.Errorf("signingCertificateV2 certHash does not match the signer certificate: possible certificate substitution")
+		}
+		return nil
+	}
 	return nil
 }
 
