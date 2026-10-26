@@ -84,6 +84,25 @@ type SignOptions struct {
 	// signing certificate. Embedded in /DSS alongside CertChain. Callers are
 	// responsible for fetching the response; the library embeds it as-is.
 	OCSPResponse []byte
+
+	// PAdES declares the signature as PAdES rather than legacy ISO 32000-1,
+	// writing /SubFilter /ETSI.CAdES.detached in place of
+	// /adbe.pkcs7.detached.
+	//
+	// ⚠ OPT-IN, AND THE DEFAULT IS THE LEGACY VALUE ON PURPOSE. The two
+	// SubFilters describe the same bytes — a detached CMS over a ByteRange —
+	// and differ in which specification the producer claims to follow. ETSI is
+	// what a strict PAdES validator looks for (EN 319 142, incorporated by
+	// ISO 32000-2); adbe.pkcs7.detached is what every PDF reader has accepted
+	// since 1.6. Flipping the default would re-label every existing caller's
+	// output as conforming to a spec they did not ask for, so the caller says.
+	//
+	// ⚠ ETSI.CAdES.detached asserts CAdES conformance, which among other
+	// things REQUIRES the signing-certificate-v2 signed attribute. pdfer always
+	// emits that (see pkcs7.go), so setting this is honest — but if that
+	// attribute is ever made conditional, this flag has to become conditional
+	// with it.
+	PAdES bool
 }
 
 // SignPDF appends a digital signature to pdfBytes using an incremental update.
@@ -161,7 +180,11 @@ func SignPDF(pdfBytes []byte, opts SignOptions) ([]byte, error) {
 	sigDictBuf.WriteString("<<")
 	sigDictBuf.WriteString("/Type/Sig")
 	sigDictBuf.WriteString("/Filter/Adobe.PPKLite")
-	sigDictBuf.WriteString("/SubFilter/adbe.pkcs7.detached")
+	if opts.PAdES {
+		sigDictBuf.WriteString("/SubFilter/ETSI.CAdES.detached")
+	} else {
+		sigDictBuf.WriteString("/SubFilter/adbe.pkcs7.detached")
+	}
 	sigDictBuf.WriteString("/ByteRange ")
 	byteRangeRelPos := sigDictBuf.Len() // position of '[' within sigDictBuf
 	sigDictBuf.WriteString(byteRangePlaceholder)
