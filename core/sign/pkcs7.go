@@ -2,6 +2,7 @@
 package sign
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/rand"
@@ -9,6 +10,7 @@ import (
 	"crypto/x509"
 	"encoding/asn1"
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -23,6 +25,9 @@ var (
 	oidMessageDigest     = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 4}
 	oidSigningTime       = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 5}
 	oidSigTimeStampToken = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 16, 2, 14}
+	// id-aa-signingCertificateV2 (RFC 5035 §3), the ESS attribute that binds
+	// the signer's certificate into the SIGNED attributes.
+	oidSigningCertificateV2 = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 16, 2, 47}
 )
 
 // derOIDs holds pre-computed DER encodings of the OIDs used in PKCS#7
@@ -31,6 +36,7 @@ var (
 var derOIDs struct {
 	data, signedData, sha256, rsaEncryption, ecdsaWithSHA256   []byte
 	contentType, messageDigest, signingTime, sigTimeStampToken []byte
+	signingCertificateV2                                       []byte
 }
 
 func init() {
@@ -50,6 +56,41 @@ func init() {
 	derOIDs.messageDigest = enc(oidMessageDigest)
 	derOIDs.signingTime = enc(oidSigningTime)
 	derOIDs.sigTimeStampToken = enc(oidSigTimeStampToken)
+	derOIDs.signingCertificateV2 = enc(oidSigningCertificateV2)
+}
+
+// signingCertificateV2Attr builds the id-aa-signingCertificateV2 signed
+// attribute (RFC 5035 §3) for cert.
+//
+// ⚠⚠ WITHOUT THIS, THE SIGNATURE DOES NOT SAY WHICH CERTIFICATE MADE IT.
+// SignerInfo identifies the signer by issuer-and-serial, but that field is
+// OUTSIDE the signed attributes — so it is not covered by the signature, and an
+// attacker who can re-wrap a CMS blob may swap in a different certificate with
+// the same key or rewrite the identifier, and every naive verifier still reports
+// a valid signature attributed to whoever the swapped certificate names. Binding
+// a hash of the certificate INTO the signed attributes closes that: change the
+// certificate and the signature breaks.
+//
+// It is also the attribute CAdES and therefore PAdES (ETSI EN 319 142, which
+// ISO 32000-2 incorporates) require of a conformant signature. Omitting it left
+// pdfer producing valid ISO 32000-1 §12.8 signatures that a strict PAdES
+// validator would reject.
+//
+//	SigningCertificateV2 ::= SEQUENCE { certs SEQUENCE OF ESSCertIDv2 }
+//	ESSCertIDv2 ::= SEQUENCE {
+//	  hashAlgorithm AlgorithmIdentifier DEFAULT sha256,
+//	  certHash      OCTET STRING }
+//
+// hashAlgorithm is OMITTED deliberately: RFC 5035 defaults it to SHA-256, and
+// DER forbids encoding a field that equals its DEFAULT. Emitting it anyway
+// produces a structure some validators reject outright.
+func signingCertificateV2Attr(cert *x509.Certificate) []byte {
+	sum := sha256.Sum256(cert.Raw)
+	certHash := derWrap(0x04, sum[:])    // OCTET STRING
+	essCertIDv2 := derSequence(certHash) // hashAlgorithm defaulted away
+	certsSeq := derSequence(essCertIDv2) // SEQUENCE OF ESSCertIDv2
+	signingCert := derSequence(certsSeq) // SigningCertificateV2
+	return attr(derOIDs.signingCertificateV2, signingCert)
 }
 
 // derLen encodes a DER length field.
@@ -77,6 +118,24 @@ func derWrap(tag byte, content []byte) []byte {
 
 func derSequence(parts ...[]byte) []byte { return derWrap(0x30, cat(parts...)) }
 func derSet(parts ...[]byte) []byte      { return derWrap(0x31, cat(parts...)) }
+
+// sortDERSet orders the members of a SET OF as DER requires: ascending by the
+// members' own encodings, compared as unsigned byte strings.
+//
+// ⚠ X.690 §11.6 MAKES THIS A CONFORMANCE REQUIREMENT, not a nicety, and the
+// cost of ignoring it is asymmetric. Our own round-trip does not notice —
+// a verifier re-tags the [0] IMPLICIT bytes we emitted and hashes exactly
+// those, so an unsorted SET still self-verifies — but a validator that
+// re-encodes the attributes canonically before hashing (which a strict
+// CAdES/PAdES implementation is entitled to do) computes a different digest
+// and reports the signature as broken. The failure therefore appears only in
+// other people's tools, which is the worst place for it to appear.
+func sortDERSet(members [][]byte) [][]byte {
+	out := make([][]byte, len(members))
+	copy(out, members)
+	sort.Slice(out, func(i, j int) bool { return bytes.Compare(out[i], out[j]) < 0 })
+	return out
+}
 
 // derContextImplicit wraps content with a context-specific constructed tag [n].
 func derContextImplicit(n int, content []byte) []byte {
@@ -126,11 +185,20 @@ func preparePKCS7(cert *x509.Certificate, key crypto.Signer, digest []byte, t ti
 	digestAttrVal, _ := asn1.Marshal(digest)
 	signingTimeAttrVal, _ := asn1.Marshal(t.UTC())
 
-	attrsContent := cat(
+	// ⚠ ORDER MATTERS AND IT IS NOT THE ORDER WRITTEN HERE. Signed attributes
+	// are a SET OF, and DER requires a SET OF to be sorted by its members'
+	// encodings — so the bytes are sorted below, before hashing, rather than
+	// emitted in the order a reader finds most natural. A verifier re-derives
+	// the same SET from the same attributes, and an unsorted encoding makes the
+	// digest it computes differ from the one we signed.
+	attrs := [][]byte{
 		attr(derOIDs.contentType, contentTypeAttrVal),
 		attr(derOIDs.messageDigest, digestAttrVal),
 		attr(derOIDs.signingTime, signingTimeAttrVal),
-	)
+		// Binds this exact certificate into the signature. See the function.
+		signingCertificateV2Attr(cert),
+	}
+	attrsContent := cat(sortDERSet(attrs)...)
 
 	// Hash the SET-wrapped attrs (per PKCS#7 §9.3).
 	h := sha256.Sum256(derWrap(0x31, attrsContent))
