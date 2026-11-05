@@ -265,25 +265,35 @@ func ParseXRefStreamFull(pdfBytes []byte, startXRef int64, verbose bool) (*XRefR
 	return result, nil
 }
 
-// GetObjectFromStream extracts an object from an object stream (ObjStm)
-// This implements PyPDF's _get_object_from_stream method
+// GetObjectFromStream extracts an object from an object stream (ObjStm).
+//
+// It locates the container by scanning, which fails on files whose object
+// headers do not begin a line. Prefer GetObjectFromStreamAt, which uses the
+// byte offset the xref table already carries; this signature is kept because
+// it is exported API.
 func GetObjectFromStream(pdfBytes []byte, objNum int, streamObjNum int, indexInStream int, encryptInfo *types.PDFEncryption, verbose bool) ([]byte, error) {
-	// Step 1: Get the object stream itself
-	// First, we need to find the object stream's byte offset
-	// This requires having the xref table for direct objects
+	return GetObjectFromStreamAt(pdfBytes, objNum, streamObjNum, indexInStream, 0, encryptInfo, verbose)
+}
 
-	// Search for the object stream. Require a non-digit (or start of file)
-	// before the object number so that object 11 is not accidentally matched
-	// by the substring "11" inside "111 0 obj". A line-start anchor would be
-	// too strict: headers may follow a bare CR or share a line with "endobj".
-	streamPattern := fmt.Sprintf(`(^|[^0-9])(%d\s+0\s+obj)`, streamObjNum)
-	re := regexp.MustCompile(streamPattern)
-	matches := re.FindSubmatchIndex(pdfBytes)
-	if matches == nil {
-		return nil, fmt.Errorf("object stream %d not found", streamObjNum)
+// GetObjectFromStreamAt extracts an object from an object stream (ObjStm),
+// using streamOffset as the container's byte offset when it is > 0.
+//
+// The offset matters. Locating the container by searching for "N 0 obj"
+// anchored at a line start (the previous and now-fallback behaviour) fails on
+// any file whose object headers do not begin a line — which is common, since
+// nothing in the spec requires it. A real FDA guidance PDF (73 pages, PDF 1.5
+// with cross-reference streams) failed on 31 of its 73 objects that way, and
+// because every manipulate entry point builds its object map through this
+// path, the whole package was unusable on that file.
+//
+// The xref already knows where the container is; it was simply being
+// discarded. The scan remains as a fallback for callers with no xref entry,
+// and now accepts any generation number rather than assuming 0.
+func GetObjectFromStreamAt(pdfBytes []byte, objNum int, streamObjNum int, indexInStream int, streamOffset int, encryptInfo *types.PDFEncryption, verbose bool) ([]byte, error) {
+	streamObjStart, err := locateObjectStream(pdfBytes, streamObjNum, streamOffset)
+	if err != nil {
+		return nil, err
 	}
-
-	streamObjStart := matches[4] // start of the "N 0 obj" group, after the boundary byte
 
 	// Find the object stream's dictionary and stream data
 	objSection := pdfBytes[streamObjStart:]
@@ -339,7 +349,6 @@ func GetObjectFromStream(pdfBytes []byte, objNum int, streamObjNum int, indexInS
 
 	// Decompress stream data (FlateDecode)
 	var decompressed []byte
-	var err error
 
 	zlibReader, zlibErr := zlib.NewReader(bytes.NewReader(streamData))
 	if zlibErr == nil {
@@ -444,4 +453,42 @@ func GetObjectFromStream(pdfBytes []byte, objNum int, streamObjNum int, indexInS
 	}
 
 	return objectData, nil
+}
+
+// objHeaderAt reports whether "N G obj" for object objNum starts at offset in
+// pdfBytes, tolerating leading whitespace. Used to validate an xref offset
+// before trusting it: a stale or slightly-wrong offset should fall back to the
+// scan rather than read a neighbouring object's bytes as if they were ours.
+func objHeaderAt(pdfBytes []byte, objNum, offset int) bool {
+	if offset < 0 || offset >= len(pdfBytes) {
+		return false
+	}
+	rest := pdfBytes[offset:]
+	if len(rest) > 64 {
+		rest = rest[:64]
+	}
+	return regexp.MustCompile(fmt.Sprintf(`^\s*%d\s+\d+\s+obj`, objNum)).Match(rest)
+}
+
+// locateObjectStream returns the byte offset of object stream streamObjNum,
+// preferring the xref-supplied offset and falling back to a scan.
+func locateObjectStream(pdfBytes []byte, streamObjNum, streamOffset int) (int, error) {
+	if streamOffset > 0 && objHeaderAt(pdfBytes, streamObjNum, streamOffset) {
+		return streamOffset, nil
+	}
+	// Fallback scan, bounded by \b rather than start-of-line. The old ^ anchor
+	// existed to stop object 11 matching the "11" inside "111 0 obj"; a word
+	// boundary rules that out just as well (the digit after "11" is a word
+	// character, so \b11\s fails) without demanding a line start, which nothing
+	// in the spec guarantees and which real files do not provide.
+	//
+	// main reached the same conclusion independently in the boundary-group form
+	// `(^|[^0-9])(N\s+0\s+obj)`; \b is the same rule spelled shorter and needs
+	// no submatch bookkeeping. Kept generation-agnostic here — both earlier
+	// versions hardcoded generation 0.
+	re := regexp.MustCompile(fmt.Sprintf(`\b%d\s+\d+\s+obj`, streamObjNum))
+	if m := re.FindIndex(pdfBytes); m != nil {
+		return m[0], nil
+	}
+	return 0, fmt.Errorf("object stream %d not found", streamObjNum)
 }

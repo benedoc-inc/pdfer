@@ -69,7 +69,11 @@ type pkcs9Attr struct {
 // ---- regex patterns for raw PDF scanning ----
 
 var (
-	reSigBlock  = regexp.MustCompile(`(?s)/Type\s*/Sig|/SubFilter\s*/adbe\.pkcs7\.detached`)
+	// ⚠ BOTH SUBFILTERS. A PAdES signature writes /ETSI.CAdES.detached and is
+	// otherwise byte-identical in structure; a matcher that knew only the
+	// legacy spelling would fail to FIND pdfer's own PAdES output and report a
+	// correctly signed document as unsigned.
+	reSigBlock  = regexp.MustCompile(`(?s)/Type\s*/Sig|/SubFilter\s*/(?:adbe\.pkcs7|ETSI\.CAdES)\.detached`)
 	reByteRange = regexp.MustCompile(`/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]`)
 	reContents  = regexp.MustCompile(`/Contents\s*<([0-9A-Fa-f\s]+)>`)
 	reReason    = regexp.MustCompile(`/Reason\s*\(`)
