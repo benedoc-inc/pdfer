@@ -128,6 +128,75 @@ and an empty `OwnerID` when the owner is not a typed schema entity.)
 
 ### P1 — High impact
 
+#### ~~Page extraction keeps the whole document (size, dangling refs, lost inheritance)~~ ✅ Fixed in v2.9.1
+`collectPageDependencies` walked object references outward from the selected
+pages — including `/Parent`, which points at the page's `/Pages` node, whose
+`/Kids` reference **every other page in the document**. The walk therefore
+reached the entire file. Removing the page-tree objects afterwards did not undo
+that: every unselected page's fonts, images and content streams were already in
+the set, orphaned but still written.
+
+Measured on `tests/resources/K141167_summary_1.pdf` (2 pages): extracting page 1
+produced **94.8%** of the source. On a 73-page PDF, `SplitPDFByPageCount` at 5
+pages/part returned parts of ~100% of the input each — 2× the original in total.
+`ExtractPages` also reported wrong page counts on the result.
+
+Three defects, all fixed together:
+- **Orphan retention** — the page-tree filter now applies at *enqueue* time by
+  object type (`isPageTreeObject`), so `/Pages` nodes are never entered and a
+  `/Page` is entered only if selected. Page 1 of the 2-page fixture is now
+  **47.2%** of the source.
+- **Dangling references** — extraction renumbers objects from 1, so a reference
+  to a dropped object left at its original number silently pointed at whatever
+  unrelated object took that number (a link annotation targeting page 40 would
+  resolve to a font). `remapExtractedRefs` rewrites them to `null` per ISO
+  32000-1 §7.3.10. Kept separate from `updateObjectReferences` (merging.go),
+  where an unmapped reference means something different.
+- **Lost inherited attributes** — `/Resources`, `/MediaBox`, `/CropBox` and
+  `/Rotate` may live on an ancestor `/Pages` node (§7.7.3.4), which extraction
+  discards. `resolveInheritedAttrs` now materializes them onto the extracted
+  page before the tree is dropped; without this a page whose size lived on the
+  parent came out with no `/MediaBox` at all.
+
+Affects `ExtractPages`, `SplitPDF` and `SplitPDFByPageCount` (the latter two
+delegate to the first).
+
+**File**: `core/manipulate/extraction.go`; tests in `extraction_test.go`
+
+#### ~~Objects in compressed object streams unreachable on real PDF 1.5+ files~~ ✅ Fixed in v2.9.1
+`GetObjectFromStream` located the containing object stream by scanning the raw
+bytes for `(?m)^N 0 obj` — anchored at a start-of-line, and assuming
+generation 0. Nothing in the spec requires an object header to begin a line,
+and real files do not oblige: on `tests/resources/objstm_xrefstream.pdf` (a
+real FDA guidance PDF, PDF 1.5 with cross-reference streams) **31 of its 73
+objects were unreachable**, so every `manipulate` entry point — which builds
+its object map through this path — failed outright on the file.
+
+The xref already carried the container's byte offset; it was simply being
+discarded. `GetObjectFromStreamAt` now takes that offset, and `GetObject` /
+`GetObjectContent` thread it through from `p.xref`. The scan survives as a
+fallback for callers with no xref entry, now bounded by `\b` instead of `^`
+(which rules out object 11 matching inside "111 0 obj" just as well, without
+demanding a line start) and accepting any generation number. An xref offset
+that does not actually point at the object's header is rejected rather than
+trusted, so a stale offset falls back to the scan instead of reading a
+neighbouring object's bytes.
+
+**File**: `core/parse/object_stream.go`, `core/parse/api.go`;
+tests in `core/parse/object_stream_offset_test.go`
+
+#### ~~`DocumentMetadata.PageCount` reported the object count~~ ✅ Fixed in v2.9.1
+`ExtractMetadata` set `PageCount: pdf.ObjectCount()` with a "will be updated
+when we parse pages" comment that was never honoured, so the field was the
+number of objects in the file — wrong by whatever object-to-page ratio a
+document happened to have. `tests/resources/objstm_xrefstream.pdf` has 73
+objects and 7 pages, and reported 73; a 5-page extract reported 52.
+
+`countPages` now reads `/Count` off the root `/Pages` node and falls back to
+walking `/Kids` for `/Page` leaves when it is missing or implausible.
+
+**File**: `content/extract/metadata.go`; tests in `page_count_test.go`
+
 #### AES-256 (V5) content crypto is not spec-conformant
 Password verification and file-key derivation for V5/R6 are correct (SHA-256
 R6 KDF, `/U`/`/O` validation, `/UE`/`/OE` unwrapping — well covered by

@@ -15,7 +15,7 @@ import (
 func ExtractMetadata(pdfBytes []byte, pdf *parse.PDF, verbose bool) (*types.DocumentMetadata, error) {
 	metadata := &types.DocumentMetadata{
 		PDFVersion: pdf.Version(),
-		PageCount:  pdf.ObjectCount(), // Will be updated when we parse pages
+		PageCount:  countPages(pdf, verbose),
 		Encrypted:  pdf.IsEncrypted(),
 		Custom:     make(map[string]string),
 	}
@@ -171,4 +171,113 @@ func parsePDFDate(dateStr string) time.Time {
 	}
 
 	return time.Time{}
+}
+
+// maxPageTreeDepth bounds the page-tree walk. A well-formed tree is shallow;
+// a deeper one means a /Kids cycle, and spinning on it is worse than
+// under-counting.
+const maxPageTreeDepth = 64
+
+// countPages returns the document's real page count by walking the page tree.
+//
+// This used to report pdf.ObjectCount() with a "will be updated when we parse
+// pages" comment that was never honoured, so DocumentMetadata.PageCount was
+// the number of OBJECTS in the file — off by whatever ratio of objects to
+// pages a document happened to have. A 7-page PDF with 73 objects reported 73
+// pages; a 5-page extract reported 52.
+//
+// Prefers the /Count on the root /Pages node (the value the spec requires to
+// be correct) and falls back to counting /Page leaves when /Count is missing
+// or implausible.
+func countPages(pdf *parse.PDF, verbose bool) int {
+	trailer := pdf.Trailer()
+	if trailer == nil || trailer.RootRef == "" {
+		return 0
+	}
+	rootObjNum, err := parseObjectRef(trailer.RootRef)
+	if err != nil {
+		return 0
+	}
+	catalog, err := pdf.GetObjectContent(rootObjNum)
+	if err != nil {
+		return 0
+	}
+	pagesRef := findDictValue(string(catalog), "/Pages")
+	if pagesRef == "" {
+		return 0
+	}
+	pagesObjNum, err := parseObjectRef(pagesRef)
+	if err != nil {
+		return 0
+	}
+	pagesObj, err := pdf.GetObjectContent(pagesObjNum)
+	if err != nil {
+		return 0
+	}
+	if n, err := strconv.Atoi(strings.TrimSpace(findDictValue(string(pagesObj), "/Count"))); err == nil && n > 0 {
+		return n
+	}
+	if verbose {
+		fmt.Printf("metadata: root /Pages has no usable /Count; counting leaves\n")
+	}
+	return countPageLeaves(pdf, pagesObjNum, 0, make(map[int]bool))
+}
+
+// countPageLeaves counts /Page nodes under a /Pages subtree.
+func countPageLeaves(pdf *parse.PDF, objNum, depth int, seen map[int]bool) int {
+	if depth > maxPageTreeDepth || seen[objNum] {
+		return 0
+	}
+	seen[objNum] = true
+	obj, err := pdf.GetObjectContent(objNum)
+	if err != nil {
+		return 0
+	}
+	body := string(obj)
+	if strings.Contains(body, "/Type/Page") && !strings.Contains(body, "/Type/Pages") {
+		return 1
+	}
+	kids := findDictValue(body, "/Kids")
+	if kids == "" {
+		return 0
+	}
+	total := 0
+	for _, m := range regexp.MustCompile(`(\d+)\s+\d+\s+R`).FindAllStringSubmatch(kids, -1) {
+		if kidNum, err := strconv.Atoi(m[1]); err == nil {
+			total += countPageLeaves(pdf, kidNum, depth+1, seen)
+		}
+	}
+	return total
+}
+
+// findDictValue reads a dictionary entry, handling the array form (/Kids [...])
+// and the reference/number forms (/Pages 2 0 R, /Count 7).
+func findDictValue(dict, key string) string {
+	idx := strings.Index(dict, key)
+	if idx < 0 {
+		return ""
+	}
+	i := idx + len(key)
+	for i < len(dict) && (dict[i] == ' ' || dict[i] == '\t' || dict[i] == '\r' || dict[i] == '\n') {
+		i++
+	}
+	if i < len(dict) && dict[i] == '[' {
+		depth := 0
+		for j := i; j < len(dict); j++ {
+			switch dict[j] {
+			case '[':
+				depth++
+			case ']':
+				depth--
+				if depth == 0 {
+					return dict[i : j+1]
+				}
+			}
+		}
+		return ""
+	}
+	if m := regexp.MustCompile(regexp.QuoteMeta(key) + `\s*(\d+\s+\d+\s+R|\d+)`).FindStringSubmatch(dict); m != nil {
+		return m[1]
+	}
+	return ""
 }
