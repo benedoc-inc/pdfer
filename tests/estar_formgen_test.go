@@ -25,35 +25,53 @@ func TestESTAR_BuildFormPacketFromTemplate(t *testing.T) {
 		t.Fatalf("ExtractAllXFAStreams: %v", err)
 	}
 
-	// The target presence set: what Acrobat restored in r1.
+	// The target overrides: every attribute delta Acrobat restored in r1. These
+	// are the 296 presence reveals plus the handful of access/locale/h deltas the
+	// capture also carries — the generalized builder round-trips all of them.
 	r1Form := readFixtureBytes(t, r1FormFixture)
-	want, err := xfa.ParseFormPacketPresence(r1Form)
+	want, err := xfa.ParseFormPacket(r1Form)
 	if err != nil {
-		t.Fatalf("ParseFormPacketPresence: %v", err)
+		t.Fatalf("ParseFormPacket: %v", err)
 	}
-	if len(want) != 296 {
-		t.Fatalf("expected 296 presence entries from r1, got %d", len(want))
+	if n := countAttr(want, "presence"); n != 296 {
+		t.Fatalf("expected 296 presence overrides from r1, got %d", n)
 	}
 
-	// Build the packet from the template + presence set alone.
-	built, err := xfa.BuildFormPacket(streams.Template.Data, want)
+	// Build the packet from the template + overrides alone — referencing none of
+	// Acrobat's tree.
+	built, err := xfa.BuildFormPacketWithOverrides(streams.Template.Data, want)
 	if err != nil {
-		t.Fatalf("BuildFormPacket: %v", err)
+		t.Fatalf("BuildFormPacketWithOverrides: %v", err)
 	}
 	t.Logf("template-built form packet: %d B (Acrobat's was %d B)", len(built), len(r1Form))
 
-	// Round-trip: parsing the built packet's presence must reproduce the input set
-	// exactly (same paths, same presence values).
-	got, err := xfa.ParseFormPacketPresence(built)
+	// Round-trip: parsing the built packet must reproduce the input overrides
+	// exactly (same paths, same attributes, same values).
+	got, err := xfa.ParseFormPacket(built)
 	if err != nil {
-		t.Fatalf("ParseFormPacketPresence(built): %v", err)
+		t.Fatalf("ParseFormPacket(built): %v", err)
 	}
-	if len(got) != len(want) {
-		t.Fatalf("round-trip size mismatch: got %d, want %d", len(got), len(want))
+	wantMap, gotMap := overrideMap(want), overrideMap(got)
+	if len(gotMap) != len(wantMap) {
+		t.Fatalf("round-trip size mismatch: got %d, want %d", len(gotMap), len(wantMap))
 	}
-	for path, p := range want {
-		if got[path] != p {
-			t.Errorf("path %s: built has presence %q, want %q", path, got[path], p)
+	for path, attrs := range wantMap {
+		g, ok := gotMap[path]
+		if !ok {
+			t.Errorf("path %s missing after round-trip", path)
+			continue
+		}
+		// Equality, not containment: the built node must carry exactly the wanted
+		// attributes and no extras (e.g. a leaked or duplicated attr Acrobat never
+		// authored). Checking every wanted value below plus matching counts here
+		// pins the attribute set exactly.
+		if len(g) != len(attrs) {
+			t.Errorf("path %s attr count mismatch: built %d %v, want %d %v", path, len(g), g, len(attrs), attrs)
+		}
+		for name, v := range attrs {
+			if g[name] != v {
+				t.Errorf("path %s attr %s: built %q, want %q", path, name, g[name], v)
+			}
 		}
 	}
 
@@ -67,4 +85,25 @@ func TestESTAR_BuildFormPacketFromTemplate(t *testing.T) {
 	if !bytes.HasPrefix(out, pristine) || len(out) <= len(pristine) {
 		t.Errorf("template-built packet did not insert as an incremental update")
 	}
+}
+
+// countAttr counts overrides that set the named attribute.
+func countAttr(overrides []xfa.NodeOverride, name string) int {
+	n := 0
+	for _, o := range overrides {
+		if _, ok := o.Attrs[name]; ok {
+			n++
+		}
+	}
+	return n
+}
+
+// overrideMap keys overrides by their canonical path string for order-independent
+// comparison of two override sets.
+func overrideMap(overrides []xfa.NodeOverride) map[string]map[string]string {
+	m := make(map[string]map[string]string, len(overrides))
+	for _, o := range overrides {
+		m[o.Path.String()] = o.Attrs
+	}
+	return m
 }
