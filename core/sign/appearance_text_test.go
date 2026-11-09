@@ -138,3 +138,39 @@ func TestAppearanceLines_EmptyMeansEmpty(t *testing.T) {
 		t.Errorf("nil Lines should give the default body, got %v", got)
 	}
 }
+
+// TestFitAppearanceLines_DropsLinesBelowTheBox is the vertical mirror of the
+// horizontal overflow guard.
+//
+// ⚠ A caller-supplied Lines list can hold more lines than the box is tall.
+// Lines past the bottom edge do not clip to the BBox in every viewer, so they
+// can print down the document underneath the box. Dropping them (with a visible
+// ellipsis) is honest; overflow reads as a rendering fault.
+func TestFitAppearanceLines_DropsLinesBelowTheBox(t *testing.T) {
+	t.Parallel()
+
+	// A 50pt box fits 4 lines (baselines at 39, 29, 19, 9).
+	const boxHeight = 50.0
+
+	lines := []string{"one", "two", "three", "four", "five", "six"}
+	got := fitAppearanceLines(lines, boxHeight)
+
+	if len(got) != 4 {
+		t.Fatalf("expected 4 lines to fit a %.0fpt box, got %d: %v", boxHeight, len(got), got)
+	}
+
+	if got[len(got)-1] != appearanceEllipsis {
+		t.Errorf("a truncated list should end in %q, got %q", appearanceEllipsis, got[len(got)-1])
+	}
+}
+
+func TestFitAppearanceLines_LeavesAFittingListAlone(t *testing.T) {
+	t.Parallel()
+
+	lines := []string{"Signed by: Dana Okafor", "Date: 2026-11-09"}
+
+	got := fitAppearanceLines(lines, 50)
+	if len(got) != len(lines) || got[len(got)-1] == appearanceEllipsis {
+		t.Errorf("a list that fits was altered: %v", got)
+	}
+}

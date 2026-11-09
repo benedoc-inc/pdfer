@@ -59,6 +59,30 @@ func fitAppearanceLine(line string, boxWidth float64) string {
 	return ""
 }
 
+// fitAppearanceLines drops lines that would render below the signature box.
+//
+// ⚠⚠ The vertical mirror of fitAppearanceLine, and for the same reason: a line
+// drawn past the bottom edge does not clip to the Form XObject's BBox in every
+// viewer, so extra caller-supplied lines can print down the document underneath
+// the box. The first baseline sits at height-appearanceLineHeight-1 and each
+// line steps down appearanceLineHeight, so a line fits only while its baseline
+// stays above the bottom edge. When lines are dropped the last kept line becomes
+// an ellipsis so the truncation is visible rather than silent.
+func fitAppearanceLines(lines []string, boxHeight float64) []string {
+	maxLines := int((boxHeight - 1) / appearanceLineHeight)
+	if maxLines <= 0 {
+		return nil
+	}
+
+	if len(lines) <= maxLines {
+		return lines
+	}
+
+	kept := append([]string(nil), lines[:maxLines-1]...)
+
+	return append(kept, appearanceEllipsis)
+}
+
 // sanitizeAppearanceLine removes what a single-line PDF text run cannot show.
 //
 // ⚠ Newlines and tabs are the dangerous ones: they are not line breaks inside

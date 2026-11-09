@@ -636,6 +636,11 @@ func buildAppearanceStream(width, height float64, lines []string) (dict, content
 	fmt.Fprintf(&cs, "q\n0.7 G\n0.5 w\n0.5 0.5 %.4f %.4f re\nS\n", width-1, height-1)
 	cs.WriteString("0 0 0 rg\nBT\n/F1 8 Tf\n")
 
+	// Drop any lines that would fall below the box before measuring widths, so
+	// a caller-supplied list cannot overflow vertically the way an over-long
+	// line would overflow horizontally.
+	lines = fitAppearanceLines(lines, height)
+
 	// ⚠ The first line sits one line-height below the top edge, and each
 	// subsequent Td is RELATIVE to the previous one, so the leading is applied
 	// between lines rather than before the first.
