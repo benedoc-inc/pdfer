@@ -47,6 +47,20 @@ type SignAppearance struct {
 	// Width, Height are the dimensions of the signature box. Typical values:
 	// Width 200, Height 50.
 	Width, Height float64
+
+	// Lines replaces the default "Signed by / Date / Reason" body with these
+	// lines, in order.
+	//
+	// ⚠ The certificate's CommonName is the SEALING identity, which is not
+	// always the signing PERSON. A platform that signs on a user's behalf
+	// holds one organizational certificate and needs the box to name the human
+	// who accepted — so the default body would say the platform's name and
+	// omit the only fact a reader is looking for.
+	//
+	// ⚠ Lines are truncated to fit Width and encoded to WinAnsi, the standard
+	// Helvetica encoding, so a name outside that repertoire degrades to "?"
+	// rather than rendering as mojibake.
+	Lines []string
 }
 
 // SignOptions configures PDF digital signature creation.
@@ -219,7 +233,10 @@ func SignPDF(pdfBytes []byte, opts SignOptions) ([]byte, error) {
 		ap := opts.Appearance
 		cn := opts.Certificate.Subject.CommonName
 		dateStr := signingTime.UTC().Format("2006-01-02 15:04:05 UTC")
-		appDict, appContent := buildAppearanceStream(ap.Width, ap.Height, cn, dateStr, opts.Reason)
+		appDict, appContent := buildAppearanceStream(
+			ap.Width, ap.Height,
+			appearanceLines(ap.Lines, cn, dateStr, opts.Reason),
+		)
 		offsets[appObjNum] = int64(buf.Len())
 		fmt.Fprintf(&buf, "%d 0 obj\n%s\nstream\n%sendstream\nendobj\n", appObjNum, appDict, appContent)
 	}
@@ -590,26 +607,58 @@ func escapePDFStr(s string) string {
 	return b.String()
 }
 
+// appearanceLines picks the body of the signature box.
+//
+// ⚠ An explicitly empty (non-nil, zero-length) Lines means "no text", not
+// "use the default". A caller that computes its lines and ends up with none
+// wants an empty box, and silently filling it with the certificate's
+// CommonName would put the platform's name on a document in place of the
+// signer's.
+func appearanceLines(lines []string, cn, dateStr, reason string) []string {
+	if lines != nil {
+		return lines
+	}
+
+	out := []string{"Signed by: " + cn, "Date: " + dateStr}
+	if reason != "" {
+		out = append(out, "Reason: "+reason)
+	}
+
+	return out
+}
+
 // buildAppearanceStream returns the dict and content for a signature Form XObject.
 // The dict includes /BBox, /Resources (inline Helvetica font), and /Length.
 // The content stream draws a light border and shows signer name, date, and
 // optional reason using 8pt Helvetica.
-func buildAppearanceStream(width, height float64, cn, dateStr, reason string) (dict, content string) {
+func buildAppearanceStream(width, height float64, lines []string) (dict, content string) {
 	var cs strings.Builder
 	fmt.Fprintf(&cs, "q\n0.7 G\n0.5 w\n0.5 0.5 %.4f %.4f re\nS\n", width-1, height-1)
 	cs.WriteString("0 0 0 rg\nBT\n/F1 8 Tf\n")
-	y := height - 11.0
-	fmt.Fprintf(&cs, "4 %.4f Td\n(%s) Tj\n", y, escapePDFStr("Signed by: "+cn))
-	cs.WriteString("0 -10 Td\n")
-	fmt.Fprintf(&cs, "(%s) Tj\n", escapePDFStr("Date: "+dateStr))
-	if reason != "" {
-		cs.WriteString("0 -10 Td\n")
-		fmt.Fprintf(&cs, "(%s) Tj\n", escapePDFStr("Reason: "+reason))
+
+	// ⚠ The first line sits one line-height below the top edge, and each
+	// subsequent Td is RELATIVE to the previous one, so the leading is applied
+	// between lines rather than before the first.
+	fmt.Fprintf(&cs, "4 %.4f Td\n", height-appearanceLineHeight-1)
+
+	for i, line := range lines {
+		if i > 0 {
+			fmt.Fprintf(&cs, "0 -%.4f Td\n", appearanceLineHeight)
+		}
+
+		fmt.Fprintf(&cs, "(%s) Tj\n", escapeAppearanceStr(fitAppearanceLine(line, width)))
 	}
+
 	cs.WriteString("ET\nQ\n")
 	content = cs.String()
 	dict = fmt.Sprintf(
-		"<</Type/XObject/Subtype/Form/BBox[0 0 %.4f %.4f]/Resources<</Font<</F1<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>>>>>/Length %d>>",
+		// ⚠ /Encoding/WinAnsiEncoding is load-bearing: with no /Encoding the
+		// viewer uses Helvetica's built-in StandardEncoding, where the high
+		// range holds different glyphs and most accented letters are absent.
+		// escapeAppearanceStr emits WinAnsi bytes, so the two must agree.
+		"<</Type/XObject/Subtype/Form/BBox[0 0 %.4f %.4f]"+
+			"/Resources<</Font<</F1<</Type/Font/Subtype/Type1/BaseFont/Helvetica"+
+			"/Encoding/WinAnsiEncoding>>>>>>/Length %d>>",
 		width, height, len(content),
 	)
 	return
